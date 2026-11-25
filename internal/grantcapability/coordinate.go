@@ -18,10 +18,12 @@ import (
 )
 
 const (
-	ScopeObjectType = "iam_grant_scope"
-	RoleObjectType  = "iam_grant_role"
-	CreateRelation  = "create_binding"
-	BindRelation    = "bind"
+	ScopeObjectType          = "iam_grant_scope"
+	RoleObjectType           = "iam_grant_role"
+	AccessLabelObjectType    = "iam_grant_access_label"
+	CreateRelation           = "create_binding"
+	BindRelation             = "bind"
+	ApplyAccessLabelRelation = "apply"
 
 	coordinateVersion = byte(1)
 	maxFieldBytes     = 4096
@@ -32,9 +34,10 @@ var ErrInvalidCoordinate = errors.New("invalid grant capability coordinate")
 
 // Coordinate не наследует anchor из home-tier роли или родительской области.
 type Coordinate struct {
-	Kind   domain.GrantCapabilityKind
-	Anchor domain.ScopeAnchor
-	RoleID domain.RoleID
+	Kind         domain.GrantCapabilityKind
+	Anchor       domain.ScopeAnchor
+	RoleID       domain.RoleID
+	DefinitionID domain.AccessLabelDefinitionID
 }
 
 type Reference struct {
@@ -46,7 +49,7 @@ type Reference struct {
 // IsInternalObjectType отделяет координаты управляющего решения от публичных
 // ресурсов. Даже администратор или доверенный PDP-сосед не публикует эту дверь.
 func IsInternalObjectType(objectType string) bool {
-	return objectType == ScopeObjectType || objectType == RoleObjectType
+	return objectType == ScopeObjectType || objectType == RoleObjectType || objectType == AccessLabelObjectType
 }
 
 func (r Reference) Object() string { return r.ObjectType + ":" + r.ObjectID }
@@ -62,7 +65,11 @@ func Encode(c Coordinate) (Reference, error) {
 		return Reference{}, err
 	}
 	wire := []byte{coordinateVersion, kind}
-	for _, field := range []string{c.Anchor.Type, c.Anchor.ID, string(c.RoleID)} {
+	referent := string(c.RoleID)
+	if c.Kind == domain.GrantCapabilityApplyAccessLabel {
+		referent = string(c.DefinitionID)
+	}
+	for _, field := range []string{c.Anchor.Type, c.Anchor.ID, referent} {
 		// kaname#1034: граница codec проверяется рядом с сужением длины.
 		// len неотрицательна, maxFieldBytes=4096 помещается в uint16.
 		n := len(field)
@@ -93,6 +100,8 @@ func Decode(r Reference) (Coordinate, error) {
 		kind = domain.GrantCapabilityCreateBinding
 	case 2:
 		kind = domain.GrantCapabilityBindRole
+	case 3:
+		kind = domain.GrantCapabilityApplyAccessLabel
 	default:
 		return Coordinate{}, invalid("kind")
 	}
@@ -113,7 +122,12 @@ func Decode(r Reference) (Coordinate, error) {
 	if len(rest) != 0 {
 		return Coordinate{}, invalid("trailing payload")
 	}
-	c := Coordinate{Kind: kind, Anchor: domain.ScopeAnchor{Type: fields[0], ID: fields[1]}, RoleID: domain.RoleID(fields[2])}
+	c := Coordinate{Kind: kind, Anchor: domain.ScopeAnchor{Type: fields[0], ID: fields[1]}}
+	if kind == domain.GrantCapabilityApplyAccessLabel {
+		c.DefinitionID = domain.AccessLabelDefinitionID(fields[2])
+	} else {
+		c.RoleID = domain.RoleID(fields[2])
+	}
 	canonical, err := Encode(c)
 	if err != nil {
 		return Coordinate{}, err
@@ -134,12 +148,16 @@ func validate(c Coordinate) error {
 	}
 	switch c.Kind {
 	case domain.GrantCapabilityCreateBinding:
-		if c.RoleID != "" {
+		if c.RoleID != "" || c.DefinitionID != "" {
 			return invalid("create payload")
 		}
 	case domain.GrantCapabilityBindRole:
-		if !token(string(c.RoleID)) || c.RoleID == "*" {
+		if c.DefinitionID != "" || !token(string(c.RoleID)) || c.RoleID == "*" {
 			return invalid("role ID")
+		}
+	case domain.GrantCapabilityApplyAccessLabel:
+		if c.RoleID != "" || c.DefinitionID.Validate() != nil {
+			return invalid("access label definition ID")
 		}
 	default:
 		return invalid("kind")
@@ -153,6 +171,8 @@ func slot(kind domain.GrantCapabilityKind) (Reference, byte, error) {
 		return Reference{ObjectType: ScopeObjectType, Relation: CreateRelation}, 1, nil
 	case domain.GrantCapabilityBindRole:
 		return Reference{ObjectType: RoleObjectType, Relation: BindRelation}, 2, nil
+	case domain.GrantCapabilityApplyAccessLabel:
+		return Reference{ObjectType: AccessLabelObjectType, Relation: ApplyAccessLabelRelation}, 3, nil
 	default:
 		return Reference{}, 0, invalid("kind")
 	}

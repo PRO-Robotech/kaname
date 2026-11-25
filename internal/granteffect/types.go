@@ -10,6 +10,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/grantcoverage"
+	"maps"
 )
 
 type Kind uint8
@@ -19,6 +20,7 @@ const (
 	CreateBinding
 	BindRole
 	ScopeAdmin
+	ApplyAccessLabel
 )
 
 // Condition хранит неизменённый предикат конкретного источника. Поддержанная
@@ -47,14 +49,15 @@ type Provenance struct {
 }
 
 type Effect struct {
-	Kind        Kind
-	Type        string
-	Action      grantcoverage.Action
-	Anchor      domain.ScopeAnchor
-	RoleID      domain.RoleID
-	Constraints []Constraint
-	Condition   Condition
-	Provenance  Provenance
+	Kind         Kind
+	Type         string
+	Action       grantcoverage.Action
+	Anchor       domain.ScopeAnchor
+	RoleID       domain.RoleID
+	DefinitionID domain.AccessLabelDefinitionID `json:",omitempty"`
+	Constraints  []Constraint
+	Condition    Condition
+	Provenance   Provenance
 }
 
 type Obligation struct {
@@ -79,6 +82,10 @@ func (s Set) Complete() bool {
 }
 func (s Set) Effects() []Effect         { return cloneEffects(s.effects) }
 func (s Set) Obligations() []Obligation { return append([]Obligation(nil), s.obligations...) }
+
+func (s Set) Cost() (effects, bytes, steps int) {
+	return len(s.effects), s.outputBytes, s.steps
+}
 
 // Binding описывает один полный предлагаемый источник на одного получателя.
 // Для нескольких получателей Compile вызывается для каждого, не только первого.
@@ -121,13 +128,8 @@ func cloneConstraints(in []Constraint) []Constraint {
 	for i := range out {
 		out[i].Path = append([]authzmodel.EffectHop(nil), out[i].Path...)
 		out[i].Region.Objects.IDs = append([]string(nil), out[i].Region.Objects.IDs...)
-		if out[i].Region.Labels != nil {
-			m := map[string]string{}
-			for k, v := range out[i].Region.Labels {
-				m[k] = v
-			}
-			out[i].Region.Labels = m
-		}
+		out[i].Region.Labels = maps.Clone(out[i].Region.Labels)
+		out[i].Region.AccessLabels = maps.Clone(out[i].Region.AccessLabels)
 		if out[i].Within != nil {
 			a := *out[i].Within
 			out[i].Within = &a

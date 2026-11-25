@@ -462,9 +462,21 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 	return plan, ctx.Err()
 }
 
+type policyPlanReadPoint uint8
+
+const (
+	policyPlanOrdinaryRead policyPlanReadPoint = iota
+	policyPlanBeforeMetadataFreeze
+	policyPlanBeforeMetadataWrite
+)
+
 // protectPolicyPlan не обнаруживает inventory и не повышает режим. Его можно
 // повторить после legacy waits: тот же held guard set и новый decision_at.
 func (p *GrantPolicyWriters) protectPolicyPlan(ctx context.Context, w *authorityWriteTx, plan *policyPlan) error {
+	return p.protectPolicyPlanAt(ctx, w, plan, policyPlanOrdinaryRead)
+}
+
+func (p *GrantPolicyWriters) protectPolicyPlanAt(ctx context.Context, w *authorityWriteTx, plan *policyPlan, point policyPlanReadPoint) error {
 	if p == nil || w == nil || plan == nil || len(plan.epochs) == 0 {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
@@ -501,7 +513,17 @@ func (p *GrantPolicyWriters) protectPolicyPlan(ctx context.Context, w *authority
 	}
 	var at time.Time
 	var scanned int
-	if err = w.tx.QueryRow(ctx, `SELECT decision_at, population_rows FROM kaname.authority_policy_epoch_lock_full_v2($1::jsonb,$2::text[],$3::jsonb,$4)`, []byte(plan.epochs), writes, population, remaining).Scan(&at, &scanned); err != nil {
+	const lockSQL = `SELECT decision_at, population_rows FROM kaname.authority_policy_epoch_lock_full_v2($1::jsonb,$2::text[],$3::jsonb,$4)`
+	query := lockSQL
+	// При SQLSTATE 40001 PostgreSQL печатает текст запроса. Для записи меток
+	// это отличает первую сверку от повторной без записи аргументов или новых SQL-вызовов.
+	switch point {
+	case policyPlanBeforeMetadataFreeze:
+		query = lockSQL + ` /* метки: первая сверка */`
+	case policyPlanBeforeMetadataWrite:
+		query = lockSQL + ` /* метки: повторная сверка перед записью */`
+	}
+	if err = w.tx.QueryRow(ctx, query, []byte(plan.epochs), writes, population, remaining).Scan(&at, &scanned); err != nil {
 		return err
 	}
 	if scanned != plan.population.count || scanned > remaining {

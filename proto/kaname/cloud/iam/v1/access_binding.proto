@@ -283,6 +283,11 @@ message AccessBinding {
   // поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
   // ссылку на его действующее делегирование.
   string delegation_id = 27;
+
+  // Защищённые метки для IAM match_access_labels, отдельные от labels.
+  // Обычное право update не разрешает выдавать доступ: изменение проверяется
+  // по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+  map<string, string> access_labels = 28;
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant

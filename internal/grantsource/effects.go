@@ -216,6 +216,13 @@ func CollectSemanticActor(ctx context.Context, w kaname.SemanticAuthorityWriter,
 			return ActorEffects{}, e
 		}
 	}
+	// Только confirmed apply sources получают дополнительный physical snapshot.
+	// Optional порт отсутствует у ordinary adapters; helper не читает non-apply.
+	if reader, ok := w.(kaname.AccessLabelBindingSourceReader); ok {
+		if err = collectAccessLabelBindingSnapshots(ctx, reader, actor, at, bindings.Bindings, checkpoints, budget); err != nil {
+			return ActorEffects{}, err
+		}
+	}
 	if err = ctx.Err(); err != nil {
 		return ActorEffects{}, err
 	}

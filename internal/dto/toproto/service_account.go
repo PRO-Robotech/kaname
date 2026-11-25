@@ -22,12 +22,13 @@ func (saObj) toPb(sa domain.ServiceAccount) (*iamv1.ServiceAccount, error) {
 		createdAt = timestamppb.New(sa.CreatedAt.Truncate(tsTruncate))
 	}
 	return &iamv1.ServiceAccount{
-		Id:          string(sa.ID),
-		AccountId:   string(sa.AccountID),
-		Name:        string(sa.Name),
-		Description: string(sa.Description),
-		CreatedAt:   createdAt,
-		Labels:      labelsToStringMap(sa.Labels),
+		Id:           string(sa.ID),
+		AccountId:    string(sa.AccountID),
+		Name:         string(sa.Name),
+		Description:  string(sa.Description),
+		CreatedAt:    createdAt,
+		Labels:       labelsToStringMap(sa.Labels),
+		AccessLabels: labelsToStringMap(sa.AccessLabels),
 		// Whether the account may authenticate. Reported because the issuance
 		// paths now decide on it: a state that changes what the platform does
 		// but that no reader can observe leaves an operator guessing why a

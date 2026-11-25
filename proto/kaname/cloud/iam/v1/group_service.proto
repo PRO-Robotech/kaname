@@ -184,7 +184,10 @@ message ListGroupsRequest {
   // Page token.
   string page_token = 3;
 
-  // A filter expression. Supports filtering by [Group.name].
+  // Выражение фильтра с одним сравнением по `name` или по обычной метке.
+  //
+  // Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+  // Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
   string filter = 4;
 }
 
@@ -208,6 +211,11 @@ message CreateGroupRequest {
 
   // Resource labels as `key:value` pairs.
   map<string, string> labels = 4;
+
+  // Начальные защищённые метки для IAM match_access_labels.
+  // Обычное право создать ресурс не разрешает выдавать доступ:
+  // весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+  map<string, string> access_labels = 5;
 }
 
 message UpdateGroupRequest {
@@ -225,6 +233,14 @@ message UpdateGroupRequest {
 
   // Resource labels as `key:value` pairs.
   map<string, string> labels = 5;
+
+  // Защищённые метки для IAM match_access_labels. Обычное право update
+  // не разрешает выдавать доступ: добавленный эффект требует Grant.
+  // update_mask без access_labels сохраняет их; с access_labels заменяет
+  // всю карту, в том числе очищает при пустом/отсутствующем поле.
+  // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+  // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+  map<string, string> access_labels = 6;
 }
 
 message DeleteGroupRequest {

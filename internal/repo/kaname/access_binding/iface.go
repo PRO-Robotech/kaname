@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/grant_delegation"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/listfilter"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/visibility"
 )
 
@@ -463,6 +464,7 @@ type ListFilter struct {
 	RoleID    string // role= (matches role_id)
 	ScopeType string // scope= (bare resource_type: cluster|account|project)
 	ScopeID   string // scopeId= (matches resource_id)
+	Label     *listfilter.Label
 	// AccountID — сужение до области ОДНОГО аккаунта: строки, привязанные к
 	// самому аккаунту, ПЛЮС строки на каждом его проекте (задача kacho#1737).
 	//

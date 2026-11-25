@@ -601,6 +601,9 @@ message ListUsersRequest {
   // `search` is the term a console types into: a User has no `name`, and the
   // exact-match terms above only answer someone who already knows the whole
   // value. `%` and `_` in its value are matched literally, not as wildcards.
+  //
+  // Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+  // Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
   string filter = 3;
 }
 
@@ -663,6 +666,14 @@ message UpdateUserRequest {
   // IdP-projected) hard-immutable и в request не переносятся. Аннотации
   // (size/key/value pattern) — паритет account/project/group/role request `labels`.
   map<string, string> labels = 4;
+
+  // Защищённые метки для IAM match_access_labels. Обычное право update
+  // не разрешает выдавать доступ: добавленный эффект требует Grant.
+  // update_mask без access_labels сохраняет их; с access_labels заменяет
+  // всю карту, в том числе очищает при пустом/отсутствующем поле.
+  // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+  // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+  map<string, string> access_labels = 5;
 }
 
 message DeleteUserRequest {

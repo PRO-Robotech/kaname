@@ -6,6 +6,7 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -56,6 +57,11 @@ const (
 	resourceSourceFactLedgerHolders
 	resourceSourceClusterFactHolders
 	resourceSourceRolePendingVerbs
+	resourceSourceMetadataBindings
+	resourceSourceMetadataBindingCoverage
+	resourceSourceMetadataAuthoredBindings
+	resourceSourceMetadataHistoricalCarriers
+	resourceSourceMetadataPolicyReceipt
 )
 
 type resourceSourceKey struct {
@@ -68,12 +74,13 @@ type resourceSourceRow struct {
 	value json.RawMessage
 }
 type resourceSourceCapture struct {
-	conn     *pgx.Conn
-	stageTX  pgx.Tx
-	lifetime *resourceAttemptLifetime
-	budget   *relverdict.AdministrativeReadBudget
-	entries  map[resourceSourceKey][]resourceSourceRow
-	sealed   bool
+	conn            *pgx.Conn
+	stageTX         pgx.Tx
+	lifetime        *resourceAttemptLifetime
+	budget          *relverdict.AdministrativeReadBudget
+	entries         map[resourceSourceKey][]resourceSourceRow
+	metadataParents *resourceParentCapture
+	sealed          bool
 }
 
 func newResourceSourceCapture(tx pgx.Tx, budget *relverdict.AdministrativeReadBudget, lifetime *resourceAttemptLifetime) (*resourceSourceCapture, error) {
@@ -95,6 +102,9 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 	singleKey := false
 	args := []any{k.typ, k.id, limit}
 	switch k.kind {
+	case resourceSourceMetadataBindings, resourceSourceMetadataBindingCoverage, resourceSourceMetadataAuthoredBindings,
+		resourceSourceMetadataHistoricalCarriers:
+		return resourceMetadataBindingsSQL(k, limit)
 	case resourceSourceSelectorObjects:
 		return resourceSelectorObjectsSQL(k, limit)
 	case resourceSourceNestedDescendants:
@@ -131,7 +141,8 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
      OR (b.resource_type='account' AND ($4::jsonb->'accounts') ? b.resource_id)
      OR (b.resource_type='project' AND b.resource_id=$4::jsonb->>'project')))
      OR (rrs.arm='names' AND $2=ANY(rrs.resource_names))
-     OR (rrs.arm='labels' AND o.labels @> rrs.match_labels)) LIMIT $3`, args, nil
+     OR (rrs.arm='labels' AND o.labels @> rrs.match_labels)
+     OR (rrs.arm='access_labels' AND o.access_labels @> rrs.match_access_labels)) LIMIT $3`, args, nil
 	case resourceSourceMatchingMirrorBindings:
 		if !nativeQuestionToken(k.typ) {
 			return "", nil, kaname.ErrSourceUnconfirmed
@@ -152,7 +163,8 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
            OR (b.resource_type='account' AND b.resource_id=COALESCE(NULLIF(m.parent_account_id,''),pj.account_id))
            OR (b.resource_type='project' AND m.parent_project_id=b.resource_id)))
            OR (rrs.arm='names' AND $2=ANY(rrs.resource_names))
-           OR (rrs.arm='labels' AND m.labels @> rrs.match_labels)) LIMIT $3`, args, nil
+           OR (rrs.arm='labels' AND m.labels @> rrs.match_labels)
+           OR (rrs.arm='access_labels' AND m.access_labels @> rrs.match_access_labels)) LIMIT $3`, args, nil
 	case resourceSourceAccount:
 		if k.typ != "account" {
 			return "", nil, kaname.ErrSourceUnconfirmed
@@ -178,6 +190,14 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 		from = "kaname.resource_registration_scope r WHERE r.object_type=$1 AND r.object_id=$2"
 	case resourceSourceProjectBinding:
 		from = "kaname.object_project_binding r WHERE r.object_type=$1 AND r.object_id=$2"
+	case resourceSourceMetadataPolicyReceipt:
+		if (metadataMutation{table: "resource_mirror", kind: k.typ}).catalogType() == "" {
+			return "", nil, kaname.ErrSourceUnconfirmed
+		}
+		// Эпоха зависит только от существования. Нулевой результат тоже
+		// сохраняется в RR и сверяется под общей оградой перед решением.
+		return `SELECT 'present'::text,'true'::text FROM ONLY kaname.producer_source_receipt
+ WHERE catalog_type=$1 AND object_id=$2 LIMIT 1`, []any{k.typ, k.id}, nil
 	case resourceSourceObjectReceipts:
 		from = "kaname.producer_source_receipt r WHERE r.object_type=$1 AND r.object_id=$2"
 	case resourceSourceObjectPublication:
@@ -322,6 +342,11 @@ func (c *resourceSourceCapture) read(ctx context.Context, tx pgx.Tx, k resourceS
 	if rows, ok := c.entries[k]; ok {
 		return rows, nil
 	}
+	if mirrorMetadataBindingSource(k) {
+		if err := c.confirmMetadataMirrorScope(ctx, tx, k.typ, k.id); err != nil {
+			return nil, err
+		}
+	}
 	rows, err := readResourceSourceRows(ctx, tx, k, c.budget)
 	if err != nil {
 		return nil, err
@@ -351,6 +376,13 @@ func (c *resourceSourceCapture) recheck(ctx context.Context, w *authorityWriteTx
 		return kaname.ErrSourceUnconfirmed
 	}
 	tx := w.tx
+	if c.metadataParents != nil {
+		for _, typ := range slices.Sorted(maps.Keys(c.metadataParents.catalogs)) {
+			if err := c.metadataParents.catalogs[typ].recheck(ctx, tx, c.budget); err != nil {
+				return err
+			}
+		}
+	}
 	keys := make([]resourceSourceKey, 0, len(c.entries))
 	for key := range c.entries {
 		keys = append(keys, key)

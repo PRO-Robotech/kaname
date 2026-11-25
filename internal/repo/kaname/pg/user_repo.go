@@ -67,7 +67,7 @@ type userReader struct {
 
 // userCols — полный набор колонок. `labels` (D-3) — tenant-facing метки,
 // делающие User label-selectable наравне с account/project (iam-direct ARM_LABELS).
-const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels, invite_expires_at"
+const userCols = "id, account_id, external_id, email, display_name, invite_status, invited_by, created_at, labels, invite_expires_at, access_labels"
 
 func (r *userReader) Get(ctx context.Context, id domain.UserID) (domain.User, error) {
 	row := r.tx.QueryRow(ctx, fmt.Sprintf(`SELECT %s FROM users WHERE id = $1`, userCols), string(id))
@@ -426,17 +426,21 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 					`Operator %s is not supported for filter field %q. Substring search on User is spelled search="<value>"`,
 					ast.Op, ast.Field)
 			}
-			switch ast.Field {
-			case "email":
+			switch {
+			case ast.Label != nil:
+				frag, fargs := labelFilterSQL(*ast.Label, argIdx)
+				conditions = append(conditions, frag)
+				args = append(args, fargs...)
+			case ast.Field == "email":
 				conditions = append(conditions, fmt.Sprintf("lower(email) = lower($%d)", argIdx))
 				args = append(args, ast.Value)
-			case "external_id":
+			case ast.Field == "external_id":
 				conditions = append(conditions, fmt.Sprintf("external_id = $%d", argIdx))
 				args = append(args, ast.Value)
-			case "invite_status":
+			case ast.Field == "invite_status":
 				conditions = append(conditions, fmt.Sprintf("invite_status = $%d", argIdx))
 				args = append(args, ast.Value)
-			case "search":
+			case ast.Field == "search":
 				// Поиск по ПОДСТРОКЕ — по тому, чем пользователя знают: почта и
 				// идентификатор. `name` у пользователя нет вовсе, а полное совпадение
 				// `email="…"` отвечает только тому, кто уже знает адрес целиком.
@@ -456,7 +460,7 @@ func (r *userReader) List(ctx context.Context, f user.ListFilter) ([]domain.User
 				return nil, "", iamerr.Wrapf(iamerr.ErrInvalidArg,
 					"Bad expression at column 1. Unknown field: %q", ast.Field)
 			}
-			argIdx++
+			argIdx = len(args) + 1
 		}
 	}
 	// Курсор. Разобранный (After) имеет приоритет: путь, который его задаёт,
@@ -941,11 +945,11 @@ func (w *userWriter) SetInviteStatus(ctx context.Context, id domain.UserID, st d
 			   SET invite_status = $2
 			 WHERE id = $1 AND invite_status <> 'PENDING'
 			RETURNING id, account_id, external_id, email, display_name,
-			          invite_status, invited_by, created_at, labels, invite_expires_at
+			          invite_status, invited_by, created_at, labels, invite_expires_at, access_labels
 		)
 		SELECT EXISTS(SELECT 1 FROM users WHERE id = $1) AS row_exists,
 		       u.id, u.account_id, u.external_id, u.email, u.display_name,
-		       u.invite_status, u.invited_by, u.created_at, u.labels, u.invite_expires_at
+		       u.invite_status, u.invited_by, u.created_at, u.labels, u.invite_expires_at, u.access_labels
 		  FROM (SELECT 1) AS one
 		  LEFT JOIN upd u ON true`
 	row := w.tx.QueryRow(ctx, q, string(id), string(st))
@@ -972,20 +976,20 @@ func (w *userWriter) SetInviteStatus(ctx context.Context, id domain.UserID, st d
 // плюс её колонки, которые NULL, когда UPDATE не сматчился.
 func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowExists*/, error) {
 	var (
-		rowExists    bool
-		userID       sql.NullString
-		accountID    sql.NullString
-		externalID   sql.NullString
-		email        sql.NullString
-		displayName  sql.NullString
-		inviteStatus sql.NullString
-		invitedBy    sql.NullString
-		createdAt    sql.NullTime
-		labelsJSON   []byte
-		expiresAt    sql.NullTime
+		rowExists                    bool
+		userID                       sql.NullString
+		accountID                    sql.NullString
+		externalID                   sql.NullString
+		email                        sql.NullString
+		displayName                  sql.NullString
+		inviteStatus                 sql.NullString
+		invitedBy                    sql.NullString
+		createdAt                    sql.NullTime
+		labelsJSON, accessLabelsJSON []byte
+		expiresAt                    sql.NullTime
 	)
 	if err := row.Scan(&rowExists, &userID, &accountID, &externalID, &email,
-		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON, &expiresAt); err != nil {
+		&displayName, &inviteStatus, &invitedBy, &createdAt, &labelsJSON, &expiresAt, &accessLabelsJSON); err != nil {
 		return domain.User{}, false, false, err
 	}
 	if !userID.Valid {
@@ -1009,6 +1013,10 @@ func scanUserStateWrite(row scanner) (domain.User, bool /*updated*/, bool /*rowE
 		return domain.User{}, false, rowExists, err
 	}
 	u.Labels = labels
+	u.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
+	if err != nil {
+		return domain.User{}, false, rowExists, err
+	}
 	return u, true, rowExists, nil
 }
 
@@ -1046,13 +1054,13 @@ func homeAccount(col *string) domain.AccountID {
 // правку КАЖДОЙ роли (kacho#1943). Заводя колонку в userCols, правь список здесь.
 func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 	var (
-		accountID    sql.NullString
-		externalID   sql.NullString
-		displayName  sql.NullString
-		inviteStatus sql.NullString
-		invitedBy    sql.NullString
-		labelsJSON   []byte
-		expiresAt    sql.NullTime
+		accountID                    sql.NullString
+		externalID                   sql.NullString
+		displayName                  sql.NullString
+		inviteStatus                 sql.NullString
+		invitedBy                    sql.NullString
+		labelsJSON, accessLabelsJSON []byte
+		expiresAt                    sql.NullTime
 	)
 	dest := append([]any{
 		(*string)(&out.ID),
@@ -1065,6 +1073,7 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		&out.CreatedAt,
 		&labelsJSON,
 		&expiresAt,
+		&accessLabelsJSON,
 	}, extra...)
 	if err := row.Scan(dest...); err != nil {
 		return err
@@ -1092,6 +1101,10 @@ func scanUserInto(row scanner, out *domain.User, extra ...any) error {
 		return err
 	}
 	out.Labels = labels
+	out.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
+	if err != nil {
+		return err
+	}
 	return nil
 }
 

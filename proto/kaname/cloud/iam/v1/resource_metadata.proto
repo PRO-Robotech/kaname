@@ -1,0 +1,24 @@
+// Copyright (c) PRO-Robotech
+// SPDX-License-Identifier: Apache-2.0
+
+syntax = "proto3";
+
+package kaname.cloud.iam.v1;
+
+option go_package = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1;iamv1";
+
+// ResourceMetadata — метки зеркала ресурса в IAM. Каноническим ресурсом
+// продолжает владеть объявившая его служба.
+message ResourceMetadata {
+  // Тип ресурса из каталога с точками, например registry.registries.
+  string resource_type = 1;
+
+  // Идентификатор ресурса в службе-владельце.
+  string resource_id = 2;
+
+  // Описательные метки зеркала.
+  map<string, string> labels = 3;
+
+  // Метки доступа зеркала, отдельно от описательных меток.
+  map<string, string> access_labels = 4;
+}

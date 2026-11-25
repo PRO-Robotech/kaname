@@ -42,6 +42,13 @@ func writerProtocolRig(t *testing.T) protocolRig {
 // окончательный bundle. Остальные protocol tests сохраняют prepared вход.
 func writerProtocolRigBeforePreparation(t *testing.T) (protocolRig, *kanamepg.Repository) {
 	t.Helper()
+	return writerProtocolRigWithRuntimeGrants(t, true)
+}
+
+// Bootstrap-проба получает новый LOGIN без предварительных authority ACL.
+// Остальные сценарии сохраняют прежнюю подготовку runtime.
+func writerProtocolRigWithRuntimeGrants(t *testing.T, grantRuntime bool) (protocolRig, *kanamepg.Repository) {
+	t.Helper()
 	ctx, admin, owner := authorityTestDB(t)
 	_, a := kac127SeedUserAndAccount(t, ctx, admin, "protocol-a")
 	_, b := kac127SeedUserAndAccount(t, ctx, admin, "protocol-b")
@@ -57,8 +64,10 @@ func writerProtocolRigBeforePreparation(t *testing.T) (protocolRig, *kanamepg.Re
 		_, _ = admin.Exec(cleanup, "DROP OWNED BY "+quoted)
 		_, _ = admin.Exec(cleanup, "DROP ROLE "+quoted)
 	})
-	_, err = admin.Exec(ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, role)
-	require.NoError(t, err)
+	if grantRuntime {
+		_, err = admin.Exec(ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, role)
+		require.NoError(t, err)
+	}
 	config := admin.Config()
 	config.ConnConfig.User = role
 	config.ConnConfig.Password = password
@@ -70,9 +79,11 @@ func writerProtocolRigBeforePreparation(t *testing.T) (protocolRig, *kanamepg.Re
 	require.NoError(t, runtime.QueryRow(ctx, `SELECT current_user,session_user`).Scan(&effective, &session))
 	require.Equal(t, role, effective)
 	require.Equal(t, role, session, "нужна настоящая LOGIN connection, не SET ROLE поверх admin")
-	var elevated bool
-	require.NoError(t, runtime.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole OR rolbypassrls OR has_schema_privilege(current_user,'kaname','CREATE') OR has_table_privilege(current_user,'kaname.groups','TRIGGER') FROM pg_roles WHERE rolname=current_user`).Scan(&elevated))
-	require.False(t, elevated)
+	if grantRuntime {
+		var elevated bool
+		require.NoError(t, runtime.QueryRow(ctx, `SELECT rolsuper OR rolcreaterole OR rolbypassrls OR has_schema_privilege(current_user,'kaname','CREATE') OR has_table_privilege(current_user,'kaname.groups','TRIGGER') FROM pg_roles WHERE rolname=current_user`).Scan(&elevated))
+		require.False(t, elevated)
+	}
 	rig := protocolRig{ctx, admin, runtime, kanamepg.New(runtime, nil), bundle, role, a, b}
 	uninitialized, err := rig.repo.TransitionalAuthorityWriter(ctx, rig.intent(a))
 	require.Error(t, err, "default identity не допускает даже transitional entry")

@@ -521,7 +521,11 @@ type AccessBinding struct {
 	// Ставит только делегированный путь права выдавать; на вход ни одного запроса
 	// поле не принимается. Делегат отзывает и удаляет только выдачи, несущие
 	// ссылку на его действующее делегирование.
-	DelegationId  string `protobuf:"bytes,27,opt,name=delegation_id,json=delegationId,proto3" json:"delegation_id,omitempty"`
+	DelegationId string `protobuf:"bytes,27,opt,name=delegation_id,json=delegationId,proto3" json:"delegation_id,omitempty"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	AccessLabels  map[string]string `protobuf:"bytes,28,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -701,6 +705,13 @@ func (x *AccessBinding) GetDelegationId() string {
 		return x.DelegationId
 	}
 	return ""
+}
+
+func (x *AccessBinding) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
+	}
+	return nil
 }
 
 // AccessTarget selects which objects, under the binding's scope-anchor, the grant
@@ -1453,7 +1464,7 @@ var File_kaname_cloud_iam_v1_access_binding_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\n" +
-	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\x9d\f\n" +
+	"(kaname/cloud/iam/v1/access_binding.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a+kaname/cloud/iam/v1/authorize_service.proto\"\xb9\r\n" +
 	"\rAccessBinding\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12!\n" +
 	"\fsubject_type\x18\x02 \x01(\tR\vsubjectType\x12\x1d\n" +
@@ -1481,8 +1492,12 @@ const file_kaname_cloud_iam_v1_access_binding_proto_rawDesc = "" +
 	"\x10granted_relation\x18\x18 \x01(\tR\x0fgrantedRelation\x12\x16\n" +
 	"\x06system\x18\x19 \x01(\bR\x06system\x12e\n" +
 	"\x11revocation_reason\x18\x1a \x01(\x0e23.kaname.cloud.iam.v1.AccessBinding.RevocationReasonH\x00R\x10revocationReason\x88\x01\x01\x12#\n" +
-	"\rdelegation_id\x18\x1b \x01(\tR\fdelegationId\x1a9\n" +
+	"\rdelegation_id\x18\x1b \x01(\tR\fdelegationId\x12Y\n" +
+	"\raccess_labels\x18\x1c \x03(\v24.kaname.cloud.iam.v1.AccessBinding.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"F\n" +
 	"\x06Status\x12\x16\n" +
@@ -1576,7 +1591,7 @@ func file_kaname_cloud_iam_v1_access_binding_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_access_binding_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_kaname_cloud_iam_v1_access_binding_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_kaname_cloud_iam_v1_access_binding_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_kaname_cloud_iam_v1_access_binding_proto_goTypes = []any{
 	(SubjectType)(0),                    // 0: kaname.cloud.iam.v1.SubjectType
 	(GrantSurfaceKind)(0),               // 1: kaname.cloud.iam.v1.GrantSurfaceKind
@@ -1596,34 +1611,36 @@ var file_kaname_cloud_iam_v1_access_binding_proto_goTypes = []any{
 	(*UpdateAccessBindingMetadata)(nil), // 15: kaname.cloud.iam.v1.UpdateAccessBindingMetadata
 	(*RevokeAccessBindingMetadata)(nil), // 16: kaname.cloud.iam.v1.RevokeAccessBindingMetadata
 	nil,                                 // 17: kaname.cloud.iam.v1.AccessBinding.LabelsEntry
-	(*timestamppb.Timestamp)(nil),       // 18: google.protobuf.Timestamp
-	(*ResourceRef)(nil),                 // 19: kaname.cloud.iam.v1.ResourceRef
+	nil,                                 // 18: kaname.cloud.iam.v1.AccessBinding.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil),       // 19: google.protobuf.Timestamp
+	(*ResourceRef)(nil),                 // 20: kaname.cloud.iam.v1.ResourceRef
 }
 var file_kaname_cloud_iam_v1_access_binding_proto_depIdxs = []int32{
-	18, // 0: kaname.cloud.iam.v1.AccessBinding.created_at:type_name -> google.protobuf.Timestamp
+	19, // 0: kaname.cloud.iam.v1.AccessBinding.created_at:type_name -> google.protobuf.Timestamp
 	2,  // 1: kaname.cloud.iam.v1.AccessBinding.status:type_name -> kaname.cloud.iam.v1.AccessBinding.Status
-	18, // 2: kaname.cloud.iam.v1.AccessBinding.expires_at:type_name -> google.protobuf.Timestamp
-	18, // 3: kaname.cloud.iam.v1.AccessBinding.revoked_at:type_name -> google.protobuf.Timestamp
+	19, // 2: kaname.cloud.iam.v1.AccessBinding.expires_at:type_name -> google.protobuf.Timestamp
+	19, // 3: kaname.cloud.iam.v1.AccessBinding.revoked_at:type_name -> google.protobuf.Timestamp
 	9,  // 4: kaname.cloud.iam.v1.AccessBinding.subjects:type_name -> kaname.cloud.iam.v1.Subject
 	17, // 5: kaname.cloud.iam.v1.AccessBinding.labels:type_name -> kaname.cloud.iam.v1.AccessBinding.LabelsEntry
 	6,  // 6: kaname.cloud.iam.v1.AccessBinding.target:type_name -> kaname.cloud.iam.v1.AccessTarget
-	18, // 7: kaname.cloud.iam.v1.AccessBinding.materialized_at:type_name -> google.protobuf.Timestamp
+	19, // 7: kaname.cloud.iam.v1.AccessBinding.materialized_at:type_name -> google.protobuf.Timestamp
 	4,  // 8: kaname.cloud.iam.v1.AccessBinding.revocation_reason:type_name -> kaname.cloud.iam.v1.AccessBinding.RevocationReason
-	7,  // 9: kaname.cloud.iam.v1.AccessTarget.resources:type_name -> kaname.cloud.iam.v1.AccessTargetResources
-	8,  // 10: kaname.cloud.iam.v1.AccessTarget.all_in_scope:type_name -> kaname.cloud.iam.v1.AccessTargetAllInScope
-	19, // 11: kaname.cloud.iam.v1.AccessTargetResources.resources:type_name -> kaname.cloud.iam.v1.ResourceRef
-	0,  // 12: kaname.cloud.iam.v1.Subject.type:type_name -> kaname.cloud.iam.v1.SubjectType
-	18, // 13: kaname.cloud.iam.v1.GroupMembershipRecord.added_at:type_name -> google.protobuf.Timestamp
-	18, // 14: kaname.cloud.iam.v1.ClusterAdminRecord.granted_at:type_name -> google.protobuf.Timestamp
-	1,  // 15: kaname.cloud.iam.v1.GrantSurfaceRecord.kind:type_name -> kaname.cloud.iam.v1.GrantSurfaceKind
-	5,  // 16: kaname.cloud.iam.v1.GrantSurfaceRecord.binding:type_name -> kaname.cloud.iam.v1.AccessBinding
-	10, // 17: kaname.cloud.iam.v1.GrantSurfaceRecord.group_membership:type_name -> kaname.cloud.iam.v1.GroupMembershipRecord
-	11, // 18: kaname.cloud.iam.v1.GrantSurfaceRecord.cluster_admin:type_name -> kaname.cloud.iam.v1.ClusterAdminRecord
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	18, // 9: kaname.cloud.iam.v1.AccessBinding.access_labels:type_name -> kaname.cloud.iam.v1.AccessBinding.AccessLabelsEntry
+	7,  // 10: kaname.cloud.iam.v1.AccessTarget.resources:type_name -> kaname.cloud.iam.v1.AccessTargetResources
+	8,  // 11: kaname.cloud.iam.v1.AccessTarget.all_in_scope:type_name -> kaname.cloud.iam.v1.AccessTargetAllInScope
+	20, // 12: kaname.cloud.iam.v1.AccessTargetResources.resources:type_name -> kaname.cloud.iam.v1.ResourceRef
+	0,  // 13: kaname.cloud.iam.v1.Subject.type:type_name -> kaname.cloud.iam.v1.SubjectType
+	19, // 14: kaname.cloud.iam.v1.GroupMembershipRecord.added_at:type_name -> google.protobuf.Timestamp
+	19, // 15: kaname.cloud.iam.v1.ClusterAdminRecord.granted_at:type_name -> google.protobuf.Timestamp
+	1,  // 16: kaname.cloud.iam.v1.GrantSurfaceRecord.kind:type_name -> kaname.cloud.iam.v1.GrantSurfaceKind
+	5,  // 17: kaname.cloud.iam.v1.GrantSurfaceRecord.binding:type_name -> kaname.cloud.iam.v1.AccessBinding
+	10, // 18: kaname.cloud.iam.v1.GrantSurfaceRecord.group_membership:type_name -> kaname.cloud.iam.v1.GroupMembershipRecord
+	11, // 19: kaname.cloud.iam.v1.GrantSurfaceRecord.cluster_admin:type_name -> kaname.cloud.iam.v1.ClusterAdminRecord
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_access_binding_proto_init() }
@@ -1648,7 +1665,7 @@ func file_kaname_cloud_iam_v1_access_binding_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_access_binding_proto_rawDesc), len(file_kaname_cloud_iam_v1_access_binding_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

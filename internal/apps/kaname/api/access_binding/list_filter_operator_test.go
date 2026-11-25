@@ -83,3 +83,15 @@ func TestABList_460_ContainsNeverReachesTheRepo(t *testing.T) {
 		t.Fatalf("refusal message %q must state the contract, not an internal fault", msg)
 	}
 }
+
+func TestABListForwardsLabelToRepository(t *testing.T) {
+	repo := newABFakeRepo("usr_o", "acc_l460d", "", "rol_v---------------", "kaname.view", nil)
+	h := newListHandler(repo, newABQueriesStub())
+
+	_, err := h.List(newOwnerContext("usr_x---------------"),
+		&iamv1.ListAccessBindingsRequest{Filter: `labels.team/platform=""`})
+	require.NoError(t, err)
+	require.NotNil(t, repo.lastListFilter.Label)
+	assert.Equal(t, "team/platform", string(repo.lastListFilter.Label.Key))
+	assert.Empty(t, repo.lastListFilter.Label.Value)
+}

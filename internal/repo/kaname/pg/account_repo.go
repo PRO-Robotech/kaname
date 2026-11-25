@@ -37,7 +37,7 @@ type accountReader struct {
 	tx pgx.Tx
 }
 
-const accountCols = "id, name, description, labels, owner_user_id, created_at"
+const accountCols = "id, name, description, labels, owner_user_id, created_at, access_labels"
 
 // accountUpdateQ — оператор записи аккаунта. СТАТИЧЕСКИЙ: набор колонок известен
 // компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
@@ -73,16 +73,12 @@ func (r *accountReader) List(ctx context.Context, f account.ListFilter) ([]domai
 	args := []any{}
 	argIdx := 1
 	if f.Filter != "" {
-		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
-		// expression, so the column follows the whitelist instead of being
-		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
 		if ferr != nil {
 			return nil, "", ferr
 		}
 		if ast != nil {
-			frag, fargs := ast.ToSQL(argIdx)
+			frag, fargs := listFilterSQL(ast, argIdx)
 			conditions = append(conditions, frag)
 			args = append(args, fargs...)
 			argIdx += len(fargs)
@@ -490,8 +486,8 @@ type scanner interface {
 
 func scanAccount(row scanner) (domain.Account, error) {
 	var (
-		a          domain.Account
-		labelsJSON []byte
+		a                            domain.Account
+		labelsJSON, accessLabelsJSON []byte
 	)
 	err := row.Scan(
 		(*string)(&a.ID),
@@ -500,11 +496,16 @@ func scanAccount(row scanner) (domain.Account, error) {
 		&labelsJSON,
 		(*string)(&a.OwnerUserID),
 		&a.CreatedAt,
+		&accessLabelsJSON,
 	)
 	if err != nil {
 		return domain.Account{}, err
 	}
 	a.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.Account{}, err
+	}
+	a.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
 	if err != nil {
 		return domain.Account{}, err
 	}

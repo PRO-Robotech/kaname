@@ -85,6 +85,10 @@ func registerPublicServices(srv grpc.ServiceRegistrar, svcs *services, opsRepo o
 	if svcs != nil && svcs.childRegistrationHandler != nil {
 		iamv1.RegisterChildRegistrationServiceServer(srv, svcs.childRegistrationHandler)
 	}
+	// Метки зеркала: только публичный слушатель, право решается по объекту.
+	if svcs != nil && svcs.resourceMetadata != nil {
+		iamv1.RegisterResourceMetadataServiceServer(srv, svcs.resourceMetadata)
+	}
 	// AuthZ — public RPCs.
 	if svcs != nil && svcs.authorizeHandler != nil {
 		iamv1.RegisterAuthorizeServiceServer(srv, svcs.authorizeHandler)

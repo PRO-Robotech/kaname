@@ -814,3 +814,11 @@ authorityProtocol:
       limits:
         cpu: "1"
         memory: 1280Mi
+
+  # Непустая строка включает owner init после migrations для Gen1 metadata.
+  # Имя существующего обычного LOGIN задаётся явно: db.user может отличаться
+  # от пользователя в runtime DSN override. Роли и пароли не создаются.
+  # Нужна отдельная пара db.migrationDSNSecretName/Key; FULL несовместим.
+  # moduleManifests задаёт один источник модели для init и службы; пустой
+  # перечень выбирает image-only. Пустая строка сохраняет прежний запуск.
+  bootstrapRuntimeRole: ""

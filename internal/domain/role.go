@@ -56,6 +56,8 @@ type Role struct {
 	// label-selectable наравне с account/project (ARM_LABELS-грант на iam.role →
 	// v_list по `labels @> matchLabels`; List фильтрует viewer ∪ v_list).
 	Labels Labels
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
 	// Integrity — целость роли: даёт ли она то, что объявляет (kacho#1035).
 	//
 	// ВЫВОДИТСЯ НА ЧТЕНИИ и НЕ ХРАНИТСЯ: колонки у неё нет, в перечень колонок
@@ -186,6 +188,7 @@ func (r Role) Validate(modules ModuleSet) error {
 	errs = multierr.Append(errs, r.Name.ValidateAtTier(r.IsSystemDerived()))
 	errs = multierr.Append(errs, r.Description.Validate())
 	errs = multierr.Append(errs, r.Labels.Validate())
+	errs = multierr.Append(errs, r.AccessLabels.Validate())
 	switch {
 	case len(r.Rules) > 0:
 		errs = multierr.Append(errs, r.Rules.Validate(PolicyOfRole(r.IsSystem, r.OwnerModule), modules))

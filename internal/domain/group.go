@@ -18,7 +18,9 @@ type Group struct {
 	Name        GroupName
 	Description Description
 	Labels      Labels
-	CreatedAt   time.Time
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
+	CreatedAt    time.Time
 }
 
 func (g Group) Validate() error {
@@ -26,6 +28,7 @@ func (g Group) Validate() error {
 	errs = multierr.Append(errs, g.Name.Validate())
 	errs = multierr.Append(errs, g.Description.Validate())
 	errs = multierr.Append(errs, g.Labels.Validate())
+	errs = multierr.Append(errs, g.AccessLabels.Validate())
 	if g.AccountID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
 	}

@@ -159,50 +159,59 @@ func RequireBinding(ctx context.Context, w kaname.SemanticAuthorityWriter, actor
 	return ctx.Err()
 }
 func requireBinding(ctx context.Context, w kaname.SemanticAuthorityWriter, p WitnessedLowerBound, proposed granteffect.Binding) error {
-	if !p.valid(w) {
-		return unavailable()
-	}
-	if err := validateProposed(proposed); err != nil {
+	explicit, err := bindingAuthority(ctx, w, p, proposed)
+	if err != nil || explicit {
 		return err
-	}
-	admin, err := administrative(ctx, w, p, proposed.Scope)
-	if err != nil {
-		return err
-	}
-	if admin {
-		return nil
-	}
-	create, err := capability(ctx, w, p.census.Actor, proposed.Scope, domain.GrantCapabilityCreateBinding, "")
-	if err != nil {
-		return err
-	}
-	if !create || !witnessedCapability(p, proposed.Scope, granteffect.CreateBinding, "") {
-		return p.insufficient()
-	}
-	bind, err := capability(ctx, w, p.census.Actor, proposed.Scope, domain.GrantCapabilityBindRole, proposed.Role.ID)
-	if err != nil {
-		return err
-	}
-	if bind && witnessedCapability(p, proposed.Scope, granteffect.BindRole, proposed.Role.ID) {
-		return nil
 	}
 	return requireCoverage(p, proposed)
 }
-func validateProposed(b granteffect.Binding) error {
+
+// bindingAuthority возвращает true, когда текущая администрация области или
+// CreateBinding вместе с BindRole уже подтверждают выдачу названной роли.
+// false без ошибки допускает проверку покрытия обычных прав.
+func bindingAuthority(ctx context.Context, w kaname.SemanticAuthorityWriter, p WitnessedLowerBound, proposed granteffect.Binding) (bool, error) {
+	if !p.valid(w) {
+		return false, unavailable()
+	}
+	caps, err := validateProposed(proposed)
+	if err != nil {
+		return false, err
+	}
+	if err := requireProposedAccessLabelCapabilities(ctx, w, p, proposed.Scope, caps); err != nil {
+		return false, err
+	}
+	admin, err := administrative(ctx, w, p, proposed.Scope)
+	if err != nil || admin {
+		return admin, err
+	}
+	create, err := capability(ctx, w, p.census.Actor, proposed.Scope, domain.GrantCapabilityCreateBinding, "")
+	if err != nil {
+		return false, err
+	}
+	if !create || !witnessedCapability(p, proposed.Scope, granteffect.CreateBinding, "") {
+		return false, p.insufficient()
+	}
+	bind, err := capability(ctx, w, p.census.Actor, proposed.Scope, domain.GrantCapabilityBindRole, proposed.Role.ID)
+	if err != nil {
+		return false, err
+	}
+	return bind && witnessedCapability(p, proposed.Scope, granteffect.BindRole, proposed.Role.ID), nil
+}
+func validateProposed(b granteffect.Binding) ([]domain.GrantCapabilityRule, error) {
 	if b.Role.ID == "" || b.SourceID == "" || !domain.IsScopeAnchorKind(b.Scope.Type) || domain.DeriveFromResourceType(b.Scope.Type).ValidateAgainst(b.Scope.Type, b.Scope.ID) != nil || b.Recipient.Validate() != nil {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Invalid proposed grant")
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Invalid proposed grant")
 	}
 	if err := b.Target.Validate(); err != nil {
-		return err
+		return nil, err
 	}
 	_, caps, err := domain.SplitGrantCapabilityRules(b.Role.Rules)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(caps) > 0 && len(b.Target.Resources) > 0 {
-		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Meta capability carrier requires allInScope")
+		return nil, iamerr.Wrapf(iamerr.ErrInvalidArg, "Meta capability carrier requires allInScope")
 	}
-	return nil
+	return caps, nil
 }
 func requireCoverage(p WitnessedLowerBound, b granteffect.Binding) error {
 	proposed := p.bundle.Compile(b)

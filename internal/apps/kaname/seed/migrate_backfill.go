@@ -482,8 +482,11 @@ func selectorArmText(a domain.Arm) string {
 		return "names"
 	case domain.ArmLabels:
 		return "labels"
-	default:
+	case domain.ArmAnchor:
 		return "anchor"
+	default:
+		// Ограничение role_rule_selectors отклонит неподдерживаемую ветвь.
+		return ""
 	}
 }
 

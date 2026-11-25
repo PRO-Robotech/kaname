@@ -102,10 +102,11 @@ func TestReadOnlyLabelDecoderCapacityFallsBackWithoutChangingResults(t *testing.
 
 type labelReaderRows struct {
 	pgx.Rows
-	raw     []byte
-	done    bool
-	scanErr error
-	rowsErr error
+	raw          []byte
+	accessLabels []byte
+	done         bool
+	scanErr      error
+	rowsErr      error
 }
 
 func (r *labelReaderRows) Next() bool {
@@ -125,6 +126,7 @@ func (r *labelReaderRows) Scan(dest ...any) error {
 		*dest[i].(*string) = value
 	}
 	*dest[4].(*[]byte) = r.raw
+	*dest[5].(*[]byte) = r.accessLabels
 	return nil
 }
 
@@ -272,4 +274,13 @@ func TestLabelReaderDecoderPreservesScanJSONAndRowsErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMirrorReaderKeepsAccessLabelsSeparate(t *testing.T) {
+	r := &labelReaderRows{raw: []byte(`{"team":"ordinary"}`), accessLabels: []byte(`{"team":"restricted"}`)}
+	rows, err := scanRows(r)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, map[string]string{"team": "ordinary"}, rows[0].Labels)
+	require.Equal(t, map[string]string{"team": "restricted"}, rows[0].AccessLabels)
 }

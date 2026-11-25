@@ -43,6 +43,9 @@ func (h *Handler) WithListOperations(uc *shared.ListOperationsUseCase) *Handler 
 }
 
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateProjectRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	p := domain.Project{
 		AccountID:   domain.AccountID(req.GetAccountId()),
 		Name:        domain.ProjectName(req.GetName()),
@@ -57,6 +60,11 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateProjectRequest) (
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateProjectRequest) (*operationpb.Operation, error) {
+	if h.update.accessLabelsWriter() == nil {
+		if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+			return nil, err
+		}
+	}
 	in := UpdateProjectInput{
 		ID: domain.ProjectID(req.GetProjectId()),
 	}
@@ -70,6 +78,9 @@ func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateProjectRequest) (
 	}
 	if labels := req.GetLabels(); labels != nil {
 		in.Labels = labelsFromProto(labels)
+	}
+	if labels := req.GetAccessLabels(); labels != nil {
+		in.AccessLabels = labelsFromProto(labels)
 	}
 	if mask := req.GetUpdateMask(); mask != nil {
 		in.UpdateMask = append([]string{}, mask.GetPaths()...)

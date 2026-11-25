@@ -61,7 +61,7 @@ func classifyResourcePredicate(key resourceSourceKey) (resourcePredicateProtecti
 				} else {
 					out.Scopes = []domain.ScopeAnchor{predicate.Scope}
 				}
-			case domain.ArmLabels:
+			case domain.ArmLabels, domain.ArmAccessLabels:
 				// Исторический whole-binding LABELS включает foreign REJECTED rows.
 				// Без finite target это действительно полный predicate данного типа.
 				out.Global = true

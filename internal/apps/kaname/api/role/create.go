@@ -166,7 +166,7 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 	if verr := validateRuleCatalog(r.Rules, r.IsSystem, facts); verr != nil {
 		return nil, shared.MapValidationErr(verr)
 	}
-	projection, cerr := facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+	projection, cerr := u.policy.projectAdmissionRules(facts, r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
 	if cerr != nil {
 		return nil, shared.MapValidationErr(cerr)
 	}
@@ -207,13 +207,9 @@ func (u *CreateRoleUseCase) Execute(ctx context.Context, r domain.Role) (*operat
 func (u *CreateRoleUseCase) doCreate(ctx context.Context, r domain.Role, actor string) (*anypb.Any, error) {
 	created, err := u.policy.run(ctx, u.repo, r, true, true,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
-			facts, ferr := writerRoleFacts(ctx, w, u.cat)
-			if ferr != nil {
-				return domain.Role{}, ferr
-			}
-			projection, perr := facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+			projection, perr := projectWriterRoleRules(ctx, w, r, u.cat)
 			if perr != nil {
-				return domain.Role{}, shared.MapValidationErr(perr)
+				return domain.Role{}, perr
 			}
 			if perr = checkGrantReferences(ctx, w, r, projection.Capabilities, true, u.referencePlans); perr != nil {
 				return domain.Role{}, perr

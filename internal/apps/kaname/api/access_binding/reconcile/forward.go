@@ -711,38 +711,3 @@ func (r *Reconciler) materializeForwardMember(_ context.Context, _ ReconcileStor
 	}
 	return nil
 }
-
-// selectorMatchesObject сообщает, совпадает ли ОДИН материализующий селектор с ОДНИМ объектом
-// по своей ветви — чистый Go-двойник предиката SQL в
-// SelectorBindingsMatchingObject, чтобы быстрый прямой путь выбирал РОВНО те же
-// совпадения селектор→объект, что и запрос распространения (без расхождений):
-//
-//   - тип объекта с точкой должен входить в ObjectTypes селектора (пусто ⇒ нет совпадения,
-//     это ранний выход для кластерного `*.*`: права супер-администратора кластера не пообъектные);
-//   - ARM_NAMES → идентификатор объекта должен входить в ResourceNames;
-//   - ARM_LABELS → метки объекта должны удовлетворять MatchLabels (labels @> matchLabels);
-//   - ARM_ANCHOR → достаточно вхождения типа (вложенность отдельно перепроверяет
-//     desiredMemberForObject → IsContainedIn).
-func selectorMatchesObject(sel domain.RuleSelector, o domain.MirrorObject) bool {
-	if !containsStringForward(sel.ObjectTypes, o.ObjectType) {
-		return false
-	}
-	switch sel.Arm {
-	case domain.ArmNames:
-		return containsStringForward(sel.ResourceNames, o.ObjectID)
-	case domain.ArmLabels:
-		return o.MatchesLabels(sel.MatchLabels)
-	default: // ArmAnchor
-		return true
-	}
-}
-
-// containsStringForward сообщает о вхождении в множество (малые закрытые списки — линейный проход).
-func containsStringForward(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
-}

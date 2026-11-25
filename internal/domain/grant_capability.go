@@ -17,18 +17,57 @@ import (
 type GrantCapabilityKind string
 
 const (
-	GrantCapabilityCreateBinding GrantCapabilityKind = "create_binding"
-	GrantCapabilityBindRole      GrantCapabilityKind = "bind_role"
+	GrantCapabilityCreateBinding    GrantCapabilityKind = "create_binding"
+	GrantCapabilityBindRole         GrantCapabilityKind = "bind_role"
+	GrantCapabilityApplyAccessLabel GrantCapabilityKind = "apply_access_label"
 )
+
+// RuleRef возвращает каталожную координату управляющего права.
+func (kind GrantCapabilityKind) RuleRef() (RoleRuleRef, bool) {
+	switch kind {
+	case GrantCapabilityCreateBinding:
+		return RoleRuleRef{Module: "iam", Resource: "accessBinding", Verb: "create"}, true
+	case GrantCapabilityBindRole:
+		return RoleRuleRef{Module: "iam", Resource: "role", Verb: "bind"}, true
+	case GrantCapabilityApplyAccessLabel:
+		return RoleRuleRef{Module: "iam", Resource: "accessLabel", Verb: "apply"}, true
+	default:
+		return RoleRuleRef{}, false
+	}
+}
+
+// AccessLabelDefinitionID — канонический lowercase PostgreSQL UUID определения.
+// Нулевой UUID не обозначает определение; сокращения, пробелы и uppercase
+// не нормализуются, чтобы ссылка имела ровно одно авторское представление.
+type AccessLabelDefinitionID string
+
+func (id AccessLabelDefinitionID) Validate() error {
+	value := string(id)
+	if len(value) != 36 || value == "00000000-0000-0000-0000-000000000000" {
+		return fmt.Errorf("Illegal argument access label definition id (canonical non-zero lowercase UUID required)")
+	}
+	for index, char := range value {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if char == '-' {
+				continue
+			}
+		} else if (char >= '0' && char <= '9') || (char >= 'a' && char <= 'f') {
+			continue
+		}
+		return fmt.Errorf("Illegal argument access label definition id (canonical non-zero lowercase UUID required)")
+	}
+	return nil
+}
 
 // GrantCapabilityRule — проекция одного авторского правила управляющей роли.
 // Область и получатели поступают из действующей выдачи этой роли, а не из её
 // definitionTier. RuleFP не содержит позиции правила: порядок и дубликаты
 // одинаковых правил не меняют множество полномочий.
 type GrantCapabilityRule struct {
-	RuleFP      string
-	Kind        GrantCapabilityKind
-	BoundRoleID RoleID
+	RuleFP       string
+	Kind         GrantCapabilityKind
+	BoundRoleID  RoleID
+	DefinitionID AccessLabelDefinitionID `json:",omitempty"`
 }
 
 // SplitGrantCapabilityRules отделяет явные управляющие пары от обычных прав.
@@ -45,6 +84,24 @@ func SplitGrantCapabilityRules(rules Rules) (Rules, []GrantCapabilityRule, error
 		create, bind := grantCapabilityPairs(r)
 		if err := validateGrantCapabilityRule(r, i, create, bind); err != nil {
 			return nil, nil, err
+		}
+		if hasAccessLabelApply(r) {
+			if err := validateAccessLabelApply(r, i); err != nil {
+				return nil, nil, err
+			}
+			fp, err := grantRuleFingerprint(r)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, id := range r.ResourceNames {
+				capability := GrantCapabilityRule{RuleFP: fp, Kind: GrantCapabilityApplyAccessLabel, DefinitionID: AccessLabelDefinitionID(id)}
+				if _, exists := seen[capability]; !exists {
+					seen[capability] = struct{}{}
+					capabilities = append(capabilities, capability)
+				}
+			}
+			// Выделенная форма не оставляет обычных прав на definition либо якорь.
+			continue
 		}
 		if !create && !bind {
 			ordinary = append(ordinary, cloneGrantRule(r))
@@ -65,6 +122,28 @@ func SplitGrantCapabilityRules(rules Rules) (Rules, []GrantCapabilityRule, error
 	return ordinary, capabilities, nil
 }
 
+// Проверяем явную пару до извлечения: смешанное правило нельзя частично
+// превратить в обычные права. Подстановки сами по себе эту пару не объявляют.
+func hasAccessLabelApply(r Rule) bool {
+	ref, _ := GrantCapabilityApplyAccessLabel.RuleRef()
+	return r.Module == ref.Module && slices.Contains(r.Resources, ref.Resource) && hasAuthoredVerb(r.Verbs, ref.Verb)
+}
+
+func validateAccessLabelApply(r Rule, index int) error {
+	if len(r.Resources) != 1 || r.Resources[0] != "accessLabel" || len(r.Verbs) != 1 || r.Verbs[0] != "apply" || r.MatchLabels != nil || r.MatchAccessLabels != nil || r.CreatedBySubject || r.Children != nil {
+		return fmt.Errorf("Illegal argument rules[%d] (accessLabel apply requires a dedicated top-level named rule without selectors or children)", index)
+	}
+	if len(r.ResourceNames) == 0 || len(r.ResourceNames) > maxResNames {
+		return fmt.Errorf("Illegal argument rules[%d].resourceNames (accessLabel apply requires 1..%d definition UUIDs)", index, maxResNames)
+	}
+	for _, id := range r.ResourceNames {
+		if err := AccessLabelDefinitionID(id).Validate(); err != nil {
+			return fmt.Errorf("Illegal argument rules[%d].resourceNames: %w", index, err)
+		}
+	}
+	return nil
+}
+
 func grantCapabilityPairs(r Rule) (create, bind bool) {
 	if r.Module != "iam" {
 		return false, false
@@ -80,8 +159,8 @@ func validateGrantCapabilityRule(r Rule, index int, create, bind bool) error {
 	if !create && !bind {
 		return nil
 	}
-	if len(r.Children) != 0 || r.CreatedBySubject || len(r.MatchLabels) != 0 {
-		return fmt.Errorf("Illegal argument rules[%d] (grant capabilities do not accept children, matchLabels or createdBySubject)", index)
+	if len(r.Children) != 0 || r.CreatedBySubject || len(r.MatchLabels) != 0 || r.MatchAccessLabels != nil {
+		return fmt.Errorf("Illegal argument rules[%d] (grant capabilities do not accept children, matchLabels, matchAccessLabels or createdBySubject)", index)
 	}
 	if create && len(r.ResourceNames) != 0 {
 		return fmt.Errorf("Illegal argument rules[%d].resourceNames (accessBinding create requires the whole scope)", index)
@@ -180,8 +259,9 @@ func nestedGrantCapability(r Rule, inheritedModule string) bool {
 		if module == "" {
 			module = inheritedModule
 		}
-		if module == "iam" && (slices.Contains(child.Resources, "accessBinding") && hasAuthoredVerb(child.Verbs, "create") ||
-			slices.Contains(child.Resources, "role") && hasAuthoredVerb(child.Verbs, "bind")) || nestedGrantCapability(child, module) {
+		child.Module = module
+		create, bind := grantCapabilityPairs(child)
+		if create || bind || hasAccessLabelApply(child) || nestedGrantCapability(child, module) {
 			return true
 		}
 	}
@@ -192,6 +272,7 @@ func cloneGrantRule(r Rule) Rule {
 	r.Resources = slices.Clone(r.Resources)
 	r.Verbs = slices.Clone(r.Verbs)
 	r.ResourceNames = slices.Clone(r.ResourceNames)
+	r.MatchAccessLabels = cloneAccessLabels(r.MatchAccessLabels)
 	if r.MatchLabels != nil {
 		labels := make(map[string]string, len(r.MatchLabels))
 		for k, v := range r.MatchLabels {
@@ -210,6 +291,9 @@ func cloneGrantRule(r Rule) Rule {
 }
 
 func grantRuleFingerprint(r Rule) (string, error) {
+	if err := validateAccessLabelCodec(r); err != nil {
+		return "", err
+	}
 	r = cloneGrantRule(r)
 	r.Resources = canonicalGrantSet(r.Resources, false)
 	r.Verbs = canonicalGrantSet(r.Verbs, true)

@@ -147,6 +147,9 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1
 // верхнем уровне (паритет с UpdateRole/ServiceAccount/AccessBinding). labels-
 // валидация и update_mask discipline — в use-case. Async → Operation.
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateUserRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+		return nil, err
+	}
 	in := UpdateUserInput{
 		ID: domain.UserID(req.GetUserId()),
 	}

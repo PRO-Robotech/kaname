@@ -45,11 +45,12 @@ import (
 func ownerSelectorOf(sel domain.RuleSelector) domain.RuleSelector {
 	c := sel.Container
 	return domain.RuleSelector{
-		RuleFP:        c.OwnerFP,
-		Arm:           c.Arm,
-		ObjectTypes:   []string{c.Type},
-		ResourceNames: c.ResourceNames,
-		MatchLabels:   c.MatchLabels,
+		RuleFP:            c.OwnerFP,
+		Arm:               c.Arm,
+		ObjectTypes:       []string{c.Type},
+		ResourceNames:     c.ResourceNames,
+		MatchLabels:       c.MatchLabels,
+		MatchAccessLabels: c.MatchAccessLabels,
 	}
 }
 
@@ -57,7 +58,7 @@ func ownerSelectorOf(sel domain.RuleSelector) domain.RuleSelector {
 // `sel`: его тип — тип владельца, он проходит ветвь владельца, входит в цель и
 // лежит в области выдачи.
 func containerSelected(sel domain.RuleSelector, bs BindingScope, a domain.MirrorObject) bool {
-	if a.ObjectType != sel.Container.Type || !selectorMatchesObject(ownerSelectorOf(sel), a) {
+	if a.ObjectType != sel.Container.Type || !ownerSelectorOf(sel).MatchesObject(a) {
 		return false
 	}
 	if len(bs.Target.Resources) > 0 && !bs.Target.Contains(a.ObjectType, a.ObjectID) {
@@ -105,7 +106,7 @@ func (r *Reconciler) matchNestedObjects(ctx context.Context, s ReconcileStore, s
 	out := desc[:0:0]
 	for _, o := range desc {
 		// Своя ветвь вложенного правила (имена, метки) сужает поверх охвата.
-		if selectorMatchesObject(sel, o) {
+		if sel.MatchesObject(o) {
 			out = append(out, o)
 		}
 	}

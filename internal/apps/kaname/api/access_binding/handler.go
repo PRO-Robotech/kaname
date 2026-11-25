@@ -29,6 +29,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	repoab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/listfilter"
 	reporole "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
 
@@ -128,6 +129,9 @@ func (h *Handler) ListOperations(ctx context.Context, req *iamv1.ListAccessBindi
 }
 
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccessBindingRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	// redesign-2026 F7: the scope-anchor is the dotted scopeType (iam.cluster |
 	// iam.account | iam.project) + scopeId. Pre-Phase-0 the scopeType is REQUIRED
 	// (explicit — prefix-derivation is B3-gated). scopeTypeToBare rejects an empty /
@@ -205,6 +209,9 @@ func (h *Handler) Revoke(ctx context.Context, req *iamv1.RevokeAccessBindingRequ
 // deleted (C-03), and set own-resource labels (D-6 label-selectability). Any other
 // mask path → INVALID_ARGUMENT (update_mask discipline enforced in the use-case).
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateAccessBindingRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+		return nil, err
+	}
 	var mask []string
 	if req.GetUpdateMask() != nil {
 		mask = req.GetUpdateMask().GetPaths()
@@ -251,7 +258,7 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListAccessBindingsRequest
 	if _, err := shared.DecodeVisiblePageToken("page_token", req.GetPageToken()); err != nil {
 		return nil, err
 	}
-	// (3) whitelist filter: subject/role/scope/scopeId; unknown key → InvalidArgument.
+	// (3) Разбираем сравнение по разрешённому полю или по обычной метке.
 	f, err := parseABListFilter(req.GetFilter())
 	if err != nil {
 		return nil, err
@@ -290,13 +297,17 @@ var abListFilterFields = []string{"subject", "role", "scope", "scopeId"}
 // (iam.account|iam.project|iam.cluster), mapped to the bare within-service anchor
 // kind; an unknown dotted scope → INVALID_ARGUMENT.
 func parseABListFilter(expr string) (repoab.ListFilter, error) {
-	ast, err := filter.Parse(expr, abListFilterFields)
+	ast, err := listfilter.Parse(expr, abListFilterFields)
 	if err != nil {
 		return repoab.ListFilter{}, shared.InvalidArg("filter", err.Error())
 	}
 	var f repoab.ListFilter
 	if ast == nil {
 		return f, nil // empty filter → no predicate
+	}
+	if ast.Label != nil {
+		f.Label = ast.Label
+		return f, nil
 	}
 	// The operator is part of the expression, not decoration. All four keys hold
 	// exact identifiers — a subject id, a role id, a scope kind, a scope id — and a

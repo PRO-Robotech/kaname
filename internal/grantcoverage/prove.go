@@ -93,12 +93,17 @@ func regionCovers(held, wanted Region, id string, b *workBudget) bool {
 		(wanted.Creator.Kind != ExactCreator || held.Creator.Subject != wanted.Creator.Subject) {
 		return false
 	}
-	// Импликация wanted ⇒ held: каждое равенство actor обязано быть у wanted.
-	if !b.takeN(len(held.Labels)) {
+	// Импликация wanted ⇒ held проверяется для каждой карты отдельно.
+	if !b.takeN(len(held.Labels) + len(held.AccessLabels)) {
 		return false
 	}
-	for key, value := range held.Labels {
-		if actual, exists := wanted.Labels[key]; !exists || actual != value {
+	return labelConjunctionCovers(held.Labels, wanted.Labels) &&
+		labelConjunctionCovers(held.AccessLabels, wanted.AccessLabels)
+}
+
+func labelConjunctionCovers(held, wanted map[string]string) bool {
+	for key, value := range held {
+		if actual, exists := wanted[key]; !exists || actual != value {
 			return false
 		}
 	}

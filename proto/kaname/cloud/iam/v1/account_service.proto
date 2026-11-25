@@ -178,9 +178,12 @@ message ListAccountsRequest {
 
   // A filter expression that filters resources listed in the response.
   // The expression must specify:
-  // 1. The field name. Currently you can use filtering only on the [Account.name] field.
+  // 1. The field name. Поддерживаются `name` и `labels.<ключ>`.
   // 2. An `=` operator.
   // 3. The value in double quotes (`"`).
+  //
+  // Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+  // Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
   string filter = 3;
 }
 
@@ -229,6 +232,11 @@ message CreateAccountRequest {
   // deleted since — is refused in the Operation outcome with ALREADY_EXISTS
   // "Account <id> already exists". An issued ID is never issued again.
   string id = 5;
+
+  // Начальные защищённые метки для IAM match_access_labels.
+  // Обычное право создать ресурс не разрешает выдавать доступ:
+  // весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+  map<string, string> access_labels = 6;
 }
 
 message UpdateAccountRequest {
@@ -248,6 +256,14 @@ message UpdateAccountRequest {
 
   // Resource labels as `key:value` pairs.
   map<string, string> labels = 5;
+
+  // Защищённые метки для IAM match_access_labels. Обычное право update
+  // не разрешает выдавать доступ: добавленный эффект требует Grant.
+  // update_mask без access_labels сохраняет их; с access_labels заменяет
+  // всю карту, в том числе очищает при пустом/отсутствующем поле.
+  // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+  // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+  map<string, string> access_labels = 6;
 }
 
 message DeleteAccountRequest {

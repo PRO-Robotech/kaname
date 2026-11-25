@@ -93,6 +93,8 @@ type exQueue struct {
 	blockClaim chan struct{} // when non-nil, ClaimReconcileEvents waits on it
 }
 
+func (*exQueue) DeferReconcileEvent(context.Context, int64) error { return nil }
+
 func (q *exQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox.Event, error) {
 	if q.blockClaim != nil {
 		<-q.blockClaim

@@ -76,9 +76,10 @@ func (l *resourceAttemptLifetime) close() {
 // подтверждённый abort остаётся распознаваемым, неоднозначная доставка — нет.
 type resourceDecisionTx struct {
 	pgx.Tx
-	lifetime         *resourceAttemptLifetime
-	owner            *authorityWriteTx
-	registrationBody *resourceRegistrationPreparation
+	lifetime           *resourceAttemptLifetime
+	owner              *authorityWriteTx
+	registrationBody   *resourceRegistrationPreparation
+	accessLabelPending int
 }
 
 func (t *resourceDecisionTx) Commit(ctx context.Context) error {

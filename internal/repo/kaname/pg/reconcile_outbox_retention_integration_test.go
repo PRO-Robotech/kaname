@@ -199,3 +199,39 @@ func TestReconcileOutbox_SweepReportsAFullBatch(t *testing.T) {
 	t.Logf("перепись: посеяно %d · снято партиями 2 + %d · таблица %d",
 		seeded, seeded-2, countReconcileRows(t, ctx, pool))
 }
+
+func TestReconcileOutbox_DeferPendingKeepsNeighboursEligible(t *testing.T) {
+	ctx, pool := retentionPool(t)
+	first := putReconcileEvent(t, ctx, pool, "cinst-deferred", nil, 2)
+	second := putReconcileEvent(t, ctx, pool, "cinst-ready", nil, 0)
+
+	require.NoError(t, reconcile_outbox.DeferPending(ctx, pool, first))
+	got, err := reconcile_outbox.ClaimBatch(ctx, pool, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, second, got[0].ID)
+	var attempts int
+	var unsent bool
+	require.NoError(t, pool.QueryRow(ctx, `SELECT attempt_count,sent_at IS NULL FROM kaname.resource_reconcile_outbox WHERE id=$1`, first).Scan(&attempts, &unsent))
+	require.Equal(t, 2, attempts)
+	require.True(t, unsent)
+
+	// Сдвигаем отметку средствами фикстуры, не ждём по таймеру.
+	_, err = pool.Exec(ctx, `UPDATE kaname.resource_reconcile_event_defer SET ready_at=statement_timestamp()-interval '1 second' WHERE event_id=$1`, first)
+	require.NoError(t, err)
+	got, err = reconcile_outbox.ClaimBatch(ctx, pool, 1)
+	require.NoError(t, err)
+	require.Len(t, got, 1)
+	require.Equal(t, first, got[0].ID)
+
+	_, err = pool.Exec(ctx, `UPDATE kaname.resource_reconcile_outbox SET sent_at=now() WHERE id=$1`, second)
+	require.NoError(t, err)
+	require.NoError(t, reconcile_outbox.DeferPending(ctx, pool, second))
+	var deferred int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.resource_reconcile_event_defer WHERE event_id=$1`, second).Scan(&deferred))
+	require.Zero(t, deferred)
+	_, err = pool.Exec(ctx, `DELETE FROM kaname.resource_reconcile_outbox WHERE id=$1`, first)
+	require.NoError(t, err)
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.resource_reconcile_event_defer WHERE event_id=$1`, first).Scan(&deferred))
+	require.Zero(t, deferred)
+}

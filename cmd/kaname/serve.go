@@ -202,6 +202,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		publication = fullStartup.publication
 	}
 
+	rolePool, roleWriters, err := prepareRolePolicyPool(ctx, cfg, pool, fullStartup)
+	if err != nil {
+		return startupFailureAt(err)
+	}
+	if rolePool != nil {
+		defer rolePool.Close()
+	}
+
 	if err := projectOwnCeilings(ctx, logger, kanamepg.NewOwnCeilingRepo(pool), cfg.OwnCeilings); err != nil {
 		return startupFailureAt(err)
 	}
@@ -304,6 +312,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	// pool="replica" и есть честный ответ на «есть ли отдельный пул чтений».
 	metricsReg.RegisterPoolStats("primary", pool)
 	metricsReg.RegisterPoolStats("replica", slavePool)
+	metricsReg.RegisterPoolStats("role-writer", rolePool)
 
 	// КАТАЛОГ МОДУЛЯ: одно чтение, страж паритета и снимок — в таком порядке и
 	// ДО сборки служб (задача kacho#1816).
@@ -683,10 +692,36 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	var resourceObjectParticipant *reconcile.Reconciler
 	var groupObjectParticipant *reconcile.Reconciler
 	var bindingStageParticipant reconcile.StagedBindingReconciler
+	var stagedMetadataWriters *kanamepg.MetadataMutationWriters
+	var legacyLabelAuthorityRequired bool
+	var legacyLabelWriters interface {
+		kanamerepo.AccountMetadataWriterFactory
+		kanamerepo.ProjectMetadataWriterFactory
+		kanamerepo.ServiceAccountMetadataWriterFactory
+	}
+	if !cfg.AuthorityProtocol.Participant() && fullStartup == nil {
+		writers, required, loadErr := kanameRepo.LoadLegacyLabelAuthority(ctx, preparedModel.text, preparedModel.report.KeyTerms...)
+		legacyLabelAuthorityRequired = required
+		if loadErr != nil {
+			logger.Warn("правки меток аккаунтов, проектов и сервисных учёток недоступны", slog.Any("error", loadErr))
+		} else if writers != nil {
+			legacyLabelWriters = writers
+		}
+	}
 	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
 		bundle, loadErr := loadGroupParticipationBundle(ctx, cfg.AuthorityProtocol, kanameRepo, preparedModel)
 		if loadErr != nil {
 			return startupFailureAt(loadErr)
+		}
+		// Тот же installed handoff: boot model и actual catalog уже сверены
+		// LoadAuthorityBundle. Staged не создаёт identity и не выбирает raw
+		// writer при ошибке защищённой metadata-фабрики.
+		stagedMetadataWriters, loadErr = kanamepg.NewStagedMetadataMutationWriters(ctx, kanameRepo, bundle)
+		if loadErr != nil {
+			return startupFailureAt(fmt.Errorf("metadata authority participant: %w", loadErr))
+		}
+		if stagedMetadataWriters == nil {
+			return startupFailureAt(fmt.Errorf("metadata authority participant is absent"))
 		}
 		clusterAdminParticipant, loadErr = kanamepg.NewClusterAdminParticipant(ctx, kanameRepo, bundle)
 		if loadErr != nil {
@@ -785,7 +820,26 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		}
 		svcs.catalogPublicationHandler = moduleapp.NewPublicationHandler(uc)
 	}
+	if legacyLabelAuthorityRequired {
+		// Ошибка установленного handoff закрывает только путь с правкой меток.
+		// Маски без меток остаются на обычном контракте записи.
+		svcs.accountMetadataUpdate.WithAccountLabelAuthorityWriter(legacyLabelWriters)
+		svcs.projectMetadataUpdate.WithProjectLabelAuthorityWriter(legacyLabelWriters)
+		svcs.serviceAccountMetadataUpdate.WithServiceAccountLabelAuthorityWriter(legacyLabelWriters)
+	}
 	if cfg.AuthorityProtocol.Participant() && fullStartup == nil {
+		if svcs.accountMetadataUpdate == nil || svcs.projectMetadataUpdate == nil || svcs.serviceAccountMetadataUpdate == nil {
+			return startupFailureAt(fmt.Errorf("metadata authority participant public handlers are absent"))
+		}
+		// Это те же UC, что получили публичные handlers в buildServices.
+		// Ordinary repository, маски и operation lifecycle остаются прежними.
+		metadataPorts, metadataErr := stagedMetadataWriters.WithInstalledAccessLabels(ctx)
+		if metadataErr != nil {
+			return startupFailureAt(fmt.Errorf("metadata access label installation: %w", metadataErr))
+		}
+		svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadataPorts)
+		svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadataPorts)
+		svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(metadataPorts)
 		resourceBeginner, participantErr := resourceParticipant.RegistrationTxBeginner(pool)
 		if participantErr != nil {
 			return startupFailureAt(participantErr)
@@ -809,7 +863,11 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		}
 	}
 	if fullStartup != nil {
-		participants, composeErr := wireFullStartupServices(ctx, fullStartup, kanameRepo, svcs, pool)
+		var roleDependencies []*kanamepg.RolePolicyWriters
+		if roleWriters != nil {
+			roleDependencies = append(roleDependencies, roleWriters)
+		}
+		participants, composeErr := wireFullStartupServices(ctx, fullStartup, kanameRepo, svcs, pool, roleDependencies...)
 		if composeErr != nil {
 			return startupFailureAt(fmt.Errorf("authority-protocol full public composition: %w", composeErr))
 		}

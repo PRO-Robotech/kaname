@@ -73,15 +73,16 @@ WHERE r.id=old.id AND n.id=old.id AND r.rules=old.rules`, v.Before, v.Row)
 	case "role_rule_selectors":
 		query = `INSERT INTO kaname.role_rule_selectors
 (role_id,rule_fp,arm,object_types,resource_names,match_labels,container_type,container_arm,
-container_resource_names,container_match_labels,verbs_by_type,created_by_subject,created_at,updated_at)
+container_resource_names,container_match_labels,verbs_by_type,created_by_subject,match_access_labels,container_match_access_labels,created_at,updated_at)
 SELECT r.role_id,r.rule_fp,r.arm,r.object_types,r.resource_names,r.match_labels,r.container_type,r.container_arm,
-r.container_resource_names,r.container_match_labels,r.verbs_by_type,r.created_by_subject,r.created_at,r.updated_at
+r.container_resource_names,r.container_match_labels,r.verbs_by_type,r.created_by_subject,r.match_access_labels,r.container_match_access_labels,r.created_at,r.updated_at
 FROM jsonb_populate_record(NULL::kaname.role_rule_selectors,$1::jsonb->'rows'->0) r
 ON CONFLICT(role_id,rule_fp) DO UPDATE SET arm=EXCLUDED.arm,object_types=EXCLUDED.object_types,
 resource_names=EXCLUDED.resource_names,match_labels=EXCLUDED.match_labels,container_type=EXCLUDED.container_type,
 container_arm=EXCLUDED.container_arm,container_resource_names=EXCLUDED.container_resource_names,
 container_match_labels=EXCLUDED.container_match_labels,verbs_by_type=EXCLUDED.verbs_by_type,
-created_by_subject=EXCLUDED.created_by_subject,updated_at=EXCLUDED.updated_at`
+created_by_subject=EXCLUDED.created_by_subject,match_access_labels=EXCLUDED.match_access_labels,
+container_match_access_labels=EXCLUDED.container_match_access_labels,updated_at=EXCLUDED.updated_at`
 	case "role_verb":
 		var row roleVerbProjectionRow
 		if err := json.Unmarshal(v.Rows[0], &row); err != nil {

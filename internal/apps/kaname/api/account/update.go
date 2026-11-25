@@ -29,25 +29,28 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 // UpdateAccountInput — payload use-case'а. Содержит id + новый body + mask.
 type UpdateAccountInput struct {
-	ID          domain.AccountID
-	Name        *domain.AccountName // nil → не применять (если в mask нет)
-	Description *domain.Description
-	Labels      domain.Labels // nil → не применять (если в mask нет)
+	ID           domain.AccountID
+	Name         *domain.AccountName // nil → не применять (если в mask нет)
+	Description  *domain.Description
+	Labels       domain.Labels // nil → не применять (если в mask нет)
+	AccessLabels domain.Labels
 	// OwnerUserID нельзя менять: hard-immutable. Если попало в mask → 400.
 	UpdateMask []string
 }
 
 // Account-mutable fields exposed via UpdateMask.
 var accountMutableFields = map[string]struct{}{
-	"name":        {},
-	"description": {},
-	"labels":      {},
+	"name":          {},
+	"description":   {},
+	"labels":        {},
+	"access_labels": {},
 }
 
 // accountImmutableFields — fields, которые если в update_mask → InvalidArgument.
@@ -84,6 +87,7 @@ type ObjectReconciler interface {
 // UpdateAccountUseCase.
 type UpdateAccountUseCase struct {
 	metadataConfigured bool
+	metadataLabelsOnly bool
 	metadataFactory    kanamerepo.AccountMetadataWriterFactory
 	repo               Repo
 	opsRepo            operations.Repo
@@ -129,6 +133,11 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 	if err := shared.ValidateResourceID(string(in.ID), domain.PrefixAccount, "account"); err != nil {
 		return nil, err
 	}
+	mask, nextAccessLabels, applyAccessLabels := shared.ResolveAccessLabelsUpdate(in.UpdateMask, in.AccessLabels)
+	in.UpdateMask = mask
+	if applyAccessLabels && u.accessLabelsWriter() == nil {
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Protected accessLabels writer unavailable")
+	}
 	if err := shared.ValidateUpdateMask(in.UpdateMask, accountMutableFields, accountImmutableFields); err != nil {
 		return nil, err
 	}
@@ -155,9 +164,8 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 	}
 
 	// Применяем mask (full-PATCH если mask пустой; иначе только поля из mask).
-	// changed — set of mutable fields whose value actually differs from current;
-	// drives the audit `changed_fields` payload + emit-per-committed-change
-	// (a no-op update that changes nothing emits no audit row).
+	// changed описывает синхронный снимок для валидации и обычного writer.
+	// Защищённый writer заменяет этот список дельтой принятой транзакции.
 	target := current
 	var changed []string
 	if in.Name != nil && shared.MaskAllows(in.UpdateMask, "name") && *in.Name != current.Name {
@@ -168,12 +176,18 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 		target.Description = *in.Description
 		changed = append(changed, "description")
 	}
-	if newLabels, apply := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels); apply && !shared.LabelsEqual(newLabels, current.Labels) {
+	newLabels, applyLabels := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels)
+	if applyLabels && !shared.LabelsEqual(newLabels, current.Labels) {
 		target.Labels = newLabels
 		changed = append(changed, "labels")
 	}
 
 	// Re-validate (domain.Validate на каждой границе).
+	if applyAccessLabels && !shared.LabelsEqual(nextAccessLabels, current.AccessLabels) {
+		target.AccessLabels = nextAccessLabels
+		changed = append(changed, "access_labels")
+	}
+
 	if err := target.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
 	}
@@ -204,6 +218,17 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 	}
 
 	maskCopy := append([]string{}, in.UpdateMask...)
+	// Отсутствие labels в implicit PATCH не разрешает записать их старый
+	// снимок поверх конкурентной правки. Остальные поля сохраняют full-PATCH.
+	if len(maskCopy) == 0 && (!applyLabels || applyAccessLabels) {
+		maskCopy = []string{"name", "description"}
+		if applyLabels {
+			maskCopy = append(maskCopy, "labels")
+		}
+		if applyAccessLabels {
+			maskCopy = append(maskCopy, "access_labels")
+		}
+	}
 	changedCopy := append([]string{}, changed...)
 	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
@@ -235,16 +260,30 @@ func (u *UpdateAccountUseCase) Execute(ctx context.Context, in UpdateAccountInpu
 // reconcile event above and the periodic sweep stay the at-least-once backstop, so this
 // changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, mask []string, actor string, changed []string) (*anypb.Any, error) {
+	// Результат несёт только дельту закоммиченной попытки: prepared executor
+	// вправе повторить тело с другим OLD после отката предыдущей попытки.
+	type updateResult struct {
+		resource domain.Account
+		changed  []string
+	}
 	updated, err := shared.DoWithWriteTx(ctx, u.metadataRepo(a, mask),
-		func(ctx context.Context, w Writer) (domain.Account, error) {
+		func(ctx context.Context, w Writer) (updateResult, error) {
+			attemptChanged := append([]string(nil), changed...)
+			if u.metadataRequired(mask) {
+				effects, ok := w.(kanamerepo.MetadataUpdateEffects)
+				if !ok {
+					return updateResult{}, iamerr.Wrapf(iamerr.ErrUnavailable, "Metadata update effects unavailable")
+				}
+				attemptChanged = append([]string(nil), effects.MetadataChangedFields()...)
+			}
 			upd, uerr := w.AccountsW().Update(ctx, a, mask)
 			if uerr != nil {
-				return domain.Account{}, uerr
+				return updateResult{}, uerr
 			}
 			// Emit-per-committed-change: only emit when a mutable field actually
 			// changed (no-op update commits nothing → no audit row, 5.2-41).
-			if len(changed) == 0 {
-				return upd, nil
+			if len(attemptChanged) == 0 {
+				return updateResult{resource: upd, changed: attemptChanged}, nil
 			}
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventAccountUpdated,
@@ -253,21 +292,21 @@ func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, m
 					"actor":          actor,
 					"resource_type":  "account",
 					"resource_id":    string(upd.ID),
-					"changed_fields": changed,
+					"changed_fields": attemptChanged,
 				},
 			}); aerr != nil {
-				return domain.Account{}, aerr
+				return updateResult{}, aerr
 			}
 			// T3/Q2: an account LABEL change can flip iam-direct selector membership
 			// (an iam.account selector matching by labels). Co-commit a reconcile
 			// trigger (parity with the γ-Q1 mirror-change trigger) so the reconciler
 			// re-evaluates affected iam.account selector bindings (≤2s). labels-only.
-			if accountLabelsChanged(changed) {
+			if accountLabelsChanged(attemptChanged) {
 				if rerr := w.EmitReconcileEvent(ctx, "mirror.upsert", "iam.account", string(upd.ID)); rerr != nil {
-					return domain.Account{}, rerr
+					return updateResult{}, rerr
 				}
 			}
-			return upd, nil
+			return updateResult{resource: upd, changed: attemptChanged}, nil
 		})
 	if err != nil {
 		return nil, err
@@ -277,8 +316,8 @@ func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, m
 	// ReconcileObjectForward is the same entry point the cross-service register path
 	// uses: its delete-stale guard finds the existing members and delegates to the FULL
 	// ReconcileObject, which is what actually revokes a now-unmatched grant.
-	if accountLabelsChanged(changed) && u.reconciler != nil {
-		id := string(updated.ID)
+	if accountLabelsChanged(updated.changed) && u.reconciler != nil {
+		id := string(updated.resource.ID)
 		shared.GoPostCommit(ctx, u.logger, "account label re-materialization", func(ctx context.Context) {
 			if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.account", id); rerr != nil && u.logger != nil {
 				u.logger.Error("account update: label re-materialization failed (reconcile event + sweep will retry)",
@@ -286,15 +325,13 @@ func (u *UpdateAccountUseCase) doUpdate(ctx context.Context, a domain.Account, m
 			}
 		})
 	}
-	return marshalAccount(updated)
+	return marshalAccount(updated.resource)
 }
 
-// accountLabelsChanged reports whether "labels" is among the changed fields of
-// an Account.Update — the only change that flips iam-direct selector membership
-// (T3/Q2).
+// Смена любой карты меток может изменить результат соответствующего селектора.
 func accountLabelsChanged(changed []string) bool {
 	for _, f := range changed {
-		if f == "labels" {
+		if f == "labels" || f == "access_labels" {
 			return true
 		}
 	}

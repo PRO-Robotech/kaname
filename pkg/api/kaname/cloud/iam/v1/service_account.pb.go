@@ -56,7 +56,11 @@ type ServiceAccount struct {
 	// отношением, которым каталог гейтит одиночное чтение — `v_get`; строка попадает
 	// в выдачу ровно тогда, когда вызывающий вправе прочитать её по id.
 	// Mutable через Update (`labels` в update_mask).
-	Labels        map[string]string `protobuf:"bytes,8,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,8,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	AccessLabels  map[string]string `protobuf:"bytes,9,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -136,6 +140,13 @@ func (x *ServiceAccount) GetEnabled() bool {
 func (x *ServiceAccount) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *ServiceAccount) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -417,7 +428,7 @@ var File_kaname_cloud_iam_v1_service_account_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_service_account_proto_rawDesc = "" +
 	"\n" +
-	")kaname/cloud/iam/v1/service_account.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xe0\x02\n" +
+	")kaname/cloud/iam/v1/service_account.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xfd\x03\n" +
 	"\x0eServiceAccount\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -427,8 +438,12 @@ const file_kaname_cloud_iam_v1_service_account_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12\x18\n" +
 	"\aenabled\x18\a \x01(\bR\aenabled\x12G\n" +
-	"\x06labels\x18\b \x03(\v2/.kaname.cloud.iam.v1.ServiceAccount.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\b \x03(\v2/.kaname.cloud.iam.v1.ServiceAccount.LabelsEntryR\x06labels\x12Z\n" +
+	"\raccess_labels\x18\t \x03(\v25.kaname.cloud.iam.v1.ServiceAccount.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aR\n" +
 	"project_id\"k\n" +
@@ -465,7 +480,7 @@ func file_kaname_cloud_iam_v1_service_account_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_service_account_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_service_account_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_kaname_cloud_iam_v1_service_account_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_kaname_cloud_iam_v1_service_account_proto_goTypes = []any{
 	(*ServiceAccount)(nil),                // 0: kaname.cloud.iam.v1.ServiceAccount
 	(*CreateServiceAccountMetadata)(nil),  // 1: kaname.cloud.iam.v1.CreateServiceAccountMetadata
@@ -474,16 +489,18 @@ var file_kaname_cloud_iam_v1_service_account_proto_goTypes = []any{
 	(*DisableServiceAccountMetadata)(nil), // 4: kaname.cloud.iam.v1.DisableServiceAccountMetadata
 	(*EnableServiceAccountMetadata)(nil),  // 5: kaname.cloud.iam.v1.EnableServiceAccountMetadata
 	nil,                                   // 6: kaname.cloud.iam.v1.ServiceAccount.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 7: google.protobuf.Timestamp
+	nil,                                   // 7: kaname.cloud.iam.v1.ServiceAccount.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 8: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_service_account_proto_depIdxs = []int32{
-	7, // 0: kaname.cloud.iam.v1.ServiceAccount.created_at:type_name -> google.protobuf.Timestamp
+	8, // 0: kaname.cloud.iam.v1.ServiceAccount.created_at:type_name -> google.protobuf.Timestamp
 	6, // 1: kaname.cloud.iam.v1.ServiceAccount.labels:type_name -> kaname.cloud.iam.v1.ServiceAccount.LabelsEntry
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	7, // 2: kaname.cloud.iam.v1.ServiceAccount.access_labels:type_name -> kaname.cloud.iam.v1.ServiceAccount.AccessLabelsEntry
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_service_account_proto_init() }
@@ -497,7 +514,7 @@ func file_kaname_cloud_iam_v1_service_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_service_account_proto_rawDesc), len(file_kaname_cloud_iam_v1_service_account_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

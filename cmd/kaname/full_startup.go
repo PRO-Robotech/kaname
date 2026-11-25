@@ -105,12 +105,24 @@ type fullStartupParticipants struct {
 
 // Единственная production composition полного public контракта. Каждая фабрика
 // получает tagged repository; immutable profile сам не является DB authority.
-func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, repo *kanamepg.Repository, svcs *services, pool *pgxpool.Pool) (*fullStartupParticipants, error) {
+func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, repo *kanamepg.Repository, svcs *services, pool *pgxpool.Pool, roleDependencies ...*kanamepg.RolePolicyWriters) (*fullStartupParticipants, error) {
 	if profile == nil || profile.contract == nil || repo == nil || svcs == nil || pool == nil {
 		return nil, fmt.Errorf("authority-protocol full service composition is incomplete")
 	}
 	if svcs.internalIAMHandler == nil {
 		return nil, fmt.Errorf("authority-protocol full internal IAM handler is absent")
+	}
+	// Отдельная role-зависимость необязательна. Ошибка явно переданной
+	// зависимости не разрешает тихий возврат к общему runtime LOGIN.
+	if len(roleDependencies) > 1 {
+		return nil, fmt.Errorf("authority-protocol role dependency is ambiguous")
+	}
+	var roleWriters *kanamepg.RolePolicyWriters
+	if len(roleDependencies) == 1 {
+		roleWriters = roleDependencies[0]
+		if err := roleWriters.ValidateFor(repo, profile.bundle); err != nil {
+			return nil, fmt.Errorf("authority-protocol role dependency: %w", err)
+		}
 	}
 	if svcs.accessBindingHandler == nil || svcs.roleHandler == nil || svcs.groupHandler == nil ||
 		svcs.grantDelegationCreate == nil || svcs.grantDelegationUpdate == nil || svcs.grantDelegationRevoke == nil || svcs.fullModuleHandler == nil ||
@@ -211,10 +223,14 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, err
 	}
-	// Metadata и CRUD получают разные закрытые prepared порты.
-	svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadata)
-	svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadata)
-	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(metadata)
+	metadataPorts, err := metadata.WithInstalledAccessLabels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("metadata access label installation: %w", err)
+	}
+	// Правка метаданных и CRUD используют разные программы записи.
+	svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadataPorts)
+	svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadataPorts)
+	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(metadataPorts)
 	state, err := kanamepg.NewServiceAccountStateWriters(ctx, repo, profile.bundle)
 	if err != nil {
 		return nil, err
@@ -233,7 +249,11 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	svcs.serviceAccountDelete.WithServiceAccountDeleteWriter(crud)
 	svcs.roleDelete.WithRoleDeleteWriter(crud)
 	svcs.accessBindingHandler.WithBindingDecisions(writers).WithBindingWithdrawal(stages)
-	svcs.roleHandler.WithRoleAuthorityWriter(writers)
+	if roleWriters == nil {
+		svcs.roleHandler.WithRoleAuthorityWriter(writers)
+	} else {
+		svcs.roleHandler.WithRoleAuthorityWriter(roleWriters)
+	}
 	svcs.groupHandler.WithGroupAdditionAuthorityWriter(writers)
 	svcs.grantDelegationCreate.WithAuthorityWriter(delegated)
 	svcs.grantDelegationUpdate.WithAuthorityWriter(delegated)

@@ -247,6 +247,9 @@ func (h *Handler) RegisterResource(ctx context.Context, req *iamv1.RegisterResou
 	if err := validateRegistrationShape(domain, req.GetSubjectId(), req.GetRelation(), req.GetObject()); err != nil {
 		return nil, err
 	}
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	if h.registrar == nil {
 		return nil, status.Error(codes.Unavailable, "fga proxy not configured")
 	}

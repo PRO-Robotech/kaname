@@ -525,6 +525,11 @@ message CreateAccessBindingRequest {
   // "target is required; use target.allInScope{} to grant all objects under the
   // anchor". NEW tag (tags 9/11 stay tombstoned).
   AccessTarget target = 15;
+
+  // Начальные защищённые метки для IAM match_access_labels.
+  // Обычное право создать ресурс не разрешает выдавать доступ:
+  // весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+  map<string, string> access_labels = 16;
 }
 
 message DeleteAccessBindingRequest {
@@ -559,6 +564,14 @@ message UpdateAccessBindingRequest {
   // update_mask). Аннотации (size/key/value pattern) — паритет
   // account/project/group request `labels`.
   map<string, string> labels = 4;
+
+  // Защищённые метки для IAM match_access_labels. Обычное право update
+  // не разрешает выдавать доступ: добавленный эффект требует Grant.
+  // update_mask без access_labels сохраняет их; с access_labels заменяет
+  // всю карту, в том числе очищает при пустом/отсутствующем поле.
+  // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+  // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+  map<string, string> access_labels = 5;
 }
 
 message ListAccessBindingsRequest {
@@ -575,6 +588,9 @@ message ListAccessBindingsRequest {
   // predicate of the form `<key>="<value>"`, key ∈ {subject, role, scope, scopeId}
   // (`scope` is the dotted scope-type `iam.account|iam.project|iam.cluster`). An
   // unknown key → INVALID_ARGUMENT. Empty → no filter (all visible bindings).
+  //
+  // Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+  // Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
   //
   // Lifecycle status is NOT a filter key — it is the dedicated
   // `include_revoked` flag below, so it composes with any predicate (the filter

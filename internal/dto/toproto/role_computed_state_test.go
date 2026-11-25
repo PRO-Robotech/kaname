@@ -77,6 +77,22 @@ func roleWithComputedState() domain.Role {
 	}
 }
 
+func TestRoleReadKeepsAccessLabelsAndSelectorSeparate(t *testing.T) {
+	r := roleWithComputedState()
+	r.Labels = domain.Labels{"team": "ordinary"}
+	r.AccessLabels = domain.Labels{"team": "protected"}
+	r.Rules = domain.Rules{{
+		Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"},
+		MatchAccessLabels: map[string]string{"team": "protected"},
+	}}
+	got := roleToPb(t, r)
+	require.Equal(t, "ordinary", got.GetLabels()["team"])
+	require.Equal(t, "protected", got.GetAccessLabels()["team"])
+	require.Len(t, got.GetRules(), 1)
+	require.Empty(t, got.GetRules()[0].GetMatchLabels())
+	require.Equal(t, "protected", got.GetRules()[0].GetMatchAccessLabels()["team"])
+}
+
 func roleToPb(t *testing.T, r domain.Role) *iamv1.Role {
 	t.Helper()
 	var dst *iamv1.Role

@@ -97,7 +97,11 @@ func RequireRole(ctx context.Context, w kaname.SemanticAuthorityWriter, actor do
 	return fallback()
 }
 func requireRoleContent(ctx context.Context, w kaname.SemanticAuthorityWriter, p WitnessedLowerBound, b granteffect.Binding) error {
-	if err := validateProposed(b); err != nil {
+	caps, err := validateProposed(b)
+	if err != nil {
+		return err
+	}
+	if err := requireProposedAccessLabelCapabilities(ctx, w, p, b.Scope, caps); err != nil {
 		return err
 	}
 	admin, err := administrative(ctx, w, p, b.Scope)

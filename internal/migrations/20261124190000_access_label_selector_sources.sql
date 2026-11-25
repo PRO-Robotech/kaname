@@ -1,0 +1,166 @@
+-- Copyright (c) PRO-Robotech
+-- SPDX-License-Identifier: AGPL-3.0-or-later
+-- Successor to 20261124180000. Protected selector sources retain separate namespaces.
+-- No resource mutation route is opened. Runtime verification is still required.
+-- +goose Up
+SELECT kaname.authority_protocol_drain();
+-- +goose StatementBegin
+DO $$ BEGIN IF NOT kaname._authority_full_contract_storage_v3() OR NOT kaname.authority_access_label_storage_valid_v1() THEN RAISE EXCEPTION 'selector source predecessor closure mismatch' USING ERRCODE='55000';END IF;END $$;
+-- +goose StatementEnd
+LOCK TABLE kaname.roles,kaname.role_rule_selectors IN ACCESS EXCLUSIVE MODE;
+-- +goose StatementBegin
+CREATE FUNCTION kaname._authority_resource_selector_matches_v3(p_selector jsonb,p_type text,p_id text,p_labels jsonb,p_access_labels jsonb)
+RETURNS boolean LANGUAGE plpgsql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $matcher$
+BEGIN
+ IF p_selector->>'arm' IS DISTINCT FROM 'access_labels' THEN
+  IF coalesce(p_selector->'match_access_labels','{}'::jsonb)<>'{}'::jsonb THEN
+   RAISE EXCEPTION 'protected predicate on an ordinary selector' USING ERRCODE='22023';END IF;
+  RETURN kaname._authority_resource_selector_matches_v2(p_selector,p_type,p_id,p_labels);
+ END IF;
+ IF jsonb_typeof(p_selector) IS DISTINCT FROM 'object' OR coalesce(p_type,'')='' OR coalesce(p_id,'')=''
+  OR jsonb_typeof(p_selector->'object_types') IS DISTINCT FROM 'array'
+  OR EXISTS(SELECT 1 FROM jsonb_array_elements(p_selector->'object_types') v WHERE jsonb_typeof(v)<>'string')
+  OR kaname.access_labels_valid_v1(p_access_labels) IS DISTINCT FROM true
+  OR kaname.access_labels_valid_v1(p_selector->'match_access_labels') IS DISTINCT FROM true
+  OR p_selector->'match_access_labels'='{}'::jsonb
+  OR (SELECT count(*) FROM jsonb_object_keys(p_selector->'match_access_labels'))>16
+  OR coalesce(p_selector->'match_labels','{}'::jsonb)<>'{}'::jsonb
+  OR coalesce(p_selector->'resource_names','[]'::jsonb)<>'[]'::jsonb THEN
+  RAISE EXCEPTION 'invalid protected selector source' USING ERRCODE='22023';END IF;
+ IF NOT (p_selector->'object_types' ? p_type) THEN RETURN false;END IF;
+ RETURN p_access_labels @> (p_selector->'match_access_labels');
+END;
+$matcher$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION kaname._authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb) FROM PUBLIC;
+-- +goose StatementBegin
+DO $$ DECLARE r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_proc p CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+ JOIN pg_roles u ON u.oid=a.grantee WHERE p.oid='kaname._authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb)'::regprocedure AND a.grantee<>p.proowner LOOP
+ EXECUTE format('REVOKE ALL ON FUNCTION kaname._authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb) FROM %I',r.rolname);
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+CREATE FUNCTION kaname.access_label_rules_valid_v1(p_rules jsonb) RETURNS boolean
+LANGUAGE plpgsql IMMUTABLE SECURITY INVOKER SET search_path=pg_catalog,pg_temp AS $rules$
+DECLARE owner jsonb; node jsonb; nodes jsonb; labels jsonb;
+BEGIN
+ IF jsonb_typeof(p_rules) IS DISTINCT FROM 'array' THEN RETURN false;END IF;
+ IF jsonb_array_length(p_rules)>64 THEN RETURN false;END IF;
+ FOR owner IN SELECT value FROM jsonb_array_elements(p_rules) LOOP
+  IF jsonb_typeof(owner) IS DISTINCT FROM 'object' THEN RETURN false;END IF;
+  nodes:=jsonb_build_array(owner);
+  IF owner ? 'children' THEN
+   IF jsonb_typeof(owner->'children') IS DISTINCT FROM 'array' THEN RETURN false;END IF;
+   IF jsonb_array_length(owner->'children') NOT BETWEEN 1 AND 16 THEN RETURN false;END IF;
+   nodes:=nodes||(owner->'children');
+  END IF;
+  FOR node IN SELECT value FROM jsonb_array_elements(nodes) LOOP
+   IF jsonb_typeof(node) IS DISTINCT FROM 'object' THEN RETURN false;END IF;
+   IF NOT (node ? 'match_access_labels') THEN CONTINUE;END IF;
+   labels:=node->'match_access_labels';
+   IF kaname.access_labels_valid_v1(labels) IS DISTINCT FROM true THEN RETURN false;END IF;
+   IF labels='{}'::jsonb OR (SELECT count(*) FROM jsonb_object_keys(labels))>16
+    OR node ? 'match_labels' OR node ? 'resource_names' OR node ? 'created_by_subject'
+    OR owner->>'module'='*' OR node->'resources' ? '*' OR node->'verbs' ? '*' THEN RETURN false;END IF;
+  END LOOP;
+ END LOOP;
+ RETURN true;
+END;
+$rules$;
+-- +goose StatementEnd
+REVOKE ALL ON FUNCTION kaname.access_label_rules_valid_v1(jsonb) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION kaname.access_label_rules_valid_v1(jsonb) TO PUBLIC;
+-- +goose StatementBegin
+DO $$ DECLARE r record;BEGIN
+ FOR r IN SELECT DISTINCT u.rolname FROM pg_proc p CROSS JOIN LATERAL aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a
+ JOIN pg_roles u ON u.oid=a.grantee WHERE p.oid='kaname.access_label_rules_valid_v1(jsonb)'::regprocedure AND a.grantee<>p.proowner LOOP
+ EXECUTE format('REVOKE ALL ON FUNCTION kaname.access_label_rules_valid_v1(jsonb) FROM %I',r.rolname);
+ END LOOP;
+END $$;
+-- +goose StatementEnd
+ALTER TABLE kaname.roles ADD CONSTRAINT roles_access_label_rules_valid CHECK (kaname.access_label_rules_valid_v1(rules));
+-- +goose StatementBegin
+DO $protected_selector_sources$
+DECLARE item record;pair jsonb;fn regprocedure;old_body text;new_body text;definition text;
+BEGIN
+ FOR item IN SELECT * FROM (VALUES
+ ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305','06ad18dacb82d2d271277a12d6a96562d95082f32f3f3b3a24a32378b4312824',$patch$[["'arm',CASE WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN authored ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"], ["'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),", "'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),\n  'match_access_labels',coalesce(authored->'match_access_labels','{}'::jsonb),"], ["kaname._authority_resource_selector_matches_v2(selector,dotted,identifier,coalesce(nullif(object_row->'labels','null'::jsonb),'{}'::jsonb))", "kaname._authority_resource_selector_matches_v3(selector,dotted,identifier,coalesce(nullif(object_row->'labels','null'::jsonb),'{}'::jsonb),object_row->'access_labels')"]]$patch$::jsonb),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754','9543a7c48560c3a8fe9a83cfe51757f10e56e9b61511136070319d66dfa85488',$patch$[["'arm',CASE WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN authored ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"], ["'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb));", "'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),\n     'match_access_labels',coalesce(authored->'match_access_labels','{}'::jsonb));"], ["'arm',CASE WHEN jsonb_array_length(coalesce(nullif(owner_rule->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN owner_rule ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(owner_rule->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"], ["'match_labels',coalesce(nullif(owner_rule->'match_labels','null'::jsonb),'{}'::jsonb));", "'match_labels',coalesce(nullif(owner_rule->'match_labels','null'::jsonb),'{}'::jsonb),\n     'match_access_labels',coalesce(owner_rule->'match_access_labels','{}'::jsonb));"], ["kaname._authority_resource_selector_matches_v2(child_selector,dotted,identifier,coalesce(nullif(projection->'labels','null'::jsonb),'{}'::jsonb))", "kaname._authority_resource_selector_matches_v3(child_selector,dotted,identifier,coalesce(nullif(projection->'labels','null'::jsonb),'{}'::jsonb),projection->'access_labels')"], ["kaname._authority_resource_selector_matches_v2(owner_selector,ancestor->>'object_type',ancestor->>'object_id',\n       coalesce(nullif(ancestor->'projection'->'labels','null'::jsonb),'{}'::jsonb))", "kaname._authority_resource_selector_matches_v3(owner_selector,ancestor->>'object_type',ancestor->>'object_id',\n       coalesce(nullif(ancestor->'projection'->'labels','null'::jsonb),'{}'::jsonb),ancestor->'projection'->'access_labels')"], ["OR coalesce(nullif(child->'match_labels','null'::jsonb),'{}'::jsonb)<>'{}'::jsonb", "OR coalesce(nullif(child->'match_labels','null'::jsonb),'{}'::jsonb)<>'{}'::jsonb\n     OR child ? 'match_access_labels'"]]$patch$::jsonb),
+ ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c','9341255c4f11de7992cf4ccc12724f929e9049e3ccc41254b115a4e9f49b3d0c',$patch$[["used integer:=2; source_names text[]; source_labels jsonb;", "used integer:=2; source_names text[]; source_labels jsonb; source_access_labels jsonb;"], ["source_labels:=selector.container_match_labels;", "source_labels:=selector.container_match_labels; source_access_labels:=selector.container_match_access_labels;"], ["source_labels:=selector.match_labels;", "source_labels:=selector.match_labels; source_access_labels:=selector.match_access_labels;"], ["WHEN 'labels' THEN '2' ELSE NULL END", "WHEN 'labels' THEN '2' WHEN 'access_labels' THEN '3' ELSE NULL END"], ["IF received IS DISTINCT FROM names OR coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb) IS DISTINCT FROM labels THEN", "IF received IS DISTINCT FROM names OR coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb) IS DISTINCT FROM labels\n OR coalesce(predicate->'access_labels','{}'::jsonb) IS DISTINCT FROM source_access_labels THEN"], ["used:=used+jsonb_array_length(names);", "used:=used+jsonb_array_length(names);\n IF arm='access_labels' THEN\n  IF kaname.access_labels_valid_v1(source_access_labels) IS DISTINCT FROM true OR source_access_labels='{}'::jsonb\n   OR labels<>'{}'::jsonb OR names<>'[]'::jsonb THEN RAISE EXCEPTION 'protected selector predicate shape invalid' USING ERRCODE='22023';END IF;\n  used:=used+(SELECT count(*) FROM jsonb_object_keys(source_access_labels));\n  IF used>p_rows THEN RAISE EXCEPTION 'protected selector predicate budget exceeded' USING ERRCODE='54000';END IF;\n END IF;"], ["ELSIF arm='labels' OR (arm='anchor'", "ELSIF arm IN ('labels','access_labels') OR (arm='anchor'"]]$patch$::jsonb),
+ ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef','c6bead8d0e553a1c1dc0c80e535f57b1ec7715ae7206735a2473a88ca8bc2743',$patch$[["statement text; arm text; names text[]; targets text[]; labels jsonb;", "statement text; arm text; names text[]; targets text[]; labels jsonb; access_labels jsonb;"], ["WHEN '2' THEN 'labels' END", "WHEN '2' THEN 'labels' WHEN '3' THEN 'access_labels' END"], ["labels:=coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb);", "labels:=coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb);\n access_labels:=coalesce(predicate->'access_labels','{}'::jsonb);"], ["OR ($3::text=''labels'' AND o.labels @> $5::jsonb)", "OR ($3::text=''labels'' AND o.labels @> $5::jsonb)\n   OR ($3::text=''access_labels'' AND o.access_labels @> $9::jsonb)"], ["predicate->'scope'->>'ID',targets LOOP", "predicate->'scope'->>'ID',targets,access_labels LOOP"]]$patch$::jsonb),
+ ('_authority_resource_match_wait_v2(jsonb,integer,integer)','6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626','58889d87678c744de3fb80c8a95234c22ffdbb8e0c195aa0cf159c7673aa4e73',$patch$[["OR (rrs.arm='labels' AND m.labels @> rrs.match_labels))", "OR (rrs.arm='labels' AND m.labels @> rrs.match_labels)\n    OR (rrs.arm='access_labels' AND m.access_labels @> rrs.match_access_labels))"], ["OR (rrs.arm='labels' AND o.labels @> rrs.match_labels))", "OR (rrs.arm='labels' AND o.labels @> rrs.match_labels)\n    OR (rrs.arm='access_labels' AND o.access_labels @> rrs.match_access_labels))"]]$patch$::jsonb),
+ ('_authority_crud_storage_v3()','2381b78fd5700ac591d16576a0002e6fd29705bdb388d3508b4257fd989f35bb','27b57b5941d1b4a176ec722cba8538963606f86cefb53a1a37d619f6032e5a75',$patch$[["e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305", "06ad18dacb82d2d271277a12d6a96562d95082f32f3f3b3a24a32378b4312824"], ["24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754", "9543a7c48560c3a8fe9a83cfe51757f10e56e9b61511136070319d66dfa85488"], ["c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c", "9341255c4f11de7992cf4ccc12724f929e9049e3ccc41254b115a4e9f49b3d0c"], ["d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef", "c6bead8d0e553a1c1dc0c80e535f57b1ec7715ae7206735a2473a88ca8bc2743"], ["6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626", "58889d87678c744de3fb80c8a95234c22ffdbb8e0c195aa0cf159c7673aa4e73"], [" ('_authority_resource_selector_matches_v2(jsonb,text,text,jsonb)','b925d87aa30d19a06d00e346d26e381721cc63c8eb4deb12f0f1a15b3e49da68',true,'i',true,'preserve'),", " ('_authority_resource_selector_matches_v2(jsonb,text,text,jsonb)','b925d87aa30d19a06d00e346d26e381721cc63c8eb4deb12f0f1a15b3e49da68',true,'i',true,'preserve'),\n ('_authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb)','f0bfedd8a0a6bf3d07529cab6a63234fddf3c04fbc9414e78d4d7d5d2896ec5b',true,'i',true,'private'),"], [" ('access_labels_valid_v1(jsonb)','5bdcbf012ab0dee0838575bc22c3109d97483e1caf2f5543d810f46be03f9c60')", " ('access_labels_valid_v1(jsonb)','5bdcbf012ab0dee0838575bc22c3109d97483e1caf2f5543d810f46be03f9c60'),\n ('access_label_rules_valid_v1(jsonb)','e8c78a52eeb4930e274ae6931da5767c3bf9c64860c6b464b994eca75b22e325')"], ["  ('authority_access_label_role_checkpoint_read_v1(text,text,text,integer)','jsonb',4,ARRAY['p_role_id','p_xmin','p_ctid','p_rows']),", "  ('authority_access_label_role_checkpoint_read_v1(text,text,text,integer)','jsonb',4,ARRAY['p_role_id','p_xmin','p_ctid','p_rows']),\n  ('_authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb)','boolean',5,ARRAY['p_selector','p_type','p_id','p_labels','p_access_labels']),\n  ('access_label_rules_valid_v1(jsonb)','boolean',1,ARRAY['p_rules']),"], [" RETURN kaname._authority_group_add_storage_v3() AND kaname._authority_forward_storage_v4();", " IF NOT EXISTS(SELECT 1 FROM pg_constraint c WHERE c.conrelid='kaname.roles'::regclass\n  AND c.conname='roles_access_label_rules_valid' AND c.contype='c' AND c.convalidated\n  AND NOT c.connoinherit AND pg_get_expr(c.conbin,c.conrelid)='kaname.access_label_rules_valid_v1(rules)') THEN RETURN false;END IF;\n RETURN kaname._authority_group_add_storage_v3() AND kaname._authority_forward_storage_v4();"]]$patch$::jsonb),
+ ('_authority_full_contract_storage_v3()','7c77cf767ad393b3f16aaae4bcda5df7594aaed73b41a17877735bdb4e92e72b','0718dba1cc1f92155447f774059249071089344ac852e0b5842551413e3dc26e',$patch$[["2381b78fd5700ac591d16576a0002e6fd29705bdb388d3508b4257fd989f35bb", "27b57b5941d1b4a176ec722cba8538963606f86cefb53a1a37d619f6032e5a75"]]$patch$::jsonb)
+ ) AS changes(signature,before_sha,after_sha,substitutions) LOOP
+  fn:=to_regprocedure('kaname.'||item.signature);
+  SELECT prosrc INTO STRICT old_body FROM pg_proc WHERE oid=fn;
+  IF encode(sha256(convert_to(old_body,'UTF8')),'hex') IS DISTINCT FROM item.before_sha THEN
+   RAISE EXCEPTION 'selector source baseline changed: %',item.signature USING ERRCODE='55000';END IF;
+  new_body:=old_body;
+  FOR pair IN SELECT value FROM jsonb_array_elements(item.substitutions) LOOP
+   IF length(new_body)-length(replace(new_body,pair->>0,'')) IS DISTINCT FROM length(pair->>0) THEN
+    RAISE EXCEPTION 'selector source substitution ambiguous' USING ERRCODE='55000';END IF;
+   new_body:=replace(new_body,pair->>0,pair->>1);
+  END LOOP;
+  IF encode(sha256(convert_to(new_body,'UTF8')),'hex') IS DISTINCT FROM item.after_sha THEN
+   RAISE EXCEPTION 'selector source calculated pin mismatch' USING ERRCODE='55000';END IF;
+  definition:=pg_get_functiondef(fn);
+  IF length(definition)-length(replace(definition,old_body,'')) IS DISTINCT FROM length(old_body) THEN
+   RAISE EXCEPTION 'selector source definition ambiguous' USING ERRCODE='55000';END IF;
+  EXECUTE replace(definition,old_body,new_body);
+ END LOOP;
+ IF NOT kaname._authority_full_contract_storage_v3() OR NOT kaname.authority_access_label_storage_valid_v1() THEN
+  RAISE EXCEPTION 'selector source closure mismatch' USING ERRCODE='55000';END IF;
+END $protected_selector_sources$;
+-- +goose StatementEnd
+
+-- +goose Down
+SELECT kaname.authority_protocol_drain();
+LOCK TABLE kaname.roles,kaname.role_rule_selectors IN ACCESS EXCLUSIVE MODE;
+-- +goose StatementBegin
+DO $$ BEGIN
+ IF EXISTS(SELECT 1 FROM kaname.role_rule_selectors WHERE arm='access_labels' OR container_arm='access_labels')
+ OR EXISTS(SELECT 1 FROM kaname.roles r CROSS JOIN LATERAL jsonb_array_elements(r.rules) a(rule)
+  WHERE a.rule ? 'match_access_labels' OR EXISTS(SELECT 1 FROM jsonb_array_elements(coalesce(a.rule->'children','[]'::jsonb)) c(rule) WHERE c.rule ? 'match_access_labels')) THEN
+  RAISE EXCEPTION 'protected policies require explicit migration before source-proof rollback' USING ERRCODE='55000';END IF;
+END $$;
+-- +goose StatementEnd
+-- +goose StatementBegin
+DO $protected_selector_sources$
+DECLARE item record;pair jsonb;fn regprocedure;old_body text;new_body text;definition text;
+BEGIN
+ FOR item IN SELECT * FROM (VALUES
+ ('_authority_full_contract_storage_v3()','0718dba1cc1f92155447f774059249071089344ac852e0b5842551413e3dc26e','7c77cf767ad393b3f16aaae4bcda5df7594aaed73b41a17877735bdb4e92e72b',$patch$[["27b57b5941d1b4a176ec722cba8538963606f86cefb53a1a37d619f6032e5a75", "2381b78fd5700ac591d16576a0002e6fd29705bdb388d3508b4257fd989f35bb"]]$patch$::jsonb),
+ ('_authority_crud_storage_v3()','27b57b5941d1b4a176ec722cba8538963606f86cefb53a1a37d619f6032e5a75','2381b78fd5700ac591d16576a0002e6fd29705bdb388d3508b4257fd989f35bb',$patch$[[" IF NOT EXISTS(SELECT 1 FROM pg_constraint c WHERE c.conrelid='kaname.roles'::regclass\n  AND c.conname='roles_access_label_rules_valid' AND c.contype='c' AND c.convalidated\n  AND NOT c.connoinherit AND pg_get_expr(c.conbin,c.conrelid)='kaname.access_label_rules_valid_v1(rules)') THEN RETURN false;END IF;\n RETURN kaname._authority_group_add_storage_v3() AND kaname._authority_forward_storage_v4();", " RETURN kaname._authority_group_add_storage_v3() AND kaname._authority_forward_storage_v4();"], ["  ('authority_access_label_role_checkpoint_read_v1(text,text,text,integer)','jsonb',4,ARRAY['p_role_id','p_xmin','p_ctid','p_rows']),\n  ('_authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb)','boolean',5,ARRAY['p_selector','p_type','p_id','p_labels','p_access_labels']),\n  ('access_label_rules_valid_v1(jsonb)','boolean',1,ARRAY['p_rules']),", "  ('authority_access_label_role_checkpoint_read_v1(text,text,text,integer)','jsonb',4,ARRAY['p_role_id','p_xmin','p_ctid','p_rows']),"], [" ('access_labels_valid_v1(jsonb)','5bdcbf012ab0dee0838575bc22c3109d97483e1caf2f5543d810f46be03f9c60'),\n ('access_label_rules_valid_v1(jsonb)','e8c78a52eeb4930e274ae6931da5767c3bf9c64860c6b464b994eca75b22e325')", " ('access_labels_valid_v1(jsonb)','5bdcbf012ab0dee0838575bc22c3109d97483e1caf2f5543d810f46be03f9c60')"], [" ('_authority_resource_selector_matches_v2(jsonb,text,text,jsonb)','b925d87aa30d19a06d00e346d26e381721cc63c8eb4deb12f0f1a15b3e49da68',true,'i',true,'preserve'),\n ('_authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb)','f0bfedd8a0a6bf3d07529cab6a63234fddf3c04fbc9414e78d4d7d5d2896ec5b',true,'i',true,'private'),", " ('_authority_resource_selector_matches_v2(jsonb,text,text,jsonb)','b925d87aa30d19a06d00e346d26e381721cc63c8eb4deb12f0f1a15b3e49da68',true,'i',true,'preserve'),"], ["58889d87678c744de3fb80c8a95234c22ffdbb8e0c195aa0cf159c7673aa4e73", "6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626"], ["c6bead8d0e553a1c1dc0c80e535f57b1ec7715ae7206735a2473a88ca8bc2743", "d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef"], ["9341255c4f11de7992cf4ccc12724f929e9049e3ccc41254b115a4e9f49b3d0c", "c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c"], ["9543a7c48560c3a8fe9a83cfe51757f10e56e9b61511136070319d66dfa85488", "24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754"], ["06ad18dacb82d2d271277a12d6a96562d95082f32f3f3b3a24a32378b4312824", "e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305"]]$patch$::jsonb),
+ ('_authority_resource_match_wait_v2(jsonb,integer,integer)','58889d87678c744de3fb80c8a95234c22ffdbb8e0c195aa0cf159c7673aa4e73','6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626',$patch$[["OR (rrs.arm='labels' AND o.labels @> rrs.match_labels)\n    OR (rrs.arm='access_labels' AND o.access_labels @> rrs.match_access_labels))", "OR (rrs.arm='labels' AND o.labels @> rrs.match_labels))"], ["OR (rrs.arm='labels' AND m.labels @> rrs.match_labels)\n    OR (rrs.arm='access_labels' AND m.access_labels @> rrs.match_access_labels))", "OR (rrs.arm='labels' AND m.labels @> rrs.match_labels))"]]$patch$::jsonb),
+ ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','c6bead8d0e553a1c1dc0c80e535f57b1ec7715ae7206735a2473a88ca8bc2743','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef',$patch$[["predicate->'scope'->>'ID',targets,access_labels LOOP", "predicate->'scope'->>'ID',targets LOOP"], ["OR ($3::text=''labels'' AND o.labels @> $5::jsonb)\n   OR ($3::text=''access_labels'' AND o.access_labels @> $9::jsonb)", "OR ($3::text=''labels'' AND o.labels @> $5::jsonb)"], ["labels:=coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb);\n access_labels:=coalesce(predicate->'access_labels','{}'::jsonb);", "labels:=coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb);"], ["WHEN '2' THEN 'labels' WHEN '3' THEN 'access_labels' END", "WHEN '2' THEN 'labels' END"], ["statement text; arm text; names text[]; targets text[]; labels jsonb; access_labels jsonb;", "statement text; arm text; names text[]; targets text[]; labels jsonb;"]]$patch$::jsonb),
+ ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','9341255c4f11de7992cf4ccc12724f929e9049e3ccc41254b115a4e9f49b3d0c','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c',$patch$[["ELSIF arm IN ('labels','access_labels') OR (arm='anchor'", "ELSIF arm='labels' OR (arm='anchor'"], ["used:=used+jsonb_array_length(names);\n IF arm='access_labels' THEN\n  IF kaname.access_labels_valid_v1(source_access_labels) IS DISTINCT FROM true OR source_access_labels='{}'::jsonb\n   OR labels<>'{}'::jsonb OR names<>'[]'::jsonb THEN RAISE EXCEPTION 'protected selector predicate shape invalid' USING ERRCODE='22023';END IF;\n  used:=used+(SELECT count(*) FROM jsonb_object_keys(source_access_labels));\n  IF used>p_rows THEN RAISE EXCEPTION 'protected selector predicate budget exceeded' USING ERRCODE='54000';END IF;\n END IF;", "used:=used+jsonb_array_length(names);"], ["IF received IS DISTINCT FROM names OR coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb) IS DISTINCT FROM labels\n OR coalesce(predicate->'access_labels','{}'::jsonb) IS DISTINCT FROM source_access_labels THEN", "IF received IS DISTINCT FROM names OR coalesce(nullif(predicate->'labels','null'::jsonb),'{}'::jsonb) IS DISTINCT FROM labels THEN"], ["WHEN 'labels' THEN '2' WHEN 'access_labels' THEN '3' ELSE NULL END", "WHEN 'labels' THEN '2' ELSE NULL END"], ["source_labels:=selector.match_labels; source_access_labels:=selector.match_access_labels;", "source_labels:=selector.match_labels;"], ["source_labels:=selector.container_match_labels; source_access_labels:=selector.container_match_access_labels;", "source_labels:=selector.container_match_labels;"], ["used integer:=2; source_names text[]; source_labels jsonb; source_access_labels jsonb;", "used integer:=2; source_names text[]; source_labels jsonb;"]]$patch$::jsonb),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','9543a7c48560c3a8fe9a83cfe51757f10e56e9b61511136070319d66dfa85488','24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754',$patch$[["OR coalesce(nullif(child->'match_labels','null'::jsonb),'{}'::jsonb)<>'{}'::jsonb\n     OR child ? 'match_access_labels'", "OR coalesce(nullif(child->'match_labels','null'::jsonb),'{}'::jsonb)<>'{}'::jsonb"], ["kaname._authority_resource_selector_matches_v3(owner_selector,ancestor->>'object_type',ancestor->>'object_id',\n       coalesce(nullif(ancestor->'projection'->'labels','null'::jsonb),'{}'::jsonb),ancestor->'projection'->'access_labels')", "kaname._authority_resource_selector_matches_v2(owner_selector,ancestor->>'object_type',ancestor->>'object_id',\n       coalesce(nullif(ancestor->'projection'->'labels','null'::jsonb),'{}'::jsonb))"], ["kaname._authority_resource_selector_matches_v3(child_selector,dotted,identifier,coalesce(nullif(projection->'labels','null'::jsonb),'{}'::jsonb),projection->'access_labels')", "kaname._authority_resource_selector_matches_v2(child_selector,dotted,identifier,coalesce(nullif(projection->'labels','null'::jsonb),'{}'::jsonb))"], ["'match_labels',coalesce(nullif(owner_rule->'match_labels','null'::jsonb),'{}'::jsonb),\n     'match_access_labels',coalesce(owner_rule->'match_access_labels','{}'::jsonb));", "'match_labels',coalesce(nullif(owner_rule->'match_labels','null'::jsonb),'{}'::jsonb));"], ["'arm',CASE WHEN owner_rule ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(owner_rule->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN jsonb_array_length(coalesce(nullif(owner_rule->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"], ["'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),\n     'match_access_labels',coalesce(authored->'match_access_labels','{}'::jsonb));", "'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb));"], ["'arm',CASE WHEN authored ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"]]$patch$::jsonb),
+ ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','06ad18dacb82d2d271277a12d6a96562d95082f32f3f3b3a24a32378b4312824','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305',$patch$[["kaname._authority_resource_selector_matches_v3(selector,dotted,identifier,coalesce(nullif(object_row->'labels','null'::jsonb),'{}'::jsonb),object_row->'access_labels')", "kaname._authority_resource_selector_matches_v2(selector,dotted,identifier,coalesce(nullif(object_row->'labels','null'::jsonb),'{}'::jsonb))"], ["'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),\n  'match_access_labels',coalesce(authored->'match_access_labels','{}'::jsonb),", "'match_labels',coalesce(nullif(authored->'match_labels','null'::jsonb),'{}'::jsonb),"], ["'arm',CASE WHEN authored ? 'match_access_labels' THEN 'access_labels' WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'", "'arm',CASE WHEN jsonb_array_length(coalesce(nullif(authored->'resource_names','null'::jsonb),'[]'::jsonb))>0 THEN 'names'"]]$patch$::jsonb)
+ ) AS changes(signature,before_sha,after_sha,substitutions) LOOP
+  fn:=to_regprocedure('kaname.'||item.signature);
+  SELECT prosrc INTO STRICT old_body FROM pg_proc WHERE oid=fn;
+  IF encode(sha256(convert_to(old_body,'UTF8')),'hex') IS DISTINCT FROM item.before_sha THEN
+   RAISE EXCEPTION 'selector source baseline changed: %',item.signature USING ERRCODE='55000';END IF;
+  new_body:=old_body;
+  FOR pair IN SELECT value FROM jsonb_array_elements(item.substitutions) LOOP
+   IF length(new_body)-length(replace(new_body,pair->>0,'')) IS DISTINCT FROM length(pair->>0) THEN
+    RAISE EXCEPTION 'selector source substitution ambiguous' USING ERRCODE='55000';END IF;
+   new_body:=replace(new_body,pair->>0,pair->>1);
+  END LOOP;
+  IF encode(sha256(convert_to(new_body,'UTF8')),'hex') IS DISTINCT FROM item.after_sha THEN
+   RAISE EXCEPTION 'selector source calculated pin mismatch' USING ERRCODE='55000';END IF;
+  definition:=pg_get_functiondef(fn);
+  IF length(definition)-length(replace(definition,old_body,'')) IS DISTINCT FROM length(old_body) THEN
+   RAISE EXCEPTION 'selector source definition ambiguous' USING ERRCODE='55000';END IF;
+  EXECUTE replace(definition,old_body,new_body);
+ END LOOP;
+ IF NOT kaname._authority_full_contract_storage_v3() OR NOT kaname.authority_access_label_storage_valid_v1() THEN
+  RAISE EXCEPTION 'selector source closure mismatch' USING ERRCODE='55000';END IF;
+END $protected_selector_sources$;
+-- +goose StatementEnd
+ALTER TABLE kaname.roles DROP CONSTRAINT roles_access_label_rules_valid;
+DROP FUNCTION kaname.access_label_rules_valid_v1(jsonb);
+DROP FUNCTION kaname._authority_resource_selector_matches_v3(jsonb,text,text,jsonb,jsonb);

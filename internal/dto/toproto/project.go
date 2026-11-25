@@ -22,12 +22,13 @@ func (projectObj) toPb(p domain.Project) (*iamv1.Project, error) {
 		createdAt = timestamppb.New(p.CreatedAt.Truncate(tsTruncate))
 	}
 	return &iamv1.Project{
-		Id:          string(p.ID),
-		AccountId:   string(p.AccountID),
-		Name:        string(p.Name),
-		Description: string(p.Description),
-		Labels:      labelsToStringMap(p.Labels),
-		CreatedAt:   createdAt,
+		Id:           string(p.ID),
+		AccountId:    string(p.AccountID),
+		Name:         string(p.Name),
+		Description:  string(p.Description),
+		Labels:       labelsToStringMap(p.Labels),
+		AccessLabels: labelsToStringMap(p.AccessLabels),
+		CreatedAt:    createdAt,
 	}, nil
 }
 

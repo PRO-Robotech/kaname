@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 )
 
 // ProjectionCheckpoint описывает вычисление проекции, а не её присутствие в БД.
@@ -55,11 +56,18 @@ func (b *Bundle) Projection(role domain.Role) (RoleProjection, error) {
 		return RoleProjection{}, err
 	}
 	for _, cap := range caps {
-		dotted, verb := "iam.accessBinding", "create"
-		if cap.Kind == domain.GrantCapabilityBindRole {
-			dotted, verb = "iam.role", "bind"
+		switch cap.Kind {
+		case domain.GrantCapabilityCreateBinding, domain.GrantCapabilityBindRole:
+		case domain.GrantCapabilityApplyAccessLabel:
+			// Строка каталога сама по себе не доказывает точный native-план.
+			if err := b.GrantCapabilityPlan(grantcapability.AccessLabelObjectType, grantcapability.ApplyAccessLabelRelation); err != nil {
+				return RoleProjection{}, err
+			}
+		default:
+			return RoleProjection{}, fmt.Errorf("grant catalog axis unavailable")
 		}
-		if !b.compiler.facts.GrantVerb(dotted, verb) {
+		ref, _ := cap.Kind.RuleRef()
+		if !b.compiler.facts.GrantVerb(ref.Module+"."+ref.Resource, ref.Verb) {
 			return RoleProjection{}, fmt.Errorf("grant catalog axis unavailable")
 		}
 	}
@@ -163,18 +171,25 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, ca
 		Container    *domain.ContainerSelector
 		Creator      bool
 		Grants       map[string][]string
+		AccessLabels map[string]string `json:",omitempty"`
 	}
 	rows := []row{}
 	for _, s := range selectors {
 		if len(s.ObjectTypes) == 0 {
 			continue
 		}
-		arm := "anchor"
-		if s.Arm == domain.ArmNames {
+		var arm string
+		switch s.Arm {
+		case domain.ArmAnchor:
+			arm = "anchor"
+		case domain.ArmNames:
 			arm = "names"
-		}
-		if s.Arm == domain.ArmLabels {
+		case domain.ArmLabels:
 			arm = "labels"
+		case domain.ArmAccessLabels:
+			arm = "access_labels"
+		default:
+			return nil, fmt.Errorf("неподдерживаемая ветвь проекции роли: %d", s.Arm)
 		}
 		types := append([]string{}, s.ObjectTypes...)
 		names := append([]string{}, s.ResourceNames...)
@@ -191,6 +206,11 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, ca
 		}
 		var container *domain.ContainerSelector
 		if s.Container != nil {
+			switch s.Container.Arm {
+			case domain.ArmAnchor, domain.ArmNames, domain.ArmLabels, domain.ArmAccessLabels:
+			default:
+				return nil, fmt.Errorf("неподдерживаемая ветвь проекции контейнера: %d", s.Container.Arm)
+			}
 			copy := *s.Container
 			copy.OwnerFP = ""
 			copy.ResourceNames = append([]string{}, copy.ResourceNames...)
@@ -200,7 +220,17 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, ca
 			}
 			container = &copy
 		}
-		rows = append(rows, row{s.RuleFP, arm, types, names, labels, container, s.CreatedBySubject, grants})
+		// Only the protected arm introduces the optional field. A malformed ordinary
+		// selector must not erase a protected predicate from its checkpoint.
+		if err := validateProjectionAccessLabels(s.Arm, s.MatchAccessLabels, s.MatchLabels, s.ResourceNames, s.CreatedBySubject); err != nil {
+			return nil, err
+		}
+		if s.Container != nil {
+			if err := validateProjectionAccessLabels(s.Container.Arm, s.Container.MatchAccessLabels, s.Container.MatchLabels, s.Container.ResourceNames, false); err != nil {
+				return nil, err
+			}
+		}
+		rows = append(rows, row{s.RuleFP, arm, types, names, labels, container, s.CreatedBySubject, grants, s.MatchAccessLabels})
 	}
 	sort.Slice(rows, func(i, j int) bool { return rows[i].FP < rows[j].FP })
 	vv := append([]domain.RoleVerb{}, verbs...)
@@ -213,6 +243,28 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, ca
 	for _, batch := range capabilities {
 		caps = append(caps, batch...)
 	}
+	// Проекция роли не содержит scope: он принадлежит носителю. Идентификаторы
+	// разных управляющих осей не должны подменять друг друга в сохранённой строке.
+	for _, cap := range caps {
+		switch cap.Kind {
+		case domain.GrantCapabilityCreateBinding:
+			if cap.BoundRoleID != "" || cap.DefinitionID != "" {
+				return nil, fmt.Errorf("invalid create binding projection payload")
+			}
+		case domain.GrantCapabilityBindRole:
+			if cap.BoundRoleID == "" || cap.BoundRoleID == "*" || cap.DefinitionID != "" {
+				return nil, fmt.Errorf("invalid bind role projection payload")
+			}
+		case domain.GrantCapabilityApplyAccessLabel:
+			if cap.BoundRoleID != "" || cap.DefinitionID.Validate() != nil {
+				return nil, fmt.Errorf("invalid access label projection payload")
+			}
+		default:
+			return nil, fmt.Errorf("unsupported grant projection kind")
+		}
+	}
+	// DefinitionID уже входит в JSON и порядок сравнения. omitempty сохраняет
+	// байты прежних create/bind и потому их контрольные суммы без изменений.
 	sort.Slice(caps, func(i, j int) bool {
 		a, _ := json.Marshal(caps[i])
 		z, _ := json.Marshal(caps[j])
@@ -223,4 +275,27 @@ func ProjectionJSON(selectors []domain.RuleSelector, verbs []domain.RoleVerb, ca
 		Selectors    []row
 		Verbs        []domain.RoleVerb
 	}{caps, rows, vv})
+}
+
+// Optional JSON keeps the previous field order and bytes for every old selector.
+// Protected restrictions must never be dropped while building a checkpoint.
+func validateProjectionAccessLabels(arm domain.Arm, protected, ordinary map[string]string, names []string, creator bool) error {
+	if arm != domain.ArmAccessLabels {
+		if len(protected) != 0 {
+			return fmt.Errorf("access labels on a different selector arm")
+		}
+		return nil
+	}
+	if len(protected) == 0 || len(protected) > 16 || len(ordinary) != 0 || len(names) != 0 || creator {
+		return fmt.Errorf("invalid access label projection shape")
+	}
+	for key, value := range protected {
+		if err := domain.LabelKey(key).Validate(); err != nil {
+			return err
+		}
+		if err := domain.LabelVal(value).Validate(); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -47,6 +47,8 @@ type fakeNotifyQueue struct {
 	marked  []int64
 }
 
+func (*fakeNotifyQueue) DeferReconcileEvent(context.Context, int64) error { return nil }
+
 func (q *fakeNotifyQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox.Event, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()

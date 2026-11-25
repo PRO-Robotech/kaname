@@ -5,6 +5,7 @@ package granteffect
 
 import (
 	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
@@ -51,7 +52,7 @@ func (c *Compiler) derive(s *Set, typ, rel string, region []Constraint, conditio
 	}
 }
 
-func selectorRegion(arm domain.Arm, ids []string, labels map[string]string) (grantcoverage.Region, error) {
+func selectorRegion(arm domain.Arm, ids []string, labels, accessLabels map[string]string) (grantcoverage.Region, error) {
 	r := universe()
 	switch arm {
 	case domain.ArmAnchor:
@@ -64,10 +65,12 @@ func selectorRegion(arm domain.Arm, ids []string, labels map[string]string) (gra
 		if len(labels) == 0 {
 			return r, fmt.Errorf("empty label selector")
 		}
-		r.Labels = map[string]string{}
-		for k, v := range labels {
-			r.Labels[k] = v
+		r.Labels = maps.Clone(labels)
+	case domain.ArmAccessLabels:
+		if len(accessLabels) == 0 {
+			return r, fmt.Errorf("empty access label selector")
 		}
+		r.AccessLabels = maps.Clone(accessLabels)
 	default:
 		return r, fmt.Errorf("unknown selector arm")
 	}
@@ -92,7 +95,7 @@ func intersectTarget(r grantcoverage.Region, dotted string, t domain.AccessTarge
 }
 
 func (c *Compiler) selectorRegions(sel domain.RuleSelector, dotted, typ string, b Binding) ([][]Constraint, error) {
-	r, err := selectorRegion(sel.Arm, sel.ResourceNames, sel.MatchLabels)
+	r, err := selectorRegion(sel.Arm, sel.ResourceNames, sel.MatchLabels, sel.MatchAccessLabels)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +121,7 @@ func (c *Compiler) selectorRegions(sel domain.RuleSelector, dotted, typ string, 
 	if !ok {
 		return nil, fmt.Errorf("unknown parent type %s", sel.Container.Type)
 	}
-	cr, err := selectorRegion(sel.Container.Arm, sel.Container.ResourceNames, sel.Container.MatchLabels)
+	cr, err := selectorRegion(sel.Container.Arm, sel.Container.ResourceNames, sel.Container.MatchLabels, sel.Container.MatchAccessLabels)
 	if err != nil {
 		return nil, err
 	}

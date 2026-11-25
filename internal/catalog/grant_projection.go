@@ -20,6 +20,17 @@ type GrantProjection struct {
 }
 
 func (f *Facts) ProjectGrantRules(rules domain.Rules, policy domain.RulePolicy) (GrantProjection, error) {
+	return f.projectGrantRules(rules, policy, false)
+}
+
+// ProjectRoleMutationRules подготавливает proposed image под signed role writer.
+// Dedicated apply остаётся отдельной capability. Здесь вычисляются строки,
+// live axis и полномочия до записи подтверждает сам writer.
+func (f *Facts) ProjectRoleMutationRules(rules domain.Rules, policy domain.RulePolicy) (GrantProjection, error) {
+	return f.projectGrantRules(rules, policy, true)
+}
+
+func (f *Facts) projectGrantRules(rules domain.Rules, policy domain.RulePolicy, roleMutation bool) (GrantProjection, error) {
 	if f == nil {
 		return GrantProjection{}, fmt.Errorf("catalog facts unavailable")
 	}
@@ -35,10 +46,17 @@ func (f *Facts) ProjectGrantRules(rules domain.Rules, policy domain.RulePolicy) 
 		return GrantProjection{}, err
 	}
 	for _, cap := range caps {
-		dotted, verb := "iam.accessBinding", "create"
-		if cap.Kind == domain.GrantCapabilityBindRole {
-			dotted, verb = "iam.role", "bind"
+		switch cap.Kind {
+		case domain.GrantCapabilityCreateBinding, domain.GrantCapabilityBindRole:
+		case domain.GrantCapabilityApplyAccessLabel:
+			if !roleMutation {
+				return GrantProjection{}, fmt.Errorf("grant authoring axis is unavailable")
+			}
+		default:
+			return GrantProjection{}, fmt.Errorf("grant authoring axis is unavailable")
 		}
+		ref, _ := cap.Kind.RuleRef()
+		dotted, verb := ref.Module+"."+ref.Resource, ref.Verb
 		if !f.GrantVerb(dotted, verb) {
 			return GrantProjection{}, fmt.Errorf("grant authoring axis %s.%s is unavailable", dotted, verb)
 		}

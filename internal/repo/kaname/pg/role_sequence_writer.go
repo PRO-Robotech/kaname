@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
@@ -43,19 +44,33 @@ func (s *roleMutationStage) prepareSequenceProgram(ctx context.Context, w *autho
 	if err != nil {
 		return err
 	}
+	raw, err = s.roleAccessLabelAuthorityInput(raw)
+	if err != nil {
+		return err
+	}
 	var costJSON []byte
 	if err = w.tx.QueryRow(ctx, `SELECT kaname.authority_role_sequence_prepare_v3($1::jsonb,$2,$3)`, raw,
 		s.plan.nativeBudget.RemainingRows(), s.plan.nativeBudget.RemainingReads()).Scan(&costJSON); err != nil {
 		return err
 	}
 	var cost struct {
-		Rows  int `json:"rows"`
-		Reads int `json:"reads"`
+		Rows            int                 `json:"rows"`
+		Reads           int                 `json:"reads"`
+		AccessLabelMode roleAccessLabelMode `json:"access_label_mode"`
 	}
 	if err = json.Unmarshal(costJSON, &cost); err != nil {
 		return err
 	}
-	return chargeNativePolicyBudget(s.plan.nativeBudget, cost.Rows, cost.Reads)
+	if err = chargeNativePolicyBudget(s.plan.nativeBudget, cost.Rows, cost.Reads); err != nil {
+		return err
+	}
+	// Режим вычисляет owner из OLD/NEW, а не caller из предложенных правил.
+	// Он обязателен для любого prepare, включая обычное изменение metadata.
+	if err = cost.AccessLabelMode.requireSupported(); err != nil {
+		return err
+	}
+	s.accessLabelMode = cost.AccessLabelMode
+	return nil
 }
 func (w *preparedRoleWriteTx) RolesW() roleport.WriterIface {
 	return &preparedRoleRowWriter{WriterIface: w.semanticAuthorityWriteTx.RolesW(), owner: w}
@@ -93,7 +108,12 @@ func (w *preparedRoleRowWriter) Insert(ctx context.Context, r domain.Role) (doma
 	if !ok {
 		return domain.Role{}, kaname.ErrInvalidAuthorityFencePlan
 	}
-	return raw.insertAt(ctx, r, stamp)
+	w.owner.roleWriteStarted = true
+	inserted, err := raw.insertAt(ctx, r, stamp)
+	if err == nil {
+		w.owner.roleWriteSucceeded = true
+	}
+	return inserted, err
 }
 func (w *preparedRoleRowWriter) UpdateCAS(ctx context.Context, r domain.Role, mask []string, version string) (domain.Role, error) {
 	stamp, err := w.stamp(ctx, r, false, mask, version)
@@ -104,7 +124,12 @@ func (w *preparedRoleRowWriter) UpdateCAS(ctx context.Context, r domain.Role, ma
 	if !ok {
 		return domain.Role{}, kaname.ErrInvalidAuthorityFencePlan
 	}
-	return raw.updateCASAt(ctx, r, mask, version, stamp)
+	w.owner.roleWriteStarted = true
+	updated, err := raw.updateCASAt(ctx, r, mask, version, stamp)
+	if err == nil {
+		w.owner.roleWriteSucceeded = true
+	}
+	return updated, err
 }
 
 // Отзыв использует уже принятое время, а не новое clock_timestamp в emitter.
@@ -121,28 +146,6 @@ func emitPreparedBindingDelete(ctx context.Context, w *authorityWriteTx, tuples 
 
 // Декоратор времени сохраняет reference-порт только для уже закрытого stage.
 // Физические SHARE locks owner/axis/reference получены lockMutation до finalclock.
-func (w *preparedRoleRowWriter) LockGrantAuthoringAxes(ctx context.Context, caps []domain.GrantCapabilityRule) error {
-	if w.owner == nil || w.owner.stage == nil {
-		return kaname.ErrInvalidAuthorityFencePlan
-	}
-	for _, cap := range caps {
-		found := false
-		for _, expected := range w.owner.stage.projection.Capabilities {
-			if cap.Kind == expected.Kind && cap.BoundRoleID == expected.BoundRoleID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return kaname.ErrInvalidAuthorityFencePlan
-		}
-	}
-	refs, ok := w.WriterIface.(roleport.GrantReferenceReader)
-	if !ok {
-		return kaname.ErrInvalidAuthorityFencePlan
-	}
-	return refs.LockGrantAuthoringAxes(ctx, caps)
-}
 func (w *preparedRoleRowWriter) LockGrantOwnerAccount(ctx context.Context, r domain.Role) (domain.AccountID, error) {
 	if w.owner == nil || w.owner.stage == nil {
 		return "", kaname.ErrInvalidAuthorityFencePlan
@@ -179,3 +182,81 @@ func (w *preparedRoleRowWriter) LockGrantReference(ctx context.Context, id domai
 }
 
 var _ roleport.GrantReferenceReader = (*preparedRoleRowWriter)(nil)
+
+// Receipt envelope используется только prepare. Базовый roleSequenceInput и
+// stamp остаются прежними: frozen.request сравнивает именно исходную мутацию.
+func (s *roleMutationStage) roleAccessLabelAuthorityInput(raw []byte) ([]byte, error) {
+	newDefinitions := make(map[domain.AccessLabelDefinitionID]bool)
+	for _, cap := range s.projection.Capabilities {
+		if cap.Kind == domain.GrantCapabilityApplyAccessLabel {
+			newDefinitions[cap.DefinitionID] = true
+		}
+	}
+	// При обновлении правил owner сверяет прежнюю проекцию. Пустой NEW
+	// может снять последнее защищённое правило и всё равно требует actor.
+	if len(newDefinitions) == 0 && (!s.request.Update || !s.request.Rules) {
+		return raw, nil
+	}
+	if s.plan == nil || s.plan.native == nil {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	actor := s.plan.request.actor
+	if actor.Validate() != nil || (actor.Type != domain.SubjectTypeUser && actor.Type != domain.SubjectTypeServiceAccount) || !nativeQuestionToken(string(actor.ID)) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
+	subject := string(actor.Type) + ":" + string(actor.ID)
+	coordinates := make(map[[3]string]struct{})
+	for q := range s.plan.native.questions {
+		if q.objectType != grantcapability.AccessLabelObjectType || q.relation != grantcapability.ApplyAccessLabelRelation {
+			continue
+		}
+		c, err := grantcapability.Decode(grantcapability.Reference{ObjectType: q.objectType, ObjectID: q.objectID, Relation: q.relation})
+		if err != nil {
+			return nil, err
+		}
+		if !newDefinitions[c.DefinitionID] {
+			continue
+		}
+		if q.subject != subject || c.Kind != domain.GrantCapabilityApplyAccessLabel {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		coordinates[[3]string{c.Anchor.Type, c.Anchor.ID, string(c.DefinitionID)}] = struct{}{}
+	}
+	if len(coordinates) > nativeQuestionLimit {
+		return nil, kaname.ErrSourceReadLimit
+	}
+	keys := make([][3]string, 0, len(coordinates))
+	for key := range coordinates {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b [3]string) int {
+		for i := range a {
+			if a[i] < b[i] {
+				return -1
+			}
+			if a[i] > b[i] {
+				return 1
+			}
+		}
+		return 0
+	})
+	questions := make([]map[string]string, 0, len(keys))
+	for _, key := range keys {
+		questions = append(questions, map[string]string{"scope_kind": key[0], "scope_id": key[1], "definition_id": key[2]})
+	}
+	authority, err := json.Marshal(map[string]any{
+		"actor": map[string]string{"type": string(actor.Type), "id": string(actor.ID)}, "questions": questions,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(authority) > 8388608 {
+		return nil, kaname.ErrSourceReadLimit
+	}
+	var input map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &input); err != nil {
+		return nil, err
+	}
+	input["_access_label_authority"] = authority
+	return json.Marshal(input)
+}

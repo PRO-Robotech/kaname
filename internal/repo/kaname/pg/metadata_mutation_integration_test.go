@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 )
 
 type metadataWorld struct {
@@ -42,9 +43,20 @@ type metadataWorld struct {
 	ops             operations.Repo
 }
 
-func metadataFixture(t *testing.T, expiring bool) metadataWorld {
+func metadataFixture(t *testing.T, expiring bool, extra ...func(protocolRig)) metadataWorld {
 	t.Helper()
-	r := writerProtocolRig(t)
+	return metadataFixtureMode(t, expiring, "full", extra...)
+}
+
+func metadataFixtureMode(t *testing.T, expiring bool, mode string, extra ...func(protocolRig)) metadataWorld {
+	t.Helper()
+	return metadataFixtureModeWithRig(t, expiring, mode, writerProtocolRig(t), extra...)
+}
+
+// Позволяет установить реальные apply sources до PrepareAuthorityBundle.
+// Все обычные metadata fixtures сохраняют прежнюю подготовку и runtime LOGIN.
+func metadataFixtureModeWithRig(t *testing.T, expiring bool, mode string, r protocolRig, extra ...func(protocolRig)) metadataWorld {
+	t.Helper()
 	actor := seedMemberUser(t, r.ctx, r.admin, r.a, "metadata-editor")
 	outsider := seedMemberUser(t, r.ctx, r.admin, r.b, "metadata-outsider")
 	_, err := r.admin.Exec(r.ctx, `UPDATE kaname.users SET email_verified_at=clock_timestamp() WHERE id=ANY($1::text[])`, []string{actor, outsider, bindingPublicOwner(t, r)})
@@ -71,6 +83,9 @@ func metadataFixture(t *testing.T, expiring bool) metadataWorld {
 	require.ElementsMatch(t, []string{"account:" + r.a, "cluster:" + domain.ClusterSingletonID}, parents, "Дано: родительские связи проекта зафиксированы как в Project.Create")
 	sa := seedSA(t, r.ctx, lifecycleOwner(r), domain.AccountID(r.a), "metadata-service-account")
 	binding := groupLifecycleBinding(t, r, r.a, actor, "metadata_editor_role", domain.Rule{Module: "iam", Resources: []string{"account", "project", "serviceAccount"}, Verbs: []string{"update"}})
+	for _, seed := range extra {
+		seed(r)
+	}
 	source := rolePolicyCatalog(t, r)
 	engine := reconcile.New(kanamepg.NewReconcileAdapter(r.admin, source), slog.Default(), source)
 	require.NoError(t, engine.ReconcileBinding(r.ctx, binding))
@@ -86,13 +101,183 @@ func metadataFixture(t *testing.T, expiring bool) metadataWorld {
 	account, err := rd.Accounts().Get(r.ctx, domain.AccountID(r.a))
 	require.NoError(t, err)
 	require.NoError(t, rd.Rollback(r.ctx))
-	full, _ := fullContractActivate(t, r)
-	factory, err := kanamepg.NewMetadataMutationWriters(r.ctx, full, r.bundle)
+	full := r.repo
+	var factory *kanamepg.MetadataMutationWriters
+	switch mode {
+	case "full":
+		full, _ = fullContractActivate(t, r)
+		factory, err = kanamepg.NewMetadataMutationWriters(r.ctx, full, r.bundle)
+	case "prepared", "active":
+		if mode == "active" {
+			require.NoError(t, lifecycleOwner(r).ActivateAuthorityBundle(r.ctx, r.bundle))
+		}
+		lifecycleState(t, r, mode, map[string]string{"prepared": "compatibility", "active": "strict"}[mode])
+		var required, staged int
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT required_contract,staged_contract FROM kaname.authority_writer_contract WHERE singleton`).Scan(&required, &staged))
+		require.Equal(t, []int{1, 1}, []int{required, staged}, "staged metadata must exercise generation 1, not FULL")
+		factory, err = kanamepg.NewStagedMetadataMutationWriters(r.ctx, r.repo, r.bundle)
+	default:
+		t.Fatalf("unknown metadata fixture mode %q", mode)
+	}
 	require.NoError(t, err)
+	require.NotNil(t, factory)
 	plans, err := authzmodel.New(r.bundle.ModelSource())
 	require.NoError(t, err)
 	door := authzcascade.WrapAdmitted(relverdict.NewPreparedAsker(r.runtime, plans), personmarks.New(r.runtime))
 	return metadataWorld{r, full, factory, actor, outsider, account, project, sa, binding, door, operations.NewRepo(r.runtime, "kaname")}
+}
+
+func metadataLabelGrantTwins(t *testing.T, mode string) {
+	t.Helper()
+	for _, kind := range []string{"account", "project", "service_account"} {
+		t.Run(kind, func(t *testing.T) {
+			var recipient, authorizer string
+			var binding, editorBinding domain.AccessBindingID
+			resource := kind
+			if kind == "service_account" {
+				resource = "serviceAccount"
+			}
+			w := metadataFixtureMode(t, false, mode, func(r protocolRig) {
+				recipient = seedMemberUser(t, r.ctx, r.admin, r.a, "label-holder")
+				authorizer = bindingPublicOwner(t, r)
+				scope := domain.ScopeAnchor{Type: "account", ID: r.a}
+				if kind == "account" {
+					// Выдача на том же аккаунте создала бы неизменный scope-self
+					// кортеж. Здесь эффект появляется именно из селектора меток.
+					scope = domain.ScopeAnchor{Type: "cluster", ID: domain.ClusterSingletonID}
+					tx, err := r.admin.Begin(r.ctx)
+					require.NoError(t, err)
+					lifecycleRollback(t, tx)
+					_, _, err = kanamepg.NewClusterAdminGrantWriter(r.admin).Grant(r.ctx, tx, domain.GrantSubjectTypeUser, domain.SubjectID(authorizer), authorizer)
+					require.NoError(t, err)
+					require.NoError(t, kanamepg.NewFGAOutboxEmitter().EmitWriteTx(r.ctx, tx, fgaTuplesGrantSystemAdmin(authorizer)))
+					require.NoError(t, tx.Commit(r.ctx))
+				}
+				binding = scopedGroupLifecycleBinding(t, r, scope, recipient, "metadata_label_reader", domain.Rule{
+					Module: "iam", Resources: []string{resource}, Verbs: []string{"get"}, MatchLabels: map[string]string{"sharing": "enabled"},
+				})
+				other := seedMemberUser(t, r.ctx, r.admin, r.a, "other-label-holder")
+				scopedGroupLifecycleBinding(t, r, scope, other, "metadata_other_reader", domain.Rule{
+					Module: "iam", Resources: []string{resource}, Verbs: []string{"get"},
+				})
+				editorBinding = groupLifecycleBinding(t, r, r.a, authorizer, "metadata_grant_editor", domain.Rule{
+					Module: "iam", Resources: []string{resource}, Verbs: []string{"update"},
+				})
+			})
+			account := accountapp.NewUpdateAccountUseCase(w.full, w.ops).WithRelationStore(w.door, nil).WithAccountMetadataWriter(w.factory)
+			project := projectapp.NewUpdateProjectUseCase(w.full, w.ops).WithRelationStore(w.door, nil).WithProjectMetadataWriter(w.factory)
+			sa := saapp.NewUpdateServiceAccountUseCase(w.full, w.ops).WithServiceAccountMetadataWriter(w.factory)
+			update := func(actor string, labels domain.Labels, want codes.Code) {
+				t.Helper()
+				ctx := declarerCtx(w.r.ctx, actor)
+				var id string
+				if kind == "account" {
+					op, err := account.Execute(ctx, accountapp.UpdateAccountInput{ID: w.account.ID, Labels: labels, UpdateMask: []string{"labels"}})
+					require.NoError(t, err)
+					id = op.ID
+				} else if kind == "service_account" {
+					op, err := sa.Execute(ctx, saapp.UpdateServiceAccountInput{ID: w.sa.ID, Labels: labels, UpdateMask: []string{"labels"}})
+					require.NoError(t, err)
+					id = op.ID
+				} else {
+					op, err := project.Execute(ctx, projectapp.UpdateProjectInput{ID: w.project.ID, Labels: labels, UpdateMask: []string{"labels"}})
+					require.NoError(t, err)
+					id = op.ID
+				}
+				if failure := awaitOperation(t, w.r.ctx, w.ops, id).Error; failure != nil {
+					require.Equal(t, int32(want), failure.Code, failure.Message)
+					return
+				}
+				require.Equal(t, codes.OK, want)
+			}
+			rig := w.r
+			rig.repo = w.full
+			reconciler := bindingStageEngine(t, rig, nil)
+			require.NoError(t, reconciler.ReconcileBinding(w.r.ctx, editorBinding))
+			check := func(want bool) {
+				t.Helper()
+				require.NoError(t, reconciler.ReconcileBinding(w.r.ctx, binding))
+				var found bool
+				require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT EXISTS (
+					SELECT 1 FROM kaname.access_binding_emitted_tuples
+					WHERE binding_id=$1 AND fga_user=$2 AND relation='v_get')`, string(binding), "user:"+recipient).Scan(&found))
+				require.Equal(t, want, found)
+			}
+			check(false)
+			before := metadataSnapshot(t, w)
+			metadataRawLabelDenied(t, w, kind)
+			if mode == "full" {
+				tx, err := w.r.runtime.Begin(w.r.ctx)
+				require.NoError(t, err)
+				lifecycleRollback(t, tx)
+				identity := w.r.bundle.Identity()
+				_, err = tx.Exec(w.r.ctx, `SELECT kaname.authority_protocol_enter_typed_v3(
+				'accounts',ARRAY[$1],jsonb_build_array(jsonb_build_object('kind','account','id',$1)),
+				'resource',$2,$3,$4,'decision')`, w.r.a, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
+				require.NoError(t, err)
+				id := string(w.account.ID)
+				if kind == "project" {
+					id = string(w.project.ID)
+				} else if kind == "service_account" {
+					id = string(w.sa.ID)
+				}
+				_, err = tx.Exec(w.r.ctx, `SELECT * FROM kaname.authority_metadata_preflight_v4(
+				$1,$2,false,$3,'{"labels":{"sharing":"enabled"}}'::jsonb)`, kind, id, ids.NewID("aud"))
+				var denied *pgconn.PgError
+				require.ErrorAs(t, err, &denied)
+				require.Equal(t, "42501", denied.Code)
+				require.Contains(t, denied.Message, "v5")
+				require.NoError(t, tx.Rollback(w.r.ctx))
+			}
+			require.Equal(t, before, metadataSnapshot(t, w))
+			labels := domain.Labels{"sharing": "enabled"}
+			update(w.actor, labels, codes.PermissionDenied)
+			require.Equal(t, before, metadataSnapshot(t, w), "отказ сохраняет метки, аудит и журнал пересчёта")
+			check(false)
+
+			update(authorizer, labels, codes.OK)
+			check(true)
+			update(w.actor, domain.Labels{}, codes.OK)
+			check(false)
+		})
+	}
+}
+
+func TestStagedMetadataLabelChangeRequiresGrantForNewHolders(t *testing.T) {
+	for _, mode := range []string{"prepared", "active"} {
+		t.Run(mode, func(t *testing.T) { metadataLabelGrantTwins(t, mode) })
+	}
+}
+
+func TestFullMetadataLabelChangeRequiresGrantForNewHolders(t *testing.T) {
+	metadataLabelGrantTwins(t, "full")
+	t.Run("authored-rule-without-selector", func(t *testing.T) {
+		w := metadataFixture(t, false, func(r protocolRig) {
+			recipient := seedMemberUser(t, r.ctx, r.admin, r.a, "holder-without-selector")
+			id := groupLifecycleBinding(t, r, r.a, recipient, "metadata_unprojected_role", domain.Rule{
+				Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"},
+				MatchLabels: map[string]string{"sharing": "enabled"},
+			})
+			role := bindingRow(t, r, id).RoleID
+			// Воспроизводим историческое расхождение проекции до включения
+			// FULL: исходное правило остаётся, строка селектора отсутствует.
+			setup, err := lifecycleOwner(r).Writer(r.ctx)
+			require.NoError(t, err)
+			defer policyFixtureRollback(setup)
+			require.NoError(t, setup.RolesW().ReplaceRuleSelectors(r.ctx, role, nil))
+			require.NoError(t, setup.Commit(r.ctx))
+		})
+		before := metadataSnapshot(t, w)
+		project := w.project
+		project.Labels = domain.Labels{"sharing": "enabled"}
+		writer, err := w.factory.ProjectMetadataWriter(w.r.ctx, project, []string{"labels"}, w.subject(w.actor))
+		if writer != nil {
+			defer policyFixtureRollback(writer)
+		}
+		require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
+		require.Nil(t, writer)
+		require.Equal(t, before, metadataSnapshot(t, w))
+	})
 }
 func (w metadataWorld) subject(id string) domain.Subject {
 	return domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(id)}
@@ -130,6 +315,139 @@ func metadataSnapshot(t *testing.T, w metadataWorld) string {
  (SELECT count(*) FROM kaname.resource_reconcile_outbox))::text`, w.r.a, string(w.project.ID), string(w.sa.ID)).Scan(&state))
 	return state
 }
+
+// The old repository object has no metadata factory. Its real runtime LOGIN
+// must hit the account/project label row gate in both gen1 startup phases.
+func metadataRawLabelDenied(t *testing.T, w metadataWorld, kind string) {
+	t.Helper()
+	before := metadataSnapshot(t, w)
+	raw, err := w.full.Writer(w.r.ctx)
+	require.NoError(t, err)
+	defer func() { _ = raw.Rollback(context.WithoutCancel(w.r.ctx)) }()
+	switch kind {
+	case "account":
+		value := w.account
+		value.Labels = domain.Labels{"sharing": "enabled"}
+		_, err = raw.AccountsW().Update(w.r.ctx, value, []string{"labels"})
+	case "service_account":
+		value := w.sa
+		value.Labels = domain.Labels{"sharing": "enabled"}
+		_, err = raw.ServiceAccountsW().Update(w.r.ctx, value, []string{"labels"})
+	case "project":
+		value := w.project
+		value.Labels = domain.Labels{"sharing": "enabled"}
+		_, err = raw.ProjectsW().Update(w.r.ctx, value, []string{"labels"})
+	default:
+		t.Fatalf("label row gate fixture unsupported kind %q", kind)
+	}
+	// Repository.Update deliberately maps SQL failures instead of exposing
+	// PgError; its fixed diagnostic keeps the refusal SQLSTATE.
+	require.ErrorIs(t, err, iamerr.ErrInternal)
+	require.Contains(t, err.Error(), "sqlstate 42501")
+	require.NoError(t, raw.Rollback(w.r.ctx))
+	require.Equal(t, before, metadataSnapshot(t, w), "raw refusal must leave rows, audit and resource outboxes unchanged")
+}
+
+func TestStagedMetadataActualThreeUseCasesAndRawLabelGate(t *testing.T) {
+	for _, mode := range []string{"prepared", "active"} {
+		t.Run(mode, func(t *testing.T) {
+			w := metadataFixtureMode(t, false, mode)
+			ctx := declarerCtx(w.r.ctx, w.actor)
+			a := accountapp.NewUpdateAccountUseCase(w.full, w.ops).WithRelationStore(w.door, nil).WithAccountMetadataWriter(w.factory)
+			p := projectapp.NewUpdateProjectUseCase(w.full, w.ops).WithRelationStore(w.door, nil).WithProjectMetadataWriter(w.factory)
+			s := saapp.NewUpdateServiceAccountUseCase(w.full, w.ops).WithServiceAccountMetadataWriter(w.factory)
+			description := domain.Description("staged metadata committed")
+			ao, err := a.Execute(ctx, accountapp.UpdateAccountInput{ID: w.account.ID, Description: &description, UpdateMask: []string{"description"}})
+			require.NoError(t, err)
+			require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, ao.ID).Error)
+			po, err := p.Execute(ctx, projectapp.UpdateProjectInput{ID: w.project.ID, Description: &description, UpdateMask: []string{"description"}})
+			require.NoError(t, err)
+			require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, po.ID).Error)
+			so, err := s.Execute(ctx, saapp.UpdateServiceAccountInput{ID: w.sa.ID, Description: &description, UpdateMask: []string{"description"}})
+			require.NoError(t, err)
+			require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, so.ID).Error)
+			var matching, audits int
+			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT (SELECT count(*) FROM kaname.accounts WHERE id=$1 AND description=$4)+(SELECT count(*) FROM kaname.projects WHERE id=$2 AND description=$4)+(SELECT count(*) FROM kaname.service_accounts WHERE id=$3 AND description=$4)`, w.r.a, string(w.project.ID), string(w.sa.ID), string(description)).Scan(&matching))
+			require.Equal(t, 3, matching)
+			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT count(*) FROM kaname.audit_outbox WHERE event_payload->>'actor'=$1 AND event_payload->>'resource_id'=ANY($2::text[])`, w.actor, []string{w.r.a, string(w.project.ID), string(w.sa.ID)}).Scan(&audits))
+			require.Equal(t, 3, audits)
+			for _, kind := range []string{"account", "project"} {
+				metadataRawLabelDenied(t, w, kind)
+			}
+			// Configured absence must fail even where compatibility would allow
+			// an ordinary description writer; it cannot silently select raw.
+			before := metadataSnapshot(t, w)
+			nilUC := accountapp.NewUpdateAccountUseCase(w.full, w.ops).WithRelationStore(w.door, nil).WithAccountMetadataWriter(nil)
+			description = "must not reach raw writer"
+			failed, err := nilUC.Execute(ctx, accountapp.UpdateAccountInput{ID: w.account.ID, Description: &description, UpdateMask: []string{"description"}})
+			require.NoError(t, err)
+			failure := awaitOperation(t, w.r.ctx, w.ops, failed.ID).Error
+			require.NotNil(t, failure)
+			require.Equal(t, int32(codes.Unavailable), failure.Code)
+			require.Equal(t, before, metadataSnapshot(t, w))
+			if mode == "prepared" {
+				// Отзыв handoff закрывает семантический вход. Даже пока протокол
+				// остаётся в compatibility, старый writer не получает путь к меткам.
+				require.NoError(t, lifecycleOwner(w.r).CloseAuthorityBundle(w.r.ctx))
+				lifecycleState(t, w.r, "transition", "compatibility")
+				factory, err := kanamepg.NewStagedMetadataMutationWriters(w.r.ctx, w.r.repo, w.r.bundle)
+				require.ErrorIs(t, err, kaname.ErrSemanticIdentityUnavailable)
+				require.Nil(t, factory)
+				for _, kind := range []string{"account", "project"} {
+					metadataRawLabelDenied(t, w, kind)
+				}
+			}
+		})
+	}
+}
+
+func TestLegacyMetadataUsesInstalledLabelAuthority(t *testing.T) {
+	w := metadataFixtureMode(t, false, "prepared")
+	model := w.r.bundle.ModelSource()
+	factory, required, err := w.r.repo.LoadLegacyLabelAuthority(w.r.ctx, model)
+	require.NoError(t, err)
+	require.True(t, required)
+	require.NotNil(t, factory)
+
+	ownerFactory, ownerRequired, err := lifecycleOwner(w.r).LoadLegacyLabelAuthority(w.r.ctx, model)
+	require.Error(t, err, "owner DSN не заменяет обычный runtime LOGIN")
+	require.True(t, ownerRequired)
+	require.Nil(t, ownerFactory)
+
+	ctx := declarerCtx(w.r.ctx, w.actor)
+	project := projectapp.NewUpdateProjectUseCase(w.r.repo, w.ops).WithRelationStore(w.door, nil).WithProjectLabelAuthorityWriter(factory)
+	labels := domain.Labels{"metadata-test": "prepared"}
+	op, err := project.Execute(ctx, projectapp.UpdateProjectInput{ID: w.project.ID, Labels: labels, UpdateMask: []string{"labels"}})
+	require.NoError(t, err)
+	require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, op.ID).Error)
+
+	require.NoError(t, lifecycleOwner(w.r).CloseAuthorityBundle(w.r.ctx))
+	factory, required, err = w.r.repo.LoadLegacyLabelAuthority(w.r.ctx, model)
+	require.ErrorIs(t, err, kaname.ErrSemanticIdentityUnavailable)
+	require.True(t, required)
+	require.Nil(t, factory)
+	project.WithProjectLabelAuthorityWriter(nil)
+
+	// Без labels в теле обычный PATCH описания не записывает метки,
+	// поэтому закрытый handoff не мешает этой совместимой операции.
+	description := domain.Description("legacy metadata description")
+	op, err = project.Execute(ctx, projectapp.UpdateProjectInput{ID: w.project.ID, Description: &description})
+	require.NoError(t, err)
+	require.Nil(t, awaitOperation(t, w.r.ctx, w.ops, op.ID).Error)
+	var storedDescription, storedLabel string
+	require.NoError(t, w.r.runtime.QueryRow(w.r.ctx, `SELECT description,labels->>'metadata-test' FROM kaname.projects WHERE id=$1`, string(w.project.ID)).Scan(&storedDescription, &storedLabel))
+	require.Equal(t, string(description), storedDescription)
+	require.Equal(t, string(labels["metadata-test"]), storedLabel)
+
+	before := metadataSnapshot(t, w)
+	op, err = project.Execute(ctx, projectapp.UpdateProjectInput{ID: w.project.ID, UpdateMask: []string{"labels"}})
+	require.NoError(t, err)
+	failure := awaitOperation(t, w.r.ctx, w.ops, op.ID).Error
+	require.NotNil(t, failure)
+	require.Equal(t, int32(codes.Unavailable), failure.Code)
+	require.Equal(t, before, metadataSnapshot(t, w))
+}
+
 func TestFullMetadataActualThreeUseCasesAndDeniedNoEffects(t *testing.T) {
 	w := metadataFixture(t, false)
 	ctx := declarerCtx(w.r.ctx, w.actor)
@@ -451,5 +769,35 @@ func TestFullMetadataLocalRenameAndDescriptionCommitBesideForeignInsert(t *testi
 				require.NoError(t, foreign.Rollback(w.r.ctx))
 			})
 		}
+	}
+}
+
+func TestMetadataAccessLabelPortsRequireInstalledContract(t *testing.T) {
+	for _, mode := range []string{"full", "prepared"} {
+		t.Run(mode, func(t *testing.T) {
+			w := metadataFixtureMode(t, false, mode)
+			ports, err := w.factory.WithInstalledAccessLabels(w.r.ctx)
+			require.NoError(t, err)
+			_, account := ports.(kaname.AccountAccessLabelsWriterFactory)
+			_, project := ports.(kaname.ProjectAccessLabelsWriterFactory)
+			require.True(t, account)
+			require.True(t, project)
+			_, serviceAccount := ports.(kaname.ServiceAccountAccessLabelsWriterFactory)
+			require.True(t, serviceAccount)
+
+			var ready bool
+			require.NoError(t, w.r.runtime.QueryRow(w.r.ctx,
+				`SELECT kaname.authority_metadata_access_label_ready_v2('metadata-access-label/previous')`).Scan(&ready))
+			require.False(t, ready)
+			_, err = w.r.admin.Exec(w.r.ctx, `ALTER TABLE kaname.projects DISABLE TRIGGER access_labels_000_commit_freshness`)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, restore := w.r.admin.Exec(w.r.ctx, `ALTER TABLE kaname.projects ENABLE TRIGGER access_labels_000_commit_freshness`)
+				require.NoError(t, restore)
+			})
+			ports, err = w.factory.WithInstalledAccessLabels(w.r.ctx)
+			require.ErrorIs(t, err, kaname.ErrSemanticIdentityUnavailable)
+			require.Nil(t, ports)
+		})
 	}
 }

@@ -147,7 +147,7 @@ ground(kind, subject, detail, scope_type, scope_id) AS (
     -- называется рядом с отношением: обратный вопрос его не вычисляет (доводов
     -- запроса у него нет), и промолчать о нём значило бы выдать условное
     -- основание за безусловное.
-    SELECT 'fact'::text, f.subject,
+    SELECT CASE WHEN ` + factFreshSQL + ` IS TRUE THEN 'fact'::text ELSE '` + pendingFactArm + `'::text END, f.subject,
            f.relation || CASE WHEN f.condition_name <> ''
                               THEN ' (условие ' || f.condition_name || ')'
                               ELSE '' END,
@@ -201,7 +201,7 @@ SELECT 'group'::text,
 // ровно потому, что он подставляет свой.
 func expandQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(expandSQL, armPredicateMark,
-		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels", nesting))
+		grantArmPredicate("$7::text", "$1::text", "$2::text", "m.labels", "m.access_labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -254,6 +254,9 @@ func expandPrepared(ctx context.Context, q pgx.Tx, plans PlanSource, objectType,
 		var s Source
 		if err := rows.Scan(&s.Kind, &s.Subject, &s.Detail, &s.ScopeType, &s.ScopeID); err != nil {
 			return nil, fmt.Errorf("relverdict: чтение основания: %w", err)
+		}
+		if s.Kind == pendingFactArm {
+			return nil, ErrAccessLabelProjectionPending
 		}
 		out = append(out, s)
 	}

@@ -153,6 +153,10 @@ func (rs Rules) ScopeSelfVerbs(scopeResource string, typeVerbs []string) []strin
 	var collected []string
 	matched := false
 	for _, r := range rs {
+		// Новый selector требует проверки объекта; без неё якорь не выдаём.
+		if r.MatchAccessLabels != nil {
+			continue
+		}
 		applies := false
 		if r.Module == wildcard {
 			// FULL `*.*` superuser shape; a half-wildcard (`*.concrete`/`concrete.*`)

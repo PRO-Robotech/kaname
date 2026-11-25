@@ -6,9 +6,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"slices"
 	"time"
 
+	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
@@ -17,10 +19,55 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// MetadataMutationWriters is an explicit full-generation composition port.
-// Repository.Writer is never changed. These methods do not serve create/delete,
-// enabled-state, owner, parent, or identity mutations.
+// MetadataMutationWriters обслуживает правки метаданных в явно выбранном
+// контракте записи. Создание, удаление и смена владельца идут через свои порты.
 type MetadataMutationWriters struct{ policy *GrantPolicyWriters }
+
+// LoadLegacyLabelAuthority подключает установленный gen1 handoff к правкам
+// меток без смены participation. Второй результат означает, что изменения
+// меток требуют этой фабрики даже при ошибке её загрузки.
+func (r *Repository) LoadLegacyLabelAuthority(ctx context.Context, model string, keys ...authzmodel.KeyTerm) (*MetadataMutationWriters, bool, error) {
+	var phase string
+	if err := r.master.QueryRow(ctx, `SELECT phase FROM kaname.authority_semantic_identity WHERE singleton`).Scan(&phase); err != nil {
+		return nil, true, err
+	}
+	switch phase {
+	case "uninitialized":
+		return nil, false, nil
+	case "prepared", "active":
+		bundle, err := r.LoadAuthorityBundle(ctx, model, keys...)
+		if err != nil {
+			return nil, true, err
+		}
+		writers, err := NewStagedMetadataMutationWriters(ctx, r, bundle)
+		return writers, true, err
+	default:
+		// После закрытия handoff SQL по-прежнему требует доказательство
+		// для правки меток. Начинать обычную запись здесь нельзя.
+		return nil, true, kaname.ErrSemanticIdentityUnavailable
+	}
+}
+
+// NewStagedMetadataMutationWriters проверяет доступность подписанного metadata
+// entry поколения 1 для указанного bundle и текущего runtime LOGIN.
+func NewStagedMetadataMutationWriters(ctx context.Context, repo *Repository, bundle *granteffect.Bundle) (*MetadataMutationWriters, error) {
+	if repo == nil || repo.fullContract != nil {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	policy, err := NewGrantPolicyWriters(ctx, repo, bundle)
+	if err != nil {
+		return nil, err
+	}
+	id := bundle.Identity()
+	var ready bool
+	if err := repo.master.QueryRow(ctx, `SELECT kaname.authority_metadata_staged_ready_v1($1,$2,$3)`, id.ModelID, id.CatalogID, id.ProjectorVersion).Scan(&ready); err != nil {
+		return nil, errors.Join(kaname.ErrSemanticIdentityUnavailable, err)
+	}
+	if !ready {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	return &MetadataMutationWriters{policy: policy}, nil
+}
 
 func NewMetadataMutationWriters(ctx context.Context, repo *Repository, bundle *granteffect.Bundle) (*MetadataMutationWriters, error) {
 	if repo == nil || !repo.fullContractMatches(bundle) {
@@ -36,10 +83,10 @@ func NewMetadataMutationWriters(ctx context.Context, repo *Repository, bundle *g
 	return &MetadataMutationWriters{policy: policy}, nil
 }
 func (p *MetadataMutationWriters) AccountMetadataWriter(ctx context.Context, a domain.Account, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
-	return p.open(ctx, metadataMutation{kind: "account", table: "accounts", typ: "account", id: string(a.ID), name: string(a.Name), description: string(a.Description), labels: a.Labels, mask: slices.Clone(mask)}, actor)
+	return p.open(ctx, metadataMutation{kind: "account", table: "accounts", typ: "account", id: string(a.ID), name: string(a.Name), description: string(a.Description), labels: a.Labels, accessLabels: a.AccessLabels, mask: slices.Clone(mask)}, actor)
 }
 func (p *MetadataMutationWriters) ProjectMetadataWriter(ctx context.Context, a domain.Project, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
-	return p.open(ctx, metadataMutation{kind: "project", table: "projects", typ: "project", id: string(a.ID), name: string(a.Name), description: string(a.Description), labels: a.Labels, mask: slices.Clone(mask)}, actor)
+	return p.open(ctx, metadataMutation{kind: "project", table: "projects", typ: "project", id: string(a.ID), name: string(a.Name), description: string(a.Description), labels: a.Labels, accessLabels: a.AccessLabels, mask: slices.Clone(mask)}, actor)
 }
 func (p *MetadataMutationWriters) ServiceAccountMetadataWriter(ctx context.Context, a domain.ServiceAccount, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
 	return p.open(ctx, metadataMutation{kind: "service_account", table: "service_accounts", typ: "iam_service_account", id: string(a.ID), name: string(a.Name), description: string(a.Description), labels: a.Labels, mask: slices.Clone(mask)}, actor)
@@ -47,40 +94,120 @@ func (p *MetadataMutationWriters) ServiceAccountMetadataWriter(ctx context.Conte
 
 type metadataMutation struct {
 	kind, table, typ, id, name, description string
-	labels                                  domain.Labels
+	labels, accessLabels                    domain.Labels
+	mode                                    metadataMutationMode
 	mask                                    []string
 }
+
+// nativeCatalogType подтверждает закрытое соответствие вида, модели и
+// физической таблицы до чтения строки или расчёта затронутых выдач.
+func (r metadataMutation) nativeCatalogType() string {
+	switch {
+	case r.kind == "account" && r.table == "accounts" && r.typ == "account":
+		return "iam.account"
+	case r.kind == "project" && r.table == "projects" && r.typ == "project":
+		return "iam.project"
+	case r.kind == "service_account" && r.table == "service_accounts" && r.typ == "iam_service_account":
+		return "iam.serviceAccount"
+	default:
+		return ""
+	}
+}
+
 type metadataStage struct {
 	request metadataMutation
 	xmin    string
 	auditID domain.AuditEventID
 	old     json.RawMessage
 	rename  bool
+	changed []string
 	plan    *policyPlan
+	grant   *metadataGrantCapture
 }
 
-func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request metadataMutation, actor domain.Subject) (*metadataStage, error) {
-	// table is selected solely by the three closed methods above.
+func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request metadataMutation, actor domain.Subject, patch metadataMutationPatch) (*metadataStage, error) {
+	if request.catalogType() == "" || !nativeQuestionToken(request.id) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
 	s := &metadataStage{request: request, auditID: domain.AuditEventID(newAuditEventID())}
-	if err := tx.QueryRow(ctx, `SELECT xmin::text,to_jsonb(o) FROM kaname.`+request.table+` o WHERE id=$1`, request.id).Scan(&s.xmin, &s.old); err != nil {
-		return nil, err
+	var scope mirrorMetadataScope
+	rootRows := 1
+	if request.table == "resource_mirror" {
+		var err error
+		scope, err = s.readMirrorRoot(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		request = s.request
+		rootRows = 3 // Зеркало, тип и объектное действие каталога.
+		if scope.project != "" {
+			rootRows++
+		}
+	} else {
+		// Имя таблицы проверено по закрытому списку IAM.
+		if err := tx.QueryRow(ctx, `SELECT xmin::text,to_jsonb(o) FROM kaname.`+request.table+` o WHERE id=$1`, request.id).Scan(&s.xmin, &s.old); err != nil {
+			return nil, err
+		}
 	}
 	var old struct {
-		Name        string             `json:"name"`
-		Owner       string             `json:"owner_user_id"`
-		CreatorType domain.SubjectType `json:"created_by_type"`
-		CreatorID   domain.SubjectID   `json:"created_by_id"`
+		Name         string             `json:"name"`
+		Description  string             `json:"description"`
+		Labels       json.RawMessage    `json:"labels"`
+		AccessLabels json.RawMessage    `json:"access_labels"`
+		Owner        string             `json:"owner_user_id"`
+		CreatorType  domain.SubjectType `json:"created_by_type"`
+		CreatorID    domain.SubjectID   `json:"created_by_id"`
 	}
 	if err := json.Unmarshal(s.old, &old); err != nil {
 		return nil, err
 	}
-	s.rename = (len(request.mask) == 0 || slices.Contains(request.mask, "name")) && old.Name != request.name
+	s.rename = patch.Name != nil && old.Name != request.name
+	if s.rename {
+		s.changed = append(s.changed, "name")
+	}
+	if patch.Description != nil && old.Description != request.description {
+		s.changed = append(s.changed, "description")
+	}
+	if len(patch.Labels) != 0 {
+		before, err := unmarshalLabels(old.Labels)
+		if err != nil {
+			return nil, err
+		}
+		if !maps.Equal(before, request.labels) {
+			s.changed = append(s.changed, "labels")
+		}
+	}
+	if len(patch.AccessLabels) != 0 {
+		var before domain.Labels
+		// Для проверки нужен валидный объект со старыми защищёнными метками.
+		// Отсутствие данных или null означает, что источник не подтверждён.
+		if len(old.AccessLabels) == 0 || string(old.AccessLabels) == "null" {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		if err := json.Unmarshal(old.AccessLabels, &before); err != nil || before == nil || before.Validate() != nil {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		var after domain.Labels
+		if err := json.Unmarshal(patch.AccessLabels, &after); err != nil || after == nil || after.Validate() != nil {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		if !maps.Equal(before, after) {
+			s.changed = append(s.changed, "access_labels")
+		}
+	}
 	questions := newNativePolicyQuestions()
 	if err := questions.add(actor, "v_update", request.typ, request.id); err != nil {
 		return nil, err
 	}
+	owners := []kaname.AuthorityOwnerRef{{Kind: request.kind, ID: request.id}}
+	if request.table == "resource_mirror" {
+		owners = []kaname.AuthorityOwnerRef{{Kind: "account", ID: scope.account}}
+		if scope.project != "" {
+			owners = append(owners, kaname.AuthorityOwnerRef{Kind: "project", ID: scope.project})
+		}
+	}
 	in := policyWriteRequest{actor: actor, kind: kaname.AuthorityResource,
-		owners: []kaname.AuthorityOwnerRef{{Kind: request.kind, ID: request.id}}, nativeQuestions: questions, consumedReads: 1}
+		owners: owners, nativeQuestions: questions, consumedReads: 1}
 	// Actual policy_epoch UPDATE keys must be exclusive before the final clock.
 	// The unchanged owner/creator is read from OLD, never trusted from the PATCH.
 	if request.kind == "account" {
@@ -93,47 +220,62 @@ func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request 
 		}
 	}
 	var err error
-	s.plan, err = p.policy.discoverPolicyPlanWithRows(ctx, tx, in, 1)
+	s.grant, err = captureMetadataGrant(ctx, tx, p.policy.bundle, request, scope, rootRows, s.old, patch.Labels, patch.AccessLabels)
 	if err != nil {
 		return nil, err
 	}
-	return s, nil
+	if s.grant == nil {
+		s.plan, err = p.policy.discoverPolicyPlanWithRows(ctx, tx, in, rootRows)
+		return s, err
+	}
+	in.global = in.global || s.grant.mirrorPolicyGlobal
+	in.readRoles = s.grant.roles
+	if s.grant.retained != nil {
+		if err = s.grant.retained.extendRequest(&in); err != nil {
+			return nil, err
+		}
+	}
+	for _, seen := range s.grant.bindings {
+		if !seen.Changes {
+			continue
+		}
+		if err = questions.bindingRole(actor, seen.Binding.Scope, seen.Binding.Role); err != nil {
+			return nil, err
+		}
+	}
+	s.plan, err = p.policy.discoverPolicyPlanWithRows(ctx, tx, in, rootRows, s.grant.source.budget)
+	return s, err
 }
 func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMutation, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
+	if request.table == "resource_mirror" {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
+	writer, err := p.openMetadataTx(ctx, request, actor)
+	if err != nil {
+		return nil, err
+	}
+	return writer, nil
+}
+
+func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request metadataMutation, actor domain.Subject) (*metadataWriteTx, error) {
 	if p == nil || p.policy == nil || p.policy.repo == nil || !nativeQuestionToken(request.id) || actor.Validate() != nil {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
-	for _, field := range request.mask {
-		if field != "name" && field != "description" && field != "labels" {
-			return nil, kaname.ErrInvalidAuthorityFencePlan
-		}
-	}
-	// Exact NEW journal origin выводится из того же mask, что actual UPDATE.
-	// Caller передаёт только metadata intent, а server compiler читает locked OLD.
-	patch := map[string]any{}
-	fields := request.mask
-	if len(fields) == 0 {
-		fields = []string{"name", "description", "labels"}
-	}
-	for _, field := range fields {
-		switch field {
-		case "name":
-			patch[field] = request.name
-		case "description":
-			patch[field] = request.description
-		case "labels":
-			encoded, err := marshalLabels(request.labels)
-			if err != nil {
-				return nil, err
-			}
-			patch[field] = json.RawMessage(encoded)
-		}
+	patch, err := prepareMetadataMutationPatch(request)
+	if err != nil {
+		return nil, err
 	}
 	encodedPatch, err := json.Marshal(patch)
 	if err != nil {
 		return nil, err
 	}
-	conn, err := p.policy.repo.master.Acquire(ctx)
+	repo := p.policy.repo
+	purpose := "decision"
+	if repo.fullContract == nil {
+		// Gen1 допускает participant и на prepared, и на active handoff.
+		purpose = "participant"
+	}
+	conn, err := repo.master.Acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -148,12 +290,18 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 		if err != nil {
 			return nil, err
 		}
-		stage, err := p.stage(ctx, snapshot, request, actor)
+		stage, err := p.stage(ctx, snapshot, request, actor, patch)
 		if cleanup := policyRollback(ctx, snapshot); cleanup != nil {
 			return nil, errors.Join(err, cleanup)
 		}
 		if err != nil {
 			return nil, err
+		}
+		// Классификация RR различает все маски. Текущий owner ABI допускает
+		// только действительную смену access_labels; закрываем попытку до RC.
+		if request.table == "resource_mirror" && !slices.Contains(stage.changed, "access_labels") {
+			stage.grant.source.lifetime.close()
+			return nil, kaname.ErrSemanticIdentityUnavailable
 		}
 		intent := stage.plan.intent(p.policy.bundle)
 		if err = validateAuthorityIntent(intent); err != nil {
@@ -167,27 +315,52 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 		if err != nil {
 			return nil, err
 		}
-		w, err := p.policy.repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, "decision", stage.plan)
-		if err == nil {
-			err = p.policy.protectPolicyPlan(ctx, w, stage.plan)
+		protectedChange := request.mode == metadataMutationAccessLabels && slices.Contains(stage.changed, "access_labels")
+		firstRead, finalRead := policyPlanOrdinaryRead, policyPlanOrdinaryRead
+		if protectedChange {
+			firstRead = policyPlanBeforeMetadataFreeze
+			finalRead = policyPlanBeforeMetadataWrite
 		}
-		// Signed entry/fences precede physical table/row/index waits. The SQL helper
-		// takes SRE ONLY for an effective rename; normal metadata takes RowExclusive.
-		var xmin string
-		var current json.RawMessage
-		if err == nil {
-			err = chargeNativePolicyBudget(stage.plan.nativeBudget, 4, 23)
+		protectedWork := metadataProtectedWorkLimit
+		w, err := repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, purpose, stage.plan)
+		if err == nil && protectedChange {
+			err = stage.prepareProtected(ctx, tx, patch.AccessLabels, &protectedWork)
 		}
 		if err == nil {
-			err = tx.QueryRow(ctx, `SELECT row_xmin,row_value FROM kaname.authority_metadata_preflight_v4($1,$2,$3,$4,$5::jsonb)`, request.kind, request.id, stage.rename, string(stage.auditID), encodedPatch).Scan(&xmin, &current)
+			err = p.policy.protectPolicyPlanAt(ctx, w, stage.plan, firstRead)
 		}
-		if err == nil && (xmin != stage.xmin || string(current) != string(stage.old)) {
-			err = kaname.ErrAuthorityClassificationChanged
+		if err == nil && protectedChange {
+			err = stage.freezeProtected(ctx, tx, p.policy.bundle, actor, encodedPatch, &protectedWork)
 		}
-		// No mutation has happened. Recheck the entire captured generation after
-		// the last physical wait, then refresh decision_at and ask OLD native rights.
+		if err == nil && !protectedChange {
+			// При прежнем значении accessLabels проверяем обычную маску
+			// и не резервируем запись защищённого атрибута.
+			body := encodedPatch
+			if request.mode == metadataMutationAccessLabels {
+				ordinary := patch
+				ordinary.AccessLabels = nil
+				body, err = json.Marshal(ordinary)
+			}
+			if err == nil {
+				var preflight metadataPreflightResult
+				preflight, err = stage.preflight(ctx, tx, actor, body, repo.fullContract == nil)
+				if err == nil && (preflight.RowXmin != stage.xmin || string(preflight.RowValue) != string(stage.old)) {
+					err = kaname.ErrAuthorityClassificationChanged
+				}
+			}
+		}
+		if err == nil && stage.grant != nil {
+			// Metadata preflight удерживает корневую и локальную генерации привязок. Сверяем
+			// также пустые предикаты и весь набор до обновления decision_at.
+			err = stage.grant.recheck(ctx, w)
+			if err == nil {
+				err = stage.grant.verifyProjections(ctx, newSemanticAuthorityWriter(w, p.policy.bundle))
+			}
+		}
+		// До записи сверяем поколение после физических ожиданий, обновляем
+		// decision_at и спрашиваем право на OLD и на добавленный эффект.
 		if err == nil {
-			err = p.policy.protectPolicyPlan(ctx, w, stage.plan)
+			err = p.policy.protectPolicyPlanAt(ctx, w, stage.plan, finalRead)
 		}
 		if err == nil {
 			_, err = tx.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`)
@@ -195,18 +368,40 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 		if err == nil {
 			semantic := newSemanticAuthorityWriter(w, p.policy.bundle)
 			var allowed bool
-			allowed, err = semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", request.typ+":"+request.id)
+			allowed, err = semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", stage.request.typ+":"+stage.request.id)
 			if err == nil && !allowed {
 				err = iamerr.Wrapf(iamerr.ErrPermissionDenied, "Metadata update authority denied")
+			}
+			if err == nil && stage.grant != nil {
+				err = stage.grant.authorize(ctx, semantic, actor)
+			}
+			if err == nil && protectedChange {
+				err = stage.approveProtectedApply(ctx, semantic, actor, &protectedWork)
 			}
 			if err == nil {
 				err = ctx.Err()
 			}
 			if err == nil {
+				if stage.grant != nil {
+					stage.grant.source.lifetime.close()
+				}
 				w.tx = &policyLeaseTx{Tx: tx, conn: conn}
 				transferred = true
-				return &metadataWriteTx{semanticAuthorityWriteTx: semantic, auditID: stage.auditID}, nil
+				out := &metadataWriteTx{semanticAuthorityWriteTx: semantic, auditID: stage.auditID, changed: stage.changed}
+				if request.mode == metadataMutationAccessLabels {
+					out.protected = &metadataProtectedWrite{
+						root: stage.request.catalogRef(), patch: encodedPatch,
+						changesLabel: protectedChange,
+					}
+					if stage.request.table == "resource_mirror" {
+						out.protected.mirrorOld = stage.old
+					}
+				}
+				return out, nil
 			}
+		}
+		if stage.grant != nil {
+			stage.grant.source.lifetime.close()
 		}
 		if cleanup := policyRollback(ctx, tx); cleanup != nil {
 			return nil, errors.Join(err, cleanup)
@@ -227,6 +422,12 @@ type metadataWriteTx struct {
 	*semanticAuthorityWriteTx
 	auditID   domain.AuditEventID
 	auditUsed bool
+	changed   []string
+	protected *metadataProtectedWrite
+}
+
+func (w *metadataWriteTx) MetadataChangedFields() []string {
+	return slices.Clone(w.changed)
 }
 
 func (w *metadataWriteTx) EmitAuditEvent(ctx context.Context, ev service.AuditEvent) error {
@@ -245,3 +446,4 @@ func (w *metadataWriteTx) Rollback(ctx context.Context) error {
 var _ kaname.AccountMetadataWriterFactory = (*MetadataMutationWriters)(nil)
 var _ kaname.ProjectMetadataWriterFactory = (*MetadataMutationWriters)(nil)
 var _ kaname.ServiceAccountMetadataWriterFactory = (*MetadataMutationWriters)(nil)
+var _ kaname.MetadataUpdateEffects = (*metadataWriteTx)(nil)

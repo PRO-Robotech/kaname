@@ -3,6 +3,8 @@
 
 package domain
 
+import "slices"
+
 // target_membership.go — the materialized membership of a binding's
 // target (selector byLabel or resources[] byName) + the pure containment
 // predicate. Pure domain (stdlib only): no pgx/grpc.
@@ -84,6 +86,8 @@ type MirrorObject struct {
 	// область с пустым идентификатором совпала бы с ним.
 	ParentAccountIDs []string
 	Labels           map[string]string
+	// AccessLabels не наследуются из обычных Labels; nil означает отсутствие фактов.
+	AccessLabels map[string]string `json:",omitempty"`
 	// CreatedBy — субъект-создатель объекта в форме субъекта модели
 	// (`service_account:<id>`, `user:<id>`), если вид объекта хранит факт создателя
 	// (kaname#1003, Р4); пусто — создатель не записан либо у вида его нет. Читает
@@ -154,4 +158,44 @@ func (m MirrorObject) MatchesLabels(matchLabels map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// MatchesAccessLabels проверяет непустой AND-selector только по меткам доступа.
+// Неизвестный ключ, отсутствующая карта и некорректная форма не дают совпадения.
+// Пустое значение отличается от отсутствующего ключа; дополнительные метки
+// объекта разрешены. Область и родительские связи проверяются отдельно.
+func (m MirrorObject) MatchesAccessLabels(matchAccessLabels map[string]string) bool {
+	if len(matchAccessLabels) == 0 || len(matchAccessLabels) > maxMatchLabels {
+		return false
+	}
+	for key, value := range matchAccessLabels {
+		if LabelKey(key).Validate() != nil || LabelVal(value).Validate() != nil {
+			return false
+		}
+		got, exists := m.AccessLabels[key]
+		if !exists || got != value {
+			return false
+		}
+	}
+	return true
+}
+
+// MatchesObject проверяет тип и собственный предикат селектора. Область
+// выдачи, её цель и принадлежность контейнеру проверяет вызывающий путь.
+func (s RuleSelector) MatchesObject(object MirrorObject) bool {
+	if !slices.Contains(s.ObjectTypes, object.ObjectType) {
+		return false
+	}
+	switch s.Arm {
+	case ArmAnchor:
+		return true
+	case ArmNames:
+		return slices.Contains(s.ResourceNames, object.ObjectID)
+	case ArmLabels:
+		return object.MatchesLabels(s.MatchLabels)
+	case ArmAccessLabels:
+		return object.MatchesAccessLabels(s.MatchAccessLabels)
+	default:
+		return false
+	}
 }

@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/PRO-Robotech/corelib/migratorcli"
@@ -15,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/grantcoverage"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 	"github.com/PRO-Robotech/kaname/internal/modelcompose"
@@ -29,11 +31,12 @@ import (
 func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 	root := &cobra.Command{Use: "authority-bundle", Short: "Явное управление согласованным bundle и drain", Args: cobraargs.OnlyKnownCommands,
 		RunE: func(*cobra.Command, []string) error { return migratorcli.ErrNoCommand }}
-	for _, action := range []string{"stage", "activate", "verify", "stage-full", "activate-full", "verify-full", "close"} {
+	for _, action := range []string{"bootstrap", "stage", "activate", "verify", "stage-full", "activate-full", "verify-full", "close"} {
 		var dir string
 		var imageOnly bool
 		var fromPublication bool
 		full := action == "stage-full" || action == "activate-full" || action == "verify-full"
+		var runtimeRole string
 		cmd := &cobra.Command{Use: action, Args: cobraargs.NoExtraArguments, RunE: func(cmd *cobra.Command, _ []string) error {
 			if action != "close" {
 				sources := 0
@@ -48,6 +51,9 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 					}
 					return errors.New("укажите ровно один источник модели: --manifest-dir или --image-only")
 				}
+			}
+			if action == "bootstrap" && strings.TrimSpace(runtimeRole) == "" {
+				return errors.New("укажите --runtime-role существующего обычного LOGIN")
 			}
 			var manifests []*manifest.Manifest
 			if dir != "" {
@@ -88,6 +94,27 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 			if fromPublication {
 				return publishedAuthorityAction(ctx, cmd, action, repository, catalogReader)
 			}
+			if action == "bootstrap" {
+				if err := repository.ValidateMetadataBootstrapRuntime(ctx, runtimeRole); err != nil {
+					return err
+				}
+				uninitialized, err := repository.MetadataAuthorityUninitialized(ctx)
+				if err != nil {
+					return err
+				}
+				if uninitialized {
+					// Предварительное чтение не разрешает запись: адаптер заново
+					// проверяет uninitialized под замками каждой транзакции каталога.
+					applier := modulecatalog.NewApplier(kanamepg.NewMetadataBootstrapCatalogRepo(pool))
+					census, err := applier.ApplyAll(ctx, manifests)
+					if err != nil {
+						return err
+					}
+					if len(census.SkippedStale) != 0 || len(census.RefusedConflict) != 0 {
+						return kaname.ErrSemanticIdentityUnavailable
+					}
+				}
+			}
 			rows, err := catalogReader.ReadCatalogHalves(ctx)
 			if err != nil {
 				return err
@@ -97,6 +124,20 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 				return err
 			}
 			switch action {
+			case "bootstrap":
+				// Установленный handoff не изменяем каталогом выше. Репозиторий
+				// под drain доказывает первый stage либо точный готовый no-op;
+				// transition, смена identity и активация сюда не входят.
+				var bootstrapped bool
+				bootstrapped, err = repository.BootstrapMetadataAuthority(ctx, bundle, runtimeRole, editions...)
+				if err != nil {
+					return err
+				}
+				return json.NewEncoder(cmd.OutOrStdout()).Encode(struct {
+					Action       string                 `json:"action"`
+					Identity     grantcoverage.Identity `json:"identity"`
+					Bootstrapped bool                   `json:"bootstrapped"`
+				}{action, bundle.Identity(), bootstrapped})
 			case "stage":
 				err = repository.StageAuthorityBundle(ctx, bundle, editions...)
 			case "activate":
@@ -129,6 +170,9 @@ func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 		}
 		if full {
 			cmd.Flags().BoolVar(&fromPublication, "publication", false, "Использовать головную редакцию из журнала публикаций PostgreSQL")
+		}
+		if action == "bootstrap" {
+			cmd.Flags().StringVar(&runtimeRole, "runtime-role", "", "Существующий обычный LOGIN службы; роль и пароль не создаются")
 		}
 		root.AddCommand(cmd)
 	}

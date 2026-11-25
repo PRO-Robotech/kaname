@@ -30,11 +30,13 @@ package seed
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )
 
@@ -49,6 +51,7 @@ type ReconcileEngine interface {
 type ReconcileQueue interface {
 	ClaimReconcileEvents(ctx context.Context, limit int) ([]reconcile_outbox.Event, error)
 	MarkReconcileEventSent(ctx context.Context, id int64) error
+	DeferReconcileEvent(ctx context.Context, id int64) error
 	// RecordReconcileEventFailure учитывает ОДИН отказ сверки по строке:
 	// увеличивает счётчик попыток, записывает причину и возвращает число попыток
 	// ПОСЛЕ учёта.
@@ -132,9 +135,9 @@ func NewReconcileWorker(engine ReconcileEngine, queue ReconcileQueue, cfg Reconc
 // Term enforcement runs on its OWN goroutine (runExpiry), not in this loop. See
 // runExpiry for why that is a correctness property and not a scheduling nicety.
 //
-// РЕПЛИКИ: клейм — дренаж берёт события клеймом с пропуском занятых (ClaimReconcileEvents),
-// а сверка берёт на каждую выдачу её собственный исключающий замок, поэтому
-// конкурирующие проходы сериализуются в базе, а не наперегонки.
+// Клейм пропускает строки, заблокированные текущими SELECT. После выхода
+// из клейма одна выдача может прийти на две реплики. Их изменения
+// сериализуют блокировки самого пересчёта.
 func (w *ReconcileWorker) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -187,6 +190,12 @@ func (w *ReconcileWorker) drain(ctx context.Context) {
 	}
 	for _, e := range events {
 		if err := w.engine.ReconcileObject(ctx, e.ObjectType, e.ObjectID); err != nil {
+			if errors.Is(err, kaname.ErrAccessLabelReconcilePending) {
+				if deferErr := w.queue.DeferReconcileEvent(ctx, e.ID); deferErr != nil {
+					w.logger.WarnContext(ctx, "reconcile event deferral failed", slog.Int64("event_id", e.ID), slog.Any("err", deferErr))
+				}
+				continue
+			}
 			w.recordFailure(ctx, e, err)
 			continue // leave event unsent → re-delivered next drain (idempotent)
 		}

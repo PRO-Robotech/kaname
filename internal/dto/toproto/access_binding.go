@@ -63,7 +63,8 @@ func (abObj) toPb(b domain.AccessBinding) (*iamv1.AccessBinding, error) {
 		// Tenant-facing метки самого ресурса — делают AccessBinding
 		// label-selectable наравне с account/project (ARM_LABELS-грант →
 		// v_list по `labels @> matchLabels`; List фильтрует viewer ∪ v_list).
-		Labels: labelsToStringMap(b.Labels),
+		Labels:       labelsToStringMap(b.Labels),
+		AccessLabels: labelsToStringMap(b.AccessLabels),
 		// Observability of the eventually-consistent materialization window: WHEN
 		// this binding's per-object access became live (reconciler ledger). Left
 		// UNSET while nothing has materialized — an epoch-zero timestamp would read

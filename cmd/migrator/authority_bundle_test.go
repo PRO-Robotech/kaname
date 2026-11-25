@@ -25,6 +25,12 @@ func TestAuthorityBundleCommandRequiresExplicitActionAndDelivery(t *testing.T) {
 	}{
 		{[]string{"authority-bundle"}, migratorcli.ErrNoCommand.Error()},
 		{[]string{"authority-bundle", "unexpected"}, "unexpected"},
+		{[]string{"authority-bundle", "bootstrap"}, "ровно один источник"},
+		{[]string{"authority-bundle", "bootstrap", "--image-only", "--manifest-dir", "somewhere", "--runtime-role", "runtime"}, "ровно один источник"},
+		{[]string{"authority-bundle", "bootstrap", "--image-only"}, "--runtime-role"},
+		{[]string{"authority-bundle", "bootstrap", "--image-only", "--runtime-role", "  "}, "--runtime-role"},
+		{[]string{"authority-bundle", "bootstrap", "--image-only", "--runtime-role", "runtime", "extra"}, "extra"},
+		{[]string{"authority-bundle", "stage", "--image-only", "--runtime-role", "runtime"}, "runtime-role"},
 		{[]string{"authority-bundle", "stage"}, "ровно один источник"},
 		{[]string{"authority-bundle", "activate"}, "ровно один источник"},
 		{[]string{"authority-bundle", "verify"}, "ровно один источник"},
@@ -38,6 +44,7 @@ func TestAuthorityBundleCommandRequiresExplicitActionAndDelivery(t *testing.T) {
 		{[]string{"authority-bundle", "follow-publications", "--interval", "0s"}, "должен быть положительным"},
 		// Законные формы доходят до настоящего DSN resolver; bogus гарантирует,
 		// что тест не открывает соединение даже при регрессии dispatch.
+		{[]string{"authority-bundle", "bootstrap", "--image-only", "--runtime-role", "runtime"}, "bogus"},
 		{[]string{"authority-bundle", "stage", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "activate", "--image-only"}, "bogus"},
 		{[]string{"authority-bundle", "verify", "--image-only"}, "bogus"},

@@ -211,6 +211,31 @@ func TestLabelImplicationAndNotTodaysMatches(t *testing.T) {
 	proves(t, a, w, true)
 	proves(t, w, a, false)
 }
+func TestProtectedSelectorCoverageKeepsLabelNamespacesSeparate(t *testing.T) {
+	c := compiler(t)
+	protected := domain.Rule{Module: "iam", Resources: []string{"role"}, Verbs: []string{"get"},
+		MatchAccessLabels: map[string]string{"team": "blue"}}
+	ordinary := protected
+	ordinary.MatchAccessLabels = nil
+	ordinary.MatchLabels = map[string]string{"team": "blue"}
+	narrow := protected
+	narrow.MatchAccessLabels = map[string]string{"team": "blue", "env": "prod"}
+	protectedEffects := complete(t, c.Compile(binding(protected)))
+	ordinaryEffects := complete(t, c.Compile(binding(ordinary)))
+	narrowEffects := complete(t, c.Compile(binding(narrow)))
+	proves(t, protectedEffects, narrowEffects, true)
+	proves(t, narrowEffects, protectedEffects, false)
+	proves(t, protectedEffects, ordinaryEffects, false)
+	proves(t, ordinaryEffects, protectedEffects, false)
+
+	for _, effect := range protectedEffects.Effects() {
+		for _, constraint := range effect.Constraints {
+			constraint.Region.AccessLabels["team"] = "red"
+		}
+	}
+	proves(t, protectedEffects, narrowEffects, true)
+}
+
 func TestNestedParentSelectionAndTwoHopPath(t *testing.T) {
 	c := compiler(t)
 	r := box("get")

@@ -35,6 +35,7 @@ func collectActorProvenance(ctx context.Context, w kaname.SemanticSourceReader, 
 	proofs := map[domain.RoleID]granteffect.ProjectionCheckpoint{}
 	issues := []granteffect.Obligation{{Code: "legacy_producer_receipt_census", Detail: "legacy sources without accepted receipt require bounded cutover census; no absence-of-grant inference"}}
 	seen := map[domain.RoleID]bool{}
+	roleSnapshots := map[domain.RoleID]kaname.RoleProjectionSourceSnapshot{}
 	for _, b := range bindings {
 		if b.Source.Role == nil {
 			continue
@@ -50,7 +51,28 @@ func collectActorProvenance(ctx context.Context, w kaname.SemanticSourceReader, 
 		if !budget.pageAvailable() {
 			return fail(ErrBindingSourceLimit)
 		}
-		checkpoint, cost, err := w.RoleProjectionCheckpoint(ctx, role.ID)
+		var checkpoint granteffect.ProjectionCheckpoint
+		var cost kaname.SourceReadCost
+		var err error
+		var snapshot kaname.RoleProjectionSourceSnapshot
+		// Optional порт меняет только apply-чтение prepared role writer.
+		// Ordinary roles и остальные adapters сохраняют прежний вызов/стоимость.
+		reader, sourceReader := w.(kaname.RoleProjectionSourceReader)
+		hasApply := false
+		if sourceReader {
+			_, caps, splitErr := domain.SplitGrantCapabilityRules(role.Rules)
+			if splitErr == nil {
+				for _, cap := range caps {
+					hasApply = hasApply || cap.Kind == domain.GrantCapabilityApplyAccessLabel
+				}
+			}
+		}
+		if hasApply {
+			snapshot, cost, err = reader.RoleProjectionCheckpointSource(ctx, role.ID)
+			checkpoint = snapshot.Checkpoint
+		} else {
+			checkpoint, cost, err = w.RoleProjectionCheckpoint(ctx, role.ID)
+		}
 		if !budget.chargeCost(cost) {
 			return fail(ErrBindingSourceLimit)
 		}
@@ -64,6 +86,12 @@ func collectActorProvenance(ctx context.Context, w kaname.SemanticSourceReader, 
 		if err != nil || e != nil || checkpoint != want.Checkpoint {
 			issues = append(issues, granteffect.Obligation{Code: "role_projection_checkpoint", Detail: string(role.ID)})
 			continue
+		}
+		if hasApply {
+			if snapshot.RoleID != role.ID || snapshot.RowXmin == "" || snapshot.RowCTID == "" {
+				return fail(kaname.ErrSourceUnconfirmed)
+			}
+			roleSnapshots[role.ID] = snapshot
 		}
 		proofs[role.ID] = checkpoint
 		// Создатель не переименовывается в actor. Сейчас authoritative creator
@@ -127,6 +155,17 @@ func collectActorProvenance(ctx context.Context, w kaname.SemanticSourceReader, 
 	}
 	if err := ctx.Err(); err != nil {
 		return fail(err)
+	}
+	// bindings — исходный slice census, не union: сохраняем stamps каждому
+	// носителю подтверждённой роли, включая альтернативных получателей.
+	for i := range bindings {
+		bindings[i].Source.RoleSnapshot = nil
+		if role := bindings[i].Source.Role; role != nil {
+			if snapshot, ok := roleSnapshots[role.ID]; ok {
+				copy := snapshot
+				bindings[i].Source.RoleSnapshot = &copy
+			}
+		}
 	}
 	return sources, proofs, issues, nil
 }

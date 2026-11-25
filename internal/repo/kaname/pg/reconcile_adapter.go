@@ -106,13 +106,14 @@ type legacyForwardStore struct {
 // ReadOnlyRuleMemberStore выдаёт новый function-scoped view, а не меняет обычный
 // MatchSelector. Его Labels нельзя изменять или удерживать после расчёта правил.
 func (s *legacyForwardStore) ReadOnlyRuleMemberStore() reconcile.ReconcileStore {
-	return &readOnlyRuleMemberView{ReconcileStore: s, tx: s.tx, decode: resource_mirror.NewReadOnlyLabelDecoder()}
+	return &readOnlyRuleMemberView{ReconcileStore: s, protected: s.reconcileStore, tx: s.tx, decode: resource_mirror.NewReadOnlyLabelDecoder()}
 }
 
 type readOnlyRuleMemberView struct {
 	reconcile.ReconcileStore
-	tx     pgx.Tx
-	decode func([]byte) (map[string]string, error)
+	protected *reconcileStore
+	tx        pgx.Tx
+	decode    func([]byte) (map[string]string, error)
 }
 
 func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
@@ -125,6 +126,10 @@ func (s *readOnlyRuleMemberView) MatchSelector(ctx context.Context, types []stri
 		out = append(out, mirrorRowToDomain(row))
 	}
 	return out, nil
+}
+
+func (s *readOnlyRuleMemberView) MatchAccessLabelObjects(ctx context.Context, types []string, labels map[string]string, iamDirect bool) ([]domain.MirrorObject, error) {
+	return s.protected.MatchAccessLabelObjects(ctx, types, labels, iamDirect)
 }
 
 func (s *readOnlyRuleMemberView) MatchMirrorLabelSelectorUnion(ctx context.Context, selectors []domain.RuleSelector) ([]domain.MirrorObject, bool, error) {
@@ -680,7 +685,7 @@ func (s *reconcileStore) MatchCreatedByIAMDirect(ctx context.Context, types []st
 		if err != nil {
 			return nil, fmt.Errorf("reconcile: iam-direct %s by creator: %w", spec.objectType, err)
 		}
-		objs, serr := scanIAMDirect(rows, spec.objectType)
+		objs, serr := scanIAMDirect(rows, spec.objectType, false)
 		if serr != nil {
 			return nil, serr
 		}
@@ -952,7 +957,7 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 		if err != nil {
 			return nil, fmt.Errorf("reconcile: iam-direct %s %s: %w", spec.objectType, mode, err)
 		}
-		objs, serr := scanIAMDirect(rows, spec.objectType)
+		objs, serr := scanIAMDirect(rows, spec.objectType, false)
 		if serr != nil {
 			return nil, serr
 		}
@@ -964,6 +969,22 @@ func (s *reconcileStore) iamDirectQuery(ctx context.Context, types []string, mod
 // MatchSelector returns mirror objects matching types+matchLabels (labels @>).
 func (s *reconcileStore) MatchSelector(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
 	rows, err := resource_mirror.MatchByLabels(ctx, s.tx, types, matchLabels)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.MirrorObject, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, mirrorRowToDomain(row))
+	}
+	return out, nil
+}
+
+// MatchAccessLabelObjects сохраняет раздельные источники IAM и зеркала.
+func (s *reconcileStore) MatchAccessLabelObjects(ctx context.Context, types []string, labels map[string]string, iamDirect bool) ([]domain.MirrorObject, error) {
+	if iamDirect {
+		return s.matchIAMDirectLabels(ctx, types, labels, true)
+	}
+	rows, err := resource_mirror.MatchByAccessLabels(ctx, s.tx, types, labels)
 	if err != nil {
 		return nil, err
 	}
@@ -986,6 +1007,10 @@ func (s *reconcileStore) MatchSelector(ctx context.Context, types []string, matc
 // `types` содержит ТОЛЬКО iam-direct типы (reconciler партиционирует по feed). No
 // peer-call (same-DB) — граф ацикличен, self-mirror отсутствует.
 func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, matchLabels map[string]string) ([]domain.MirrorObject, error) {
+	return s.matchIAMDirectLabels(ctx, types, matchLabels, false)
+}
+
+func (s *reconcileStore) matchIAMDirectLabels(ctx context.Context, types []string, matchLabels map[string]string, protected bool) ([]domain.MirrorObject, error) {
 	if len(types) == 0 || len(matchLabels) == 0 {
 		return nil, nil
 	}
@@ -1003,17 +1028,22 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 		// All identifiers below are fixed literals from the closed spec map (never
 		// user input), so the interpolation is injection-safe. The own-table
 		// `labels @> $1` probe is served by the per-table GIN index (migration 0041).
-		q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() +
-			" FROM " + spec.table + " o"
+		column := "o.labels"
+		projection := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator()
+		if protected {
+			column = "o.access_labels"
+			projection += ", " + column
+		}
+		q := projection + " FROM " + spec.table + " o"
 		if spec.join != "" {
 			q += " " + spec.join
 		}
-		q += " WHERE o.labels @> $1::jsonb ORDER BY o.id ASC"
+		q += " WHERE " + column + " @> $1::jsonb ORDER BY o.id ASC"
 		rows, qerr := s.tx.Query(ctx, q, labelsJSON)
 		if qerr != nil {
 			return nil, fmt.Errorf("reconcile: iam-direct match labels %s: %w", spec.objectType, qerr)
 		}
-		objs, serr := scanIAMDirect(rows, spec.objectType)
+		objs, serr := scanIAMDirect(rows, spec.objectType, protected)
 		if serr != nil {
 			return nil, serr
 		}
@@ -1034,13 +1064,18 @@ func (s *reconcileStore) MatchIAMDirect(ctx context.Context, types []string, mat
 // массивом, а не соединением. Соединение размножило бы строки, и один объект дал
 // бы ДВА желаемых участника с одним ключом — накрытый и отвергнутый, — из которых
 // последний записанный отобрал бы кортеж у первого.
-func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, error) {
+func scanIAMDirect(rows pgx.Rows, objectType string, protected bool) ([]domain.MirrorObject, error) {
 	defer rows.Close()
 	var out []domain.MirrorObject
 	for rows.Next() {
 		var id, parentProject, creator string
 		var parentAccounts []string
-		if err := rows.Scan(&id, &parentAccounts, &parentProject, &creator); err != nil {
+		var labels map[string]string
+		columns := []any{&id, &parentAccounts, &parentProject, &creator}
+		if protected {
+			columns = append(columns, &labels)
+		}
+		if err := rows.Scan(columns...); err != nil {
 			return nil, fmt.Errorf("reconcile: scan iam-direct %s row: %w", objectType, err)
 		}
 		out = append(out, domain.MirrorObject{
@@ -1049,6 +1084,7 @@ func scanIAMDirect(rows pgx.Rows, objectType string) ([]domain.MirrorObject, err
 			ParentAccountIDs: parentAccounts,
 			ParentProjectID:  parentProject,
 			CreatedBy:        creator,
+			AccessLabels:     labels,
 		})
 	}
 	return out, rows.Err()
@@ -1172,18 +1208,18 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 		// forward path only routes iam-direct types here).
 		return domain.MirrorObject{}, false, nil
 	}
-	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() + ", o.labels" +
+	q := "SELECT o.id, " + spec.accountsExpr() + ", " + spec.parentProjectExpr + ", " + spec.creator() + ", o.labels, o.access_labels" +
 		" FROM " + spec.table + " o"
 	if spec.join != "" {
 		q += " " + spec.join
 	}
 	q += " WHERE o.id = $1"
 	var (
-		id, parentProject, creator string
-		parentAccounts             []string
-		labelsJSON                 []byte
+		id, parentProject, creator   string
+		parentAccounts               []string
+		labelsJSON, accessLabelsJSON []byte
 	)
-	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &creator, &labelsJSON); err != nil {
+	if err := s.tx.QueryRow(ctx, q, objectID).Scan(&id, &parentAccounts, &parentProject, &creator, &labelsJSON, &accessLabelsJSON); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.MirrorObject{}, false, nil
 		}
@@ -1199,6 +1235,11 @@ func (s *reconcileStore) GetIAMDirectObject(ctx context.Context, objectType, obj
 	if len(labelsJSON) > 0 {
 		if err := json.Unmarshal(labelsJSON, &obj.Labels); err != nil {
 			return domain.MirrorObject{}, false, fmt.Errorf("reconcile: unmarshal iam-direct labels %s:%s: %w", spec.objectType, objectID, err)
+		}
+	}
+	if len(accessLabelsJSON) > 0 && string(accessLabelsJSON) != "{}" {
+		if err := json.Unmarshal(accessLabelsJSON, &obj.AccessLabels); err != nil {
+			return domain.MirrorObject{}, false, fmt.Errorf("reconcile: unmarshal iam-direct access labels %s:%s: %w", spec.objectType, objectID, err)
 		}
 	}
 	return obj, true, nil
@@ -1321,7 +1362,8 @@ func (s *reconcileStore) SelectorBindingsMatchingObject(ctx context.Context, obj
 		                 AND b.resource_id = COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id))
 		             OR (b.resource_type = 'project' AND m.parent_project_id = b.resource_id)))
 		       OR (rrs.arm = 'names'  AND $2 = ANY(rrs.resource_names))
-		       OR (rrs.arm = 'labels' AND m.labels @> rrs.match_labels) )
+		       OR (rrs.arm = 'labels' AND m.labels @> rrs.match_labels)
+		       OR (rrs.arm = 'access_labels' AND m.access_labels @> rrs.match_access_labels) )
 		  ORDER BY b.id ASC`,
 		objectType, objectID)
 	if err != nil {
@@ -1402,7 +1444,7 @@ func (s *reconcileStore) IAMDirectSelectorBindingsMatchingObject(ctx context.Con
 	// (labels @> match_labels через GIN).
 	labelsBranch := ""
 	if hasLabels {
-		labelsBranch = " OR (rrs.arm = 'labels' AND o.labels @> rrs.match_labels)"
+		labelsBranch = " OR (rrs.arm = 'labels' AND o.labels @> rrs.match_labels) OR (rrs.arm = 'access_labels' AND o.access_labels @> rrs.match_access_labels)"
 	}
 	anchorBranch := `(rrs.arm = 'anchor' AND (
 	                       b.resource_type NOT IN ('account','project')
@@ -1813,6 +1855,7 @@ func mirrorRowToDomain(r resource_mirror.MirrorRow) domain.MirrorObject {
 		ParentProjectID:  r.ParentProjectID,
 		ParentAccountIDs: singletonAccount(r.ParentAccountID),
 		Labels:           r.Labels,
+		AccessLabels:     r.AccessLabels,
 	}
 }
 
@@ -1854,6 +1897,11 @@ func (a *ReconcileAdapter) MarkReconcileEventSent(ctx context.Context, id int64)
 		return err
 	}
 	return tx.Commit(ctx)
+}
+
+// DeferReconcileEvent сохраняет событие для следующей проверки текущего поколения.
+func (a *ReconcileAdapter) DeferReconcileEvent(ctx context.Context, id int64) error {
+	return reconcile_outbox.DeferPending(ctx, a.pool, id)
 }
 
 // RecordReconcileEventFailure учитывает один отказ сверки по строке очереди:

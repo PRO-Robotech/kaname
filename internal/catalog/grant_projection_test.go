@@ -21,6 +21,49 @@ func grantFacts(t *testing.T) *catalog.Facts {
 	require.NoError(t, e)
 	return f
 }
+
+func TestAccessLabelAuthoringAxisCannotBecomeLeafOrContainer(t *testing.T) {
+	row := catalog.VerbRow{Module: "iam", Resource: "accessLabel", Verb: "apply"}
+	rows := catalog.Rows{
+		Modules:   []string{"iam"},
+		Resources: []catalog.ResourceRow{{Module: "iam", Resource: "accessLabel", ObjectType: "iam_grant_access_label"}},
+		Verbs:     []catalog.VerbRow{row},
+	}
+	facts, err := catalog.NewFacts(catalog.Halves{Live: rows})
+	require.NoError(t, err)
+	require.True(t, facts.GrantVerb("iam.accessLabel", "apply"))
+	require.Empty(t, facts.VerbsOfType("iam_grant_access_label"))
+	for _, verbs := range [][]string{{"apply"}, {"*"}} {
+		require.Empty(t, facts.ObjectVerbs("iam.accessLabel", verbs))
+		require.Empty(t, facts.GrantedVerbs("iam_grant_access_label", verbs, []string{"get", "delete"}, domain.PolicyOfRole(true, "")))
+		require.Empty(t, facts.ObjectRelations("iam_grant_access_label", verbs, []string{"get", "delete"}, domain.PolicyOfRole(true, "")))
+	}
+	rule := domain.Rule{Module: "iam", Resources: []string{"accessLabel"}, Verbs: []string{"apply"}, ResourceNames: []string{"3d9cd5bf-906f-4bbe-8a8b-234ba2efa54a"}}
+	_, err = facts.ProjectGrantRules(domain.Rules{rule}, domain.TenantPolicy())
+	require.Error(t, err, "объявление в каталоге само по себе не готовит выдачу")
+	prepared, err := facts.ProjectRoleMutationRules(domain.Rules{rule}, domain.TenantPolicy())
+	require.NoError(t, err)
+	require.Len(t, prepared.Capabilities, 1)
+	require.Equal(t, domain.GrantCapabilityApplyAccessLabel, prepared.Capabilities[0].Kind)
+	require.Empty(t, prepared.Permissions)
+	require.Empty(t, prepared.Selectors)
+	require.Empty(t, prepared.Verbs)
+	for _, malformed := range []catalog.VerbRow{
+		{Module: row.Module, Resource: row.Resource, Verb: row.Verb, PerObject: true},
+		{Module: row.Module, Resource: row.Resource, Verb: row.Verb, ContainerParent: "account", ContainerRelation: "editor"},
+		{Module: row.Module, Resource: row.Resource, Verb: "create"},
+	} {
+		rows.Verbs = []catalog.VerbRow{malformed}
+		_, err = catalog.NewFacts(catalog.Halves{Live: rows})
+		require.ErrorContains(t, err, "должен объявить отдельное право")
+	}
+	rows.Verbs = []catalog.VerbRow{row}
+	rows.Resources[0].ParentTypes = []string{"account"}
+	rows.Resources[0].ParentNames = []string{"parent"}
+	_, err = catalog.NewFacts(catalog.Halves{Live: rows})
+	require.ErrorContains(t, err, "недопустимый тип")
+}
+
 func TestGrantProjectionKeepsMixedResidualAndNeverExpandsMetaWildcard(t *testing.T) {
 	f := grantFacts(t)
 	id := ids.NewID(domain.PrefixRole)

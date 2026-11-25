@@ -15,6 +15,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmodel"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
@@ -170,7 +171,7 @@ func TestNativeReadQuestionsRemovalAndRoleMethodDoNotBecomeD1(t *testing.T) {
 	q := newNativePolicyQuestions()
 	actor := nativeBoundaryActor()
 	require.NoError(t, q.removal(actor, domain.AccessBinding{ID: "abn_native", ResourceType: "account", ResourceID: "acc_native"}))
-	require.NoError(t, q.roleBase(actor, domain.Role{ID: "rol_native", AccountID: "acc_native"}, false))
+	require.NoError(t, q.roleBase(actor, domain.Role{ID: "rol_native", AccountID: "acc_native"}, false, nil))
 	roots, err := q.ordered(context.Background())
 	require.NoError(t, err)
 	var remove, update bool
@@ -217,7 +218,9 @@ func TestNativeRoleReferencesUseBothCanonicalVisibilityQuestions(t *testing.T) {
 	q := newNativePolicyQuestions()
 	actor := nativeBoundaryActor()
 	role := domain.Role{ID: "rol_native", AccountID: "acc_native", Rules: domain.Rules{{Module: "iam", Resources: []string{"role"}, Verbs: []string{"bind"}, ResourceNames: []string{"rol_reference"}}}}
-	require.NoError(t, q.roleBase(actor, role, true))
+	_, caps, err := domain.SplitGrantCapabilityRules(role.Rules)
+	require.NoError(t, err)
+	require.NoError(t, q.roleBase(actor, role, true, caps))
 	roots, err := q.ordered(context.Background())
 	require.NoError(t, err)
 	var editor, viewer, list bool
@@ -233,6 +236,52 @@ func TestNativeRoleReferencesUseBothCanonicalVisibilityQuestions(t *testing.T) {
 	require.True(t, viewer)
 	require.True(t, list)
 }
+func TestNativePolicyQuestionsDeclareExactAccessLabelScopes(t *testing.T) {
+	actor := nativeBoundaryActor()
+	definition := domain.AccessLabelDefinitionID("12345678-1234-1234-1234-123456789abc")
+	role := domain.Role{ID: "rol_native", AccountID: "acc_native", Rules: domain.Rules{{
+		Module: "iam", Resources: []string{"accessLabel"}, Verbs: []string{"apply"}, ResourceNames: []string{string(definition)},
+	}}}
+	fallback := domain.ScopeAnchor{Type: "account", ID: "acc_native"}
+	project := domain.ScopeAnchor{Type: "project", ID: "prj_native"}
+	secondProject := domain.ScopeAnchor{Type: "project", ID: "prj_second"}
+	_, caps, err := domain.SplitGrantCapabilityRules(role.Rules)
+	require.NoError(t, err)
+	questions := newNativePolicyQuestions()
+	require.NoError(t, questions.roleBase(actor, role, false, caps))
+	for _, scope := range []domain.ScopeAnchor{project, secondProject, project} {
+		binding := domain.AccessBinding{ResourceType: domain.ResourceType(scope.Type), ResourceID: scope.ID}
+		require.NoError(t, questions.roleCarrier(actor, binding, caps))
+	}
+	check := func(q *nativePolicyQuestions, expected ...domain.ScopeAnchor) {
+		t.Helper()
+		roots, err := q.ordered(context.Background())
+		require.NoError(t, err)
+		var scopes []domain.ScopeAnchor
+		for _, candidate := range roots {
+			if candidate.objectType != grantcapability.AccessLabelObjectType {
+				continue
+			}
+			coordinate, err := grantcapability.Decode(grantcapability.Reference{
+				ObjectType: candidate.objectType, ObjectID: candidate.objectID, Relation: candidate.relation,
+			})
+			require.NoError(t, err)
+			require.Equal(t, domain.GrantCapabilityApplyAccessLabel, coordinate.Kind)
+			require.Equal(t, definition, coordinate.DefinitionID)
+			require.Equal(t, string(actor.Type)+":"+string(actor.ID), candidate.subject)
+			scopes = append(scopes, coordinate.Anchor)
+		}
+		require.ElementsMatch(t, expected, scopes)
+	}
+	check(questions, fallback, project, secondProject)
+
+	binding := newNativePolicyQuestions()
+	require.NoError(t, binding.bindingRole(actor, project, role))
+	check(binding, project)
+	role.Rules[0].ResourceNames[0] = "*"
+	require.Error(t, newNativePolicyQuestions().bindingRole(actor, project, role))
+}
+
 func TestNativePopulationQuestionsRetainLastCarrierAndInvalidInput(t *testing.T) {
 	q := newNativePolicyQuestions()
 	actor := nativeBoundaryActor()

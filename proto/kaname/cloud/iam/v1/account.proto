@@ -58,6 +58,11 @@ message Account {
   // migration 0008_drop_organizations.sql.
   reserved 7;
   reserved "organization_id";
+
+  // Защищённые метки для IAM match_access_labels, отдельные от labels.
+  // Обычное право update не разрешает выдавать доступ: изменение проверяется
+  // по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+  map<string, string> access_labels = 8;
 }
 
 message CreateAccountMetadata {

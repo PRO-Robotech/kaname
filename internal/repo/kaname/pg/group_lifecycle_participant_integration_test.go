@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,6 +31,11 @@ import (
 // Реальные RolesW/selector projection/bindingset, с фактом того же bundle.
 func groupLifecycleBinding(t *testing.T, r protocolRig, account, uid, name string, rule domain.Rule) domain.AccessBindingID {
 	t.Helper()
+	return scopedGroupLifecycleBinding(t, r, domain.ScopeAnchor{Type: "account", ID: account}, uid, name, rule)
+}
+
+func scopedGroupLifecycleBinding(t *testing.T, r protocolRig, scope domain.ScopeAnchor, uid, name string, rule domain.Rule) domain.AccessBindingID {
+	t.Helper()
 	var halves catalog.Halves
 	require.NoError(t, json.Unmarshal(r.bundle.CanonicalCatalog(), &halves))
 	facts, err := catalog.NewFacts(halves)
@@ -40,13 +46,27 @@ func groupLifecycleBinding(t *testing.T, r protocolRig, account, uid, name strin
 	rules := domain.Rules{rule}
 	permissions, err := domain.CompileRules(rules)
 	require.NoError(t, err)
-	role, err := w.RolesW().Insert(r.ctx, domain.Role{ID: domain.RoleID(ids.NewID("rol")), AccountID: domain.AccountID(account), Name: domain.RoleName(name), Rules: rules, Permissions: permissions})
+	roleInput := domain.Role{ID: domain.RoleID(ids.NewID("rol")), Name: domain.RoleName(name), Rules: rules, Permissions: permissions}
+	var role domain.Role
+	switch scope.Type {
+	case "account":
+		roleInput.AccountID = domain.AccountID(scope.ID)
+		role, err = w.RolesW().Insert(r.ctx, roleInput)
+	case "cluster":
+		roleInput.ClusterID = domain.ClusterID(scope.ID)
+		roleInput.Name = domain.RoleName(strings.ReplaceAll(name, "_", "-"))
+		roleInput.ID = domain.SystemRoleID(roleInput.Name)
+		role, _, err = w.RolesW().UpsertSystemRole(r.ctx, roleInput)
+	default:
+		t.Fatalf("неподдерживаемая область фикстуры %q", scope.Type)
+	}
 	require.NoError(t, err)
-	require.NoError(t, w.RolesW().ReplaceRuleSelectors(r.ctx, role.ID, facts.GrantSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())))
+	rolePolicy := domain.PolicyOfRole(role.IsSystem, role.OwnerModule)
+	require.NoError(t, w.RolesW().ReplaceRuleSelectors(r.ctx, role.ID, facts.GrantSelectors(rules.MaterializingSelectors(), rolePolicy)))
 	// kaname#1034: native binding arm требует обе реальные ordinary проекции,
 	// как Role.Create; один ledger/selector не заменяет role_verb.
-	require.NoError(t, w.RolesW().ReplaceRoleVerbs(r.ctx, role.ID, facts.RoleVerbsFromSelectors(rules.MaterializingSelectors(), domain.TenantPolicy())))
-	b, err := bindingset.Insert(r.ctx, w.AccessBindingsW(), domain.AccessBinding{ID: domain.AccessBindingID(ids.NewID("acb")), SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid), RoleID: role.ID, ResourceType: "account", ResourceID: account, Scope: domain.ScopeAccount, Status: domain.AccessBindingStatusActive})
+	require.NoError(t, w.RolesW().ReplaceRoleVerbs(r.ctx, role.ID, facts.RoleVerbsFromSelectors(rules.MaterializingSelectors(), rolePolicy)))
+	b, err := bindingset.Insert(r.ctx, w.AccessBindingsW(), domain.AccessBinding{ID: domain.AccessBindingID(ids.NewID("acb")), SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(uid), RoleID: role.ID, ResourceType: domain.ResourceType(scope.Type), ResourceID: scope.ID, Scope: domain.DeriveFromResourceType(scope.Type), Status: domain.AccessBindingStatusActive})
 	require.NoError(t, err)
 	require.NoError(t, w.Commit(r.ctx))
 	return b.ID

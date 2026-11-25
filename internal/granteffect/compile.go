@@ -136,6 +136,12 @@ func bindingBytes(b Binding) ([]byte, error) {
 }
 
 func (c *Compiler) Compile(b Binding) Set {
+	return c.compileBinding(b, nil)
+}
+
+// focal доступен только порту сравнения метаданных. Обычный компилятор
+// не специализирует селектор по текущему перечню объектов или их меткам.
+func (c *Compiler) compileBinding(b Binding, focal *MetadataObject) Set {
 	s := Set{identity: c.identity, obligations: append([]Obligation(nil), c.modelObligations...)}
 	p := Provenance{SourceID: b.SourceID, RoleID: b.Role.ID}
 	fail := func(code, detail string) { s.obligations = append(s.obligations, Obligation{code, detail, p}) }
@@ -171,6 +177,10 @@ func (c *Compiler) Compile(b Binding) Set {
 		return s
 	}
 	if len(b.Role.Rules) == 0 {
+		if focal != nil {
+			// Старые выдачи на область не зависят от метаданных account/project.
+			return s
+		}
 		if b.Recipient.IsSystemClass() && len(b.Role.Permissions) > 0 {
 			fail("recipient_legacy", "class legacy producer is not established")
 			return s
@@ -213,14 +223,24 @@ func (c *Compiler) Compile(b Binding) Set {
 			ep.AuthoredRuleFP = cap.RuleFP
 			ep.ProjectedRuleFP = cap.RuleFP
 			ep.Primitive = "explicit_meta"
-			k := CreateBinding
-			modelType, modelRelation := grantcapability.ScopeObjectType, grantcapability.CreateRelation
-			dotted, verb := "iam.accessBinding", "create"
-			if cap.Kind == domain.GrantCapabilityBindRole {
+			var k Kind
+			var modelType, modelRelation string
+			switch cap.Kind {
+			case domain.GrantCapabilityCreateBinding:
+				k = CreateBinding
+				modelType, modelRelation = grantcapability.ScopeObjectType, grantcapability.CreateRelation
+			case domain.GrantCapabilityBindRole:
 				k = BindRole
 				modelType, modelRelation = grantcapability.RoleObjectType, grantcapability.BindRelation
-				dotted, verb = "iam.role", "bind"
+			case domain.GrantCapabilityApplyAccessLabel:
+				k = ApplyAccessLabel
+				modelType, modelRelation = grantcapability.AccessLabelObjectType, grantcapability.ApplyAccessLabelRelation
+			default:
+				s.obligations = append(s.obligations, Obligation{"meta_model", string(cap.Kind), ep})
+				continue
 			}
+			ref, _ := cap.Kind.RuleRef()
+			dotted, verb := ref.Module+"."+ref.Resource, ref.Verb
 			if err := c.plans.GrantCapabilityPlan(modelType, modelRelation); err != nil {
 				s.obligations = append(s.obligations, Obligation{"meta_model", modelType + "." + modelRelation, ep})
 				continue
@@ -229,7 +249,9 @@ func (c *Compiler) Compile(b Binding) Set {
 				s.obligations = append(s.obligations, Obligation{"catalog_meta", dotted + "." + verb, ep})
 				continue
 			}
-			c.append(&s, Effect{Kind: k, Anchor: b.Scope, RoleID: cap.BoundRoleID, Provenance: ep})
+			if focal == nil {
+				c.append(&s, Effect{Kind: k, Anchor: b.Scope, RoleID: cap.BoundRoleID, DefinitionID: cap.DefinitionID, Provenance: ep})
+			}
 		}
 	}
 	// Каждая авторская строка проходит split отдельно: provenance остатка не
@@ -254,7 +276,7 @@ func (c *Compiler) Compile(b Binding) Set {
 	}
 	selectors := c.facts.GrantSelectors(c.facts.MaterializingSelectorsInScope(rules, domain.DeriveFromResourceType(b.Scope.Type)), policy)
 	if b.Recipient.IsSystemClass() {
-		c.compilePublicReaders(&s, b, selectors, origins, p)
+		c.compilePublicReaders(&s, b, selectors, origins, p, focal)
 	}
 	roleVerbs := map[domain.RoleVerb]bool{}
 	for _, v := range c.facts.RoleVerbsFromSelectors(selectors, policy) {
@@ -286,7 +308,7 @@ func (c *Compiler) Compile(b Binding) Set {
 			if len(recipientVerbs) == 0 {
 				continue
 			}
-			regions, err := c.selectorRegions(sel, dotted, typ, b)
+			regions, err := c.bindingSelectorRegions(sel, dotted, typ, b, focal)
 			if err != nil {
 				s.obligations = append(s.obligations, Obligation{"selector", err.Error(), ep})
 				continue
@@ -302,6 +324,9 @@ func (c *Compiler) Compile(b Binding) Set {
 						if !c.classDeclaration(&s, b.Recipient, typ, rel, ep) {
 							continue
 						}
+						if focal != nil && !c.metadataDeclaration(&s, b.Recipient, typ, rel, ep) {
+							continue
+						}
 						c.derive(&s, typ, rel, region, Condition{}, ep)
 					}
 					if contains(verbs, "*") {
@@ -312,7 +337,7 @@ func (c *Compiler) Compile(b Binding) Set {
 			}
 			// Контейнерный producer адресует собственный scope только для SA и без
 			// конечной цели; селектор объектов не подменяет эту семантику.
-			if sel.Container == nil && len(b.Target.Resources) == 0 && b.Recipient.Type == domain.SubjectTypeServiceAccount {
+			if focal == nil && sel.Container == nil && len(b.Target.Resources) == 0 && b.Recipient.Type == domain.SubjectTypeServiceAccount {
 				for _, v := range sel.Verbs {
 					if g, ok := c.facts.ContainerVerb(dotted, v); ok && g.ParentType == b.Scope.Type {
 						cp := ep
@@ -323,7 +348,7 @@ func (c *Compiler) Compile(b Binding) Set {
 			}
 		}
 	}
-	if len(b.Target.Resources) == 0 && b.Scope.Type != "cluster" {
+	if focal == nil && len(b.Target.Resources) == 0 && b.Scope.Type != "cluster" {
 		verbs := domain.RecipientVerbs(b.Recipient, rules.ScopeSelfVerbs(b.Scope.Type, c.typeVerbs(b.Scope.Type)), false)
 		if len(verbs) > 0 {
 			ep := p
@@ -395,6 +420,12 @@ func (c *Compiler) append(s *Set, e Effect) {
 func (c *Compiler) CompileDirect(d Direct) Set {
 	s := Set{identity: c.identity, obligations: append([]Obligation(nil), c.modelObligations...)}
 	p := Provenance{SourceID: d.SourceID, Primitive: "direct_fact"}
+	if d.ObjectType == grantcapability.AccessLabelObjectType {
+		// Источник права на ключ проходит проверку роли и привязки в своей
+		// области. Обычная строка relation_fact не удостоверяет эту цепочку.
+		s.obligations = append(s.obligations, Obligation{"direct_declaration", d.ObjectType, p})
+		return s
+	}
 	raw, _ := json.Marshal(d)
 	if len(raw) > MaxInputBytes || d.SourceID == "" || d.ObjectID == "" || d.Recipient.Validate() != nil {
 		s.obligations = append(s.obligations, Obligation{"input", "direct source", p})

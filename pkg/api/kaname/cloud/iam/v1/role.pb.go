@@ -705,7 +705,11 @@ type Role struct {
 	// ровно ту неразличимость, ради устранения которой заведены `health` и
 	// `withdrawn_grants`. Сверх того у арендатора ОСТАЁТСЯ выдача на снятую роль:
 	// ресурс, на который ссылается его собственная строка, обязан читаться.
-	Lifecycle     *RoleLifecycle `protobuf:"bytes,28,opt,name=lifecycle,proto3" json:"lifecycle,omitempty"`
+	Lifecycle *RoleLifecycle `protobuf:"bytes,28,opt,name=lifecycle,proto3" json:"lifecycle,omitempty"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	AccessLabels  map[string]string `protobuf:"bytes,29,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -926,6 +930,13 @@ func (x *Role) GetRuleStates() []*RuleState {
 func (x *Role) GetLifecycle() *RoleLifecycle {
 	if x != nil {
 		return x.Lifecycle
+	}
+	return nil
+}
+
+func (x *Role) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -1521,8 +1532,16 @@ type Rule struct {
 	// и `match_labels` взаимоисключающе. tag 8 — первый свободный (7 занят
 	// `children`).
 	CreatedBySubject bool `protobuf:"varint,8,opt,name=created_by_subject,json=createdBySubject,proto3" json:"created_by_subject,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Защищённый IAM-селектор: AND-equality по access_labels ресурса.
+	// До 16 ключей; при выборе этой оси карта непустая.
+	// Обычные labels не участвуют в этом сравнении; fallback к match_labels нет.
+	// Взаимоисключающий выбор с resource_names, match_labels и created_by_subject.
+	// Поле действует и у children: они используют тот же Rule, оставаясь
+	// output-only на Role.Create/Update и объявляемыми манифестом модуля.
+	// Изменение правила требует проверки Grant на весь добавленный эффект.
+	MatchAccessLabels map[string]string `protobuf:"bytes,9,rep,name=match_access_labels,json=matchAccessLabels,proto3" json:"match_access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Rule) Reset() {
@@ -1602,6 +1621,13 @@ func (x *Rule) GetCreatedBySubject() bool {
 		return x.CreatedBySubject
 	}
 	return false
+}
+
+func (x *Rule) GetMatchAccessLabels() map[string]string {
+	if x != nil {
+		return x.MatchAccessLabels
+	}
+	return nil
 }
 
 type CreateRoleMetadata struct {
@@ -1743,7 +1769,7 @@ var File_kaname_cloud_iam_v1_role_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\n" +
-	"\x1ekaname/cloud/iam/v1/role.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa5\v\n" +
+	"\x1ekaname/cloud/iam/v1/role.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb8\f\n" +
 	"\x04Role\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -1779,11 +1805,15 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\x15pruned_selector_types\x18\x1a \x03(\v2'.kaname.cloud.iam.v1.PrunedSelectorTypeR\x13prunedSelectorTypes\x12?\n" +
 	"\vrule_states\x18\x1b \x03(\v2\x1e.kaname.cloud.iam.v1.RuleStateR\n" +
 	"ruleStates\x12@\n" +
-	"\tlifecycle\x18\x1c \x01(\v2\".kaname.cloud.iam.v1.RoleLifecycleR\tlifecycle\x1a9\n" +
+	"\tlifecycle\x18\x1c \x01(\v2\".kaname.cloud.iam.v1.RoleLifecycleR\tlifecycle\x12P\n" +
+	"\raccess_labels\x18\x1d \x03(\v2+.kaname.cloud.iam.v1.Role.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a<\n" +
 	"\x0eVerbNotesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\t\x10\n" +
 	"R\x0forganization_id\"\xcf\x01\n" +
@@ -1822,7 +1852,7 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\x05cause\x18\a \x01(\x0e2(.kaname.cloud.iam.v1.WithdrawnGrantCauseR\x05cause\"F\n" +
 	"\x0eDefinitionTier\x12\x1b\n" +
 	"\ttier_type\x18\x01 \x01(\tR\btierType\x12\x17\n" +
-	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\xfc\x02\n" +
+	"\atier_id\x18\x02 \x01(\tR\x06tierId\"\xa4\x04\n" +
 	"\x04Rule\x12\x1c\n" +
 	"\tresources\x18\x02 \x03(\tR\tresources\x12\x14\n" +
 	"\x05verbs\x18\x03 \x03(\tR\x05verbs\x12%\n" +
@@ -1830,8 +1860,12 @@ const file_kaname_cloud_iam_v1_role_proto_rawDesc = "" +
 	"\fmatch_labels\x18\x05 \x03(\v2*.kaname.cloud.iam.v1.Rule.MatchLabelsEntryR\vmatchLabels\x12\x16\n" +
 	"\x06module\x18\x06 \x01(\tR\x06module\x125\n" +
 	"\bchildren\x18\a \x03(\v2\x19.kaname.cloud.iam.v1.RuleR\bchildren\x12,\n" +
-	"\x12created_by_subject\x18\b \x01(\bR\x10createdBySubject\x1a>\n" +
+	"\x12created_by_subject\x18\b \x01(\bR\x10createdBySubject\x12`\n" +
+	"\x13match_access_labels\x18\t \x03(\v20.kaname.cloud.iam.v1.Rule.MatchAccessLabelsEntryR\x11matchAccessLabels\x1a>\n" +
 	"\x10MatchLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1aD\n" +
+	"\x16MatchAccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x01\x10\x02R\amodules\"-\n" +
 	"\x12CreateRoleMetadata\x12\x17\n" +
@@ -1881,7 +1915,7 @@ func file_kaname_cloud_iam_v1_role_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_role_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_kaname_cloud_iam_v1_role_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_kaname_cloud_iam_v1_role_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
 var file_kaname_cloud_iam_v1_role_proto_goTypes = []any{
 	(RoleLifecycleState)(0),       // 0: kaname.cloud.iam.v1.RoleLifecycleState
 	(RuleLifecycle)(0),            // 1: kaname.cloud.iam.v1.RuleLifecycle
@@ -1901,13 +1935,15 @@ var file_kaname_cloud_iam_v1_role_proto_goTypes = []any{
 	(*DeleteRoleMetadata)(nil),    // 15: kaname.cloud.iam.v1.DeleteRoleMetadata
 	nil,                           // 16: kaname.cloud.iam.v1.Role.LabelsEntry
 	nil,                           // 17: kaname.cloud.iam.v1.Role.VerbNotesEntry
-	nil,                           // 18: kaname.cloud.iam.v1.Rule.MatchLabelsEntry
-	(*timestamppb.Timestamp)(nil), // 19: google.protobuf.Timestamp
+	nil,                           // 18: kaname.cloud.iam.v1.Role.AccessLabelsEntry
+	nil,                           // 19: kaname.cloud.iam.v1.Rule.MatchLabelsEntry
+	nil,                           // 20: kaname.cloud.iam.v1.Rule.MatchAccessLabelsEntry
+	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_role_proto_depIdxs = []int32{
-	19, // 0: kaname.cloud.iam.v1.Role.created_at:type_name -> google.protobuf.Timestamp
+	21, // 0: kaname.cloud.iam.v1.Role.created_at:type_name -> google.protobuf.Timestamp
 	12, // 1: kaname.cloud.iam.v1.Role.rules:type_name -> kaname.cloud.iam.v1.Rule
-	19, // 2: kaname.cloud.iam.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
+	21, // 2: kaname.cloud.iam.v1.Role.updated_at:type_name -> google.protobuf.Timestamp
 	16, // 3: kaname.cloud.iam.v1.Role.labels:type_name -> kaname.cloud.iam.v1.Role.LabelsEntry
 	11, // 4: kaname.cloud.iam.v1.Role.definition_tier:type_name -> kaname.cloud.iam.v1.DefinitionTier
 	17, // 5: kaname.cloud.iam.v1.Role.verb_notes:type_name -> kaname.cloud.iam.v1.Role.VerbNotesEntry
@@ -1916,22 +1952,24 @@ var file_kaname_cloud_iam_v1_role_proto_depIdxs = []int32{
 	9,  // 8: kaname.cloud.iam.v1.Role.pruned_selector_types:type_name -> kaname.cloud.iam.v1.PrunedSelectorType
 	8,  // 9: kaname.cloud.iam.v1.Role.rule_states:type_name -> kaname.cloud.iam.v1.RuleState
 	7,  // 10: kaname.cloud.iam.v1.Role.lifecycle:type_name -> kaname.cloud.iam.v1.RoleLifecycle
-	0,  // 11: kaname.cloud.iam.v1.RoleLifecycle.state:type_name -> kaname.cloud.iam.v1.RoleLifecycleState
-	19, // 12: kaname.cloud.iam.v1.RoleLifecycle.retired_at:type_name -> google.protobuf.Timestamp
-	1,  // 13: kaname.cloud.iam.v1.RuleState.state:type_name -> kaname.cloud.iam.v1.RuleLifecycle
-	8,  // 14: kaname.cloud.iam.v1.RuleState.children:type_name -> kaname.cloud.iam.v1.RuleState
-	2,  // 15: kaname.cloud.iam.v1.PrunedSelectorType.outcome:type_name -> kaname.cloud.iam.v1.SelectorPruneOutcome
-	19, // 16: kaname.cloud.iam.v1.PrunedSelectorType.pruned_at:type_name -> google.protobuf.Timestamp
-	4,  // 17: kaname.cloud.iam.v1.WithdrawnGrant.source:type_name -> kaname.cloud.iam.v1.WithdrawnGrantSource
-	19, // 18: kaname.cloud.iam.v1.WithdrawnGrant.withdrawn_at:type_name -> google.protobuf.Timestamp
-	3,  // 19: kaname.cloud.iam.v1.WithdrawnGrant.cause:type_name -> kaname.cloud.iam.v1.WithdrawnGrantCause
-	18, // 20: kaname.cloud.iam.v1.Rule.match_labels:type_name -> kaname.cloud.iam.v1.Rule.MatchLabelsEntry
-	12, // 21: kaname.cloud.iam.v1.Rule.children:type_name -> kaname.cloud.iam.v1.Rule
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	18, // 11: kaname.cloud.iam.v1.Role.access_labels:type_name -> kaname.cloud.iam.v1.Role.AccessLabelsEntry
+	0,  // 12: kaname.cloud.iam.v1.RoleLifecycle.state:type_name -> kaname.cloud.iam.v1.RoleLifecycleState
+	21, // 13: kaname.cloud.iam.v1.RoleLifecycle.retired_at:type_name -> google.protobuf.Timestamp
+	1,  // 14: kaname.cloud.iam.v1.RuleState.state:type_name -> kaname.cloud.iam.v1.RuleLifecycle
+	8,  // 15: kaname.cloud.iam.v1.RuleState.children:type_name -> kaname.cloud.iam.v1.RuleState
+	2,  // 16: kaname.cloud.iam.v1.PrunedSelectorType.outcome:type_name -> kaname.cloud.iam.v1.SelectorPruneOutcome
+	21, // 17: kaname.cloud.iam.v1.PrunedSelectorType.pruned_at:type_name -> google.protobuf.Timestamp
+	4,  // 18: kaname.cloud.iam.v1.WithdrawnGrant.source:type_name -> kaname.cloud.iam.v1.WithdrawnGrantSource
+	21, // 19: kaname.cloud.iam.v1.WithdrawnGrant.withdrawn_at:type_name -> google.protobuf.Timestamp
+	3,  // 20: kaname.cloud.iam.v1.WithdrawnGrant.cause:type_name -> kaname.cloud.iam.v1.WithdrawnGrantCause
+	19, // 21: kaname.cloud.iam.v1.Rule.match_labels:type_name -> kaname.cloud.iam.v1.Rule.MatchLabelsEntry
+	12, // 22: kaname.cloud.iam.v1.Rule.children:type_name -> kaname.cloud.iam.v1.Rule
+	20, // 23: kaname.cloud.iam.v1.Rule.match_access_labels:type_name -> kaname.cloud.iam.v1.Rule.MatchAccessLabelsEntry
+	24, // [24:24] is the sub-list for method output_type
+	24, // [24:24] is the sub-list for method input_type
+	24, // [24:24] is the sub-list for extension type_name
+	24, // [24:24] is the sub-list for extension extendee
+	0,  // [0:24] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_role_proto_init() }
@@ -1945,7 +1983,7 @@ func file_kaname_cloud_iam_v1_role_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_role_proto_rawDesc), len(file_kaname_cloud_iam_v1_role_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   13,
+			NumMessages:   15,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -26,12 +26,13 @@ func (accountObj) toPb(a domain.Account) (*iamv1.Account, error) {
 		createdAt = timestamppb.New(a.CreatedAt.Truncate(tsTruncate))
 	}
 	return &iamv1.Account{
-		Id:          string(a.ID),
-		Name:        string(a.Name),
-		Description: string(a.Description),
-		Labels:      labelsToStringMap(a.Labels),
-		OwnerUserId: string(a.OwnerUserID),
-		CreatedAt:   createdAt,
+		Id:           string(a.ID),
+		Name:         string(a.Name),
+		Description:  string(a.Description),
+		Labels:       labelsToStringMap(a.Labels),
+		AccessLabels: labelsToStringMap(a.AccessLabels),
+		OwnerUserId:  string(a.OwnerUserID),
+		CreatedAt:    createdAt,
 	}, nil
 }
 

@@ -140,7 +140,7 @@ func (v *validator) resource(r Resource) Reason {
 	default:
 		return ReasonMalformed
 	}
-	if !v.consumeEntries(len(objects.IDs)) || !v.consumeEntries(len(r.Region.Labels)) {
+	if !v.consumeEntries(len(objects.IDs)) || !v.consumeEntries(len(r.Region.Labels)+len(r.Region.AccessLabels)) {
 		return ReasonLimit
 	}
 	for _, id := range objects.IDs {
@@ -150,6 +150,17 @@ func (v *validator) resource(r Resource) Reason {
 	}
 	for key, value := range r.Region.Labels {
 		if key == "" {
+			return ReasonMalformed
+		}
+		if reason := v.text(key); reason != ReasonNone {
+			return reason
+		}
+		if reason := v.text(value); reason != ReasonNone {
+			return reason
+		}
+	}
+	for key, value := range r.Region.AccessLabels {
+		if domain.LabelKey(key).Validate() != nil || domain.LabelVal(value).Validate() != nil {
 			return ReasonMalformed
 		}
 		if reason := v.text(key); reason != ReasonNone {
@@ -184,7 +195,7 @@ func (v *validator) resource(r Resource) Reason {
 func emptyResource(r Resource) bool {
 	return r.Module == "" && r.Type == "" && r.Action == (Action{}) &&
 		r.Region.Objects.Kind == 0 && len(r.Region.Objects.IDs) == 0 &&
-		len(r.Region.Labels) == 0 && r.Region.Creator == (Creator{})
+		len(r.Region.Labels) == 0 && len(r.Region.AccessLabels) == 0 && r.Region.Creator == (Creator{})
 }
 
 func (v *validator) consumeEntries(n int) bool {

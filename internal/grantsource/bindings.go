@@ -22,6 +22,9 @@ import (
 // Role отсутствует у системной формы GrantedRelation. Семантику роли и модели
 // проверяет будущий компилятор; сырая выдача не является разрешением.
 type BindingSource struct {
+	BindingSnapshot kaname.CapturedAccessLabelBindingSource
+	// Только observed role image после полного checkpoint; не held DB proof.
+	RoleSnapshot      *kaname.RoleProjectionSourceSnapshot
 	Binding           domain.AccessBinding
 	Role              *domain.Role
 	Recipient         domain.Subject

@@ -501,7 +501,13 @@ type RegisterResourceRequest struct {
 	// Для permanentProject: true требуется хотя бы одно звено project:<id>;
 	// каждое такое звено сверяется с неизменной привязкой объекта к проекту.
 	// Вызывающий явно передаёт цепь, в том числе при повторной регистрации.
-	ParentChain   []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
+	ParentChain []string `protobuf:"bytes,9,rep,name=parent_chain,json=parentChain,proto3" json:"parent_chain,omitempty"`
+	// Защищённые метки ресурса для IAM match_access_labels, отдельные от labels.
+	// Доставка владельцем ресурса не заменяет проверку права выдать доступ:
+	// добавленный эффект требует Grant в защищённой транзакции регистрации.
+	// Отсутствие/пустая proto3 map не объявляет очистку прежних access_labels;
+	// этот API без update_mask не является входом для их явной очистки.
+	AccessLabels  map[string]string `protobuf:"bytes,10,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -595,6 +601,13 @@ func (x *RegisterResourceRequest) GetSourceVersion() *timestamppb.Timestamp {
 func (x *RegisterResourceRequest) GetParentChain() []string {
 	if x != nil {
 		return x.ParentChain
+	}
+	return nil
+}
+
+func (x *RegisterResourceRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -1658,7 +1671,7 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x12HIGHER_CONSISTENCY\x10\x02\"A\n" +
 	"\rCheckResponse\x12\x18\n" +
 	"\aallowed\x18\x01 \x01(\bR\aallowed\x12\x16\n" +
-	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xd2\x03\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"\xf8\x04\n" +
 	"\x17RegisterResourceRequest\x12\x1d\n" +
 	"\n" +
 	"subject_id\x18\x01 \x01(\tR\tsubjectId\x12\x1a\n" +
@@ -1669,8 +1682,13 @@ const file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc = "" +
 	"\x11parent_project_id\x18\x06 \x01(\tR\x0fparentProjectId\x12*\n" +
 	"\x11parent_account_id\x18\a \x01(\tR\x0fparentAccountId\x12A\n" +
 	"\x0esource_version\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rsourceVersion\x12!\n" +
-	"\fparent_chain\x18\t \x03(\tR\vparentChain\x1a9\n" +
+	"\fparent_chain\x18\t \x03(\tR\vparentChain\x12c\n" +
+	"\raccess_labels\x18\n" +
+	" \x03(\v2>.kaname.cloud.iam.v1.RegisterResourceRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x1a\n" +
 	"\x18RegisterResourceResponse\"\xa2\x01\n" +
@@ -1758,7 +1776,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_kaname_cloud_iam_v1_internal_iam_service_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(CheckRequest_Consistency)(0),            // 0: kaname.cloud.iam.v1.CheckRequest.Consistency
 	(*LookupSubjectRequest)(nil),             // 1: kaname.cloud.iam.v1.LookupSubjectRequest
@@ -1784,49 +1802,51 @@ var file_kaname_cloud_iam_v1_internal_iam_service_proto_goTypes = []any{
 	(*CheckBasicCredentialLiveRequest)(nil),  // 21: kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
 	(*CheckBasicCredentialLiveResponse)(nil), // 22: kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
 	nil,                                      // 23: kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	nil,                                      // 24: kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	(*User)(nil),                             // 25: kaname.cloud.iam.v1.User
-	(*ServiceAccount)(nil),                   // 26: kaname.cloud.iam.v1.ServiceAccount
-	(*timestamppb.Timestamp)(nil),            // 27: google.protobuf.Timestamp
-	(*operation.Operation)(nil),              // 28: corelib.operation.Operation
+	nil,                                      // 24: kaname.cloud.iam.v1.RegisterResourceRequest.AccessLabelsEntry
+	nil,                                      // 25: kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
+	(*User)(nil),                             // 26: kaname.cloud.iam.v1.User
+	(*ServiceAccount)(nil),                   // 27: kaname.cloud.iam.v1.ServiceAccount
+	(*timestamppb.Timestamp)(nil),            // 28: google.protobuf.Timestamp
+	(*operation.Operation)(nil),              // 29: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_internal_iam_service_proto_depIdxs = []int32{
-	25, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
-	26, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
+	26, // 0: kaname.cloud.iam.v1.LookupSubjectResponse.user:type_name -> kaname.cloud.iam.v1.User
+	27, // 1: kaname.cloud.iam.v1.LookupSubjectResponse.service_account:type_name -> kaname.cloud.iam.v1.ServiceAccount
 	0,  // 2: kaname.cloud.iam.v1.CheckRequest.consistency:type_name -> kaname.cloud.iam.v1.CheckRequest.Consistency
 	23, // 3: kaname.cloud.iam.v1.RegisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.LabelsEntry
-	27, // 4: kaname.cloud.iam.v1.RegisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	27, // 5: kaname.cloud.iam.v1.CloseChildParentRequest.source_version:type_name -> google.protobuf.Timestamp
-	27, // 6: kaname.cloud.iam.v1.CloseChildParentResponse.closed_at:type_name -> google.protobuf.Timestamp
-	24, // 7: kaname.cloud.iam.v1.UnregisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
-	27, // 8: kaname.cloud.iam.v1.UnregisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
-	15, // 9: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
-	27, // 10: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
-	1,  // 11: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
-	3,  // 12: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
-	11, // 13: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
-	14, // 14: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
-	5,  // 15: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
-	7,  // 16: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:input_type -> kaname.cloud.iam.v1.CloseChildParentRequest
-	9,  // 17: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
-	19, // 18: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
-	17, // 19: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
-	21, // 20: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
-	2,  // 21: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
-	4,  // 22: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
-	28, // 23: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
-	16, // 24: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
-	6,  // 25: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
-	8,  // 26: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:output_type -> kaname.cloud.iam.v1.CloseChildParentResponse
-	10, // 27: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
-	20, // 28: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
-	18, // 29: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
-	22, // 30: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
-	21, // [21:31] is the sub-list for method output_type
-	11, // [11:21] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	28, // 4: kaname.cloud.iam.v1.RegisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
+	24, // 5: kaname.cloud.iam.v1.RegisterResourceRequest.access_labels:type_name -> kaname.cloud.iam.v1.RegisterResourceRequest.AccessLabelsEntry
+	28, // 6: kaname.cloud.iam.v1.CloseChildParentRequest.source_version:type_name -> google.protobuf.Timestamp
+	28, // 7: kaname.cloud.iam.v1.CloseChildParentResponse.closed_at:type_name -> google.protobuf.Timestamp
+	25, // 8: kaname.cloud.iam.v1.UnregisterResourceRequest.labels:type_name -> kaname.cloud.iam.v1.UnregisterResourceRequest.LabelsEntry
+	28, // 9: kaname.cloud.iam.v1.UnregisterResourceRequest.source_version:type_name -> google.protobuf.Timestamp
+	15, // 10: kaname.cloud.iam.v1.PollSubjectChangesResponse.changes:type_name -> kaname.cloud.iam.v1.SubjectChange
+	28, // 11: kaname.cloud.iam.v1.ResolveBasicCredentialResponse.expires_at:type_name -> google.protobuf.Timestamp
+	1,  // 12: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:input_type -> kaname.cloud.iam.v1.LookupSubjectRequest
+	3,  // 13: kaname.cloud.iam.v1.InternalIAMService.Check:input_type -> kaname.cloud.iam.v1.CheckRequest
+	11, // 14: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:input_type -> kaname.cloud.iam.v1.ForceLogoutRequest
+	14, // 15: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:input_type -> kaname.cloud.iam.v1.PollSubjectChangesRequest
+	5,  // 16: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:input_type -> kaname.cloud.iam.v1.RegisterResourceRequest
+	7,  // 17: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:input_type -> kaname.cloud.iam.v1.CloseChildParentRequest
+	9,  // 18: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:input_type -> kaname.cloud.iam.v1.UnregisterResourceRequest
+	19, // 19: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:input_type -> kaname.cloud.iam.v1.ResolveBasicCredentialRequest
+	17, // 20: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:input_type -> kaname.cloud.iam.v1.GetRoleCompiledRequest
+	21, // 21: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:input_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveRequest
+	2,  // 22: kaname.cloud.iam.v1.InternalIAMService.LookupSubject:output_type -> kaname.cloud.iam.v1.LookupSubjectResponse
+	4,  // 23: kaname.cloud.iam.v1.InternalIAMService.Check:output_type -> kaname.cloud.iam.v1.CheckResponse
+	29, // 24: kaname.cloud.iam.v1.InternalIAMService.ForceLogout:output_type -> corelib.operation.Operation
+	16, // 25: kaname.cloud.iam.v1.InternalIAMService.PollSubjectChanges:output_type -> kaname.cloud.iam.v1.PollSubjectChangesResponse
+	6,  // 26: kaname.cloud.iam.v1.InternalIAMService.RegisterResource:output_type -> kaname.cloud.iam.v1.RegisterResourceResponse
+	8,  // 27: kaname.cloud.iam.v1.InternalIAMService.CloseChildParent:output_type -> kaname.cloud.iam.v1.CloseChildParentResponse
+	10, // 28: kaname.cloud.iam.v1.InternalIAMService.UnregisterResource:output_type -> kaname.cloud.iam.v1.UnregisterResourceResponse
+	20, // 29: kaname.cloud.iam.v1.InternalIAMService.ResolveBasicCredential:output_type -> kaname.cloud.iam.v1.ResolveBasicCredentialResponse
+	18, // 30: kaname.cloud.iam.v1.InternalIAMService.GetRoleCompiled:output_type -> kaname.cloud.iam.v1.GetRoleCompiledResponse
+	22, // 31: kaname.cloud.iam.v1.InternalIAMService.CheckBasicCredentialLive:output_type -> kaname.cloud.iam.v1.CheckBasicCredentialLiveResponse
+	22, // [22:32] is the sub-list for method output_type
+	12, // [12:22] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_internal_iam_service_proto_init() }
@@ -1852,7 +1872,7 @@ func file_kaname_cloud_iam_v1_internal_iam_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_internal_iam_service_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   24,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

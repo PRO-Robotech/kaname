@@ -80,10 +80,10 @@ func TestProjectionColumnCounterKnowsParentheses(t *testing.T) {
 	// Запятая внутри скобок — не разделитель.
 	require.Equal(t, 2, countProjectionColumns("id, COALESCE(role_id, '') AS role_id"))
 	require.Equal(t, 1, countProjectionColumns("COALESCE(a, b, c)"))
-	// Живая проекция со скобками — двадцать колонок, а не двадцать три
+	// Живая проекция со скобками — двадцать одна колонка, а не двадцать четыре
 	// (три COALESCE; причина отзыва — kaname#963, ссылка на делегирование —
 	// kaname#986).
-	require.Equal(t, 20, countProjectionColumns(abCols),
+	require.Equal(t, 21, countProjectionColumns(abCols),
 		"abCols: считалка обязана пропустить запятую внутри COALESCE")
 }
 
@@ -102,9 +102,17 @@ func TestProjectionScanArityMatchesItsColumns(t *testing.T) {
 			func(d *destCounter) { _, _ = scanRole(d) }},
 		{"roleCols/scanRoleWithVersion", roleCols, 1,
 			func(d *destCounter) { var v string; _, _ = scanRoleWithVersion(d, &v) }},
+		{"roleCols/scanRoleWithTrailing", roleCols, 2,
+			func(d *destCounter) {
+				var live bool
+				var storedFPs []string
+				_, _ = scanRoleWithTrailing(d, &live, &storedFPs)
+			}},
 
 		{"userCols/scanUser", userCols, 0,
 			func(d *destCounter) { _, _ = scanUser(d) }},
+		{"userCols/scanUserStateWrite", userCols, 1,
+			func(d *destCounter) { _, _, _, _ = scanUserStateWrite(d) }},
 		{"userCols/scanUserWithCreated", userCols, 1,
 			func(d *destCounter) {
 				var u domain.User

@@ -98,6 +98,19 @@ func main() {
 
 	census, findings, code := modelrender.Sweep(rows.Resources, root, ledger)
 
+	// Внутренние capability blocks не принадлежат manifest resources и потому
+	// проверяются отдельно по полному канону, без послаблений обычного Sweep.
+	if census.CanonPath != "" {
+		_, nativeDSL, nativeErr := authzplan.ResolveCanonicalModelFrom(root)
+		if nativeErr == nil {
+			nativeErr = modelrender.ValidateNativeGrantCapabilityBlocks(nativeDSL)
+		}
+		if nativeErr != nil {
+			findings = append(findings, modelrender.Finding{Detail: "native capability canon: " + nativeErr.Error()})
+			code = modelrender.SweepFinding
+		}
+	}
+
 	// Перепись печатается ВСЕГДА и первой: без неё зелёный вердикт неотличим от
 	// вердикта обхода, не прочитавшего ничего.
 	fmt.Printf("корень обхода: %s\n", root)

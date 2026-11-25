@@ -3,12 +3,19 @@
 
 package catalog
 
-import "github.com/PRO-Robotech/kaname/internal/domain"
+import (
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
+)
 
 // ObjectRelations — общий смысл эмиссии одного правила на объекте. Его используют
 // материализатор и компилятор выдаваемого эффекта; собственного ранжирования
 // глаголов у потребителей нет. typeVerbs передаётся явно для проб урезанного типа.
 func (f *Facts) ObjectRelations(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string {
+	// У внутреннего права на ключ нет обычной объектной эмиссии и ярусов.
+	if fgaType == grantcapability.AccessLabelObjectType {
+		return nil
+	}
 	_, tier := domain.ResolveVerbsAndTier(authored, typeVerbs)
 	granted := f.GrantedVerbs(fgaType, authored, typeVerbs, policy)
 	seen := make(map[string]bool, len(granted)+1)
@@ -57,6 +64,9 @@ func (f *Facts) ScopeSelfRelations(scopeType string, authored, typeVerbs []strin
 // ObjectVerbs исключает действия, которые дают отношение на родителе.
 // Они не должны дополнительно порождать ярус или глагол на дочернем объекте.
 func (f *Facts) ObjectVerbs(dotted string, authored []string) []string {
+	if f != nil && f.fgaTypeByDotted[dotted] == grantcapability.AccessLabelObjectType {
+		return nil
+	}
 	out := make([]string, 0, len(authored))
 	for _, verb := range authored {
 		if _, container := f.ContainerVerb(dotted, verb); !container {

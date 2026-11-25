@@ -31,6 +31,15 @@ func decodeLabels(raw []byte) (map[string]string, error) {
 	return labels, nil
 }
 
+// decodeAccessLabels пропускает пустое значение, не создавая карту
+// для каждой строки до первого сохранённого управляемого атрибута.
+func decodeAccessLabels(raw []byte) (map[string]string, error) {
+	if len(raw) == 0 || string(raw) == "{}" {
+		return nil, nil
+	}
+	return decodeLabels(raw)
+}
+
 func (c *readOnlyLabelCache) decode(raw []byte) (map[string]string, error) {
 	if labels, found := c.values[string(raw)]; found {
 		return labels, nil

@@ -84,7 +84,10 @@ type ListGroupsRequest struct {
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// A filter expression. Supports filtering by [Group.name].
+	// Выражение фильтра с одним сравнением по `name` или по обычной метке.
+	//
+	// Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+	// Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
 	Filter        string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -211,7 +214,11 @@ type CreateGroupRequest struct {
 	// Description of the group.
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Начальные защищённые метки для IAM match_access_labels.
+	// Обычное право создать ресурс не разрешает выдавать доступ:
+	// весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+	AccessLabels  map[string]string `protobuf:"bytes,5,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -274,6 +281,13 @@ func (x *CreateGroupRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *CreateGroupRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
+	}
+	return nil
+}
+
 type UpdateGroupRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Group resource to update.
@@ -285,7 +299,14 @@ type UpdateGroupRequest struct {
 	// Description of the group.
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
-	Labels        map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels. Обычное право update
+	// не разрешает выдавать доступ: добавленный эффект требует Grant.
+	// update_mask без access_labels сохраняет их; с access_labels заменяет
+	// всю карту, в том числе очищает при пустом/отсутствующем поле.
+	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+	AccessLabels  map[string]string `protobuf:"bytes,6,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -351,6 +372,13 @@ func (x *UpdateGroupRequest) GetDescription() string {
 func (x *UpdateGroupRequest) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *UpdateGroupRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -780,24 +808,32 @@ const file_kaname_cloud_iam_v1_group_service_proto_rawDesc = "" +
 	"\x06filter\x18\x04 \x01(\tR\x06filter\"p\n" +
 	"\x12ListGroupsResponse\x122\n" +
 	"\x06groups\x18\x01 \x03(\v2\x1a.kaname.cloud.iam.v1.GroupR\x06groups\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xf1\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x92\x03\n" +
 	"\x12CreateGroupRequest\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12K\n" +
-	"\x06labels\x18\x04 \x03(\v23.kaname.cloud.iam.v1.CreateGroupRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x04 \x03(\v23.kaname.cloud.iam.v1.CreateGroupRequest.LabelsEntryR\x06labels\x12^\n" +
+	"\raccess_labels\x18\x05 \x03(\v29.kaname.cloud.iam.v1.CreateGroupRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xaa\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcb\x03\n" +
 	"\x12UpdateGroupRequest\x12\x19\n" +
 	"\bgroup_id\x18\x01 \x01(\tR\agroupId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
 	"updateMask\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12K\n" +
-	"\x06labels\x18\x05 \x03(\v23.kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x05 \x03(\v23.kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntryR\x06labels\x12^\n" +
+	"\raccess_labels\x18\x06 \x03(\v29.kaname.cloud.iam.v1.UpdateGroupRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"/\n" +
 	"\x12DeleteGroupRequest\x12\x19\n" +
@@ -867,7 +903,7 @@ func file_kaname_cloud_iam_v1_group_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_group_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_group_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_kaname_cloud_iam_v1_group_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_kaname_cloud_iam_v1_group_service_proto_goTypes = []any{
 	(*GetGroupRequest)(nil),             // 0: kaname.cloud.iam.v1.GetGroupRequest
 	(*ListGroupsRequest)(nil),           // 1: kaname.cloud.iam.v1.ListGroupsRequest
@@ -882,42 +918,46 @@ var file_kaname_cloud_iam_v1_group_service_proto_goTypes = []any{
 	(*ListGroupOperationsRequest)(nil),  // 10: kaname.cloud.iam.v1.ListGroupOperationsRequest
 	(*ListGroupOperationsResponse)(nil), // 11: kaname.cloud.iam.v1.ListGroupOperationsResponse
 	nil,                                 // 12: kaname.cloud.iam.v1.CreateGroupRequest.LabelsEntry
-	nil,                                 // 13: kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntry
-	(*Group)(nil),                       // 14: kaname.cloud.iam.v1.Group
-	(*fieldmaskpb.FieldMask)(nil),       // 15: google.protobuf.FieldMask
-	(*GroupMember)(nil),                 // 16: kaname.cloud.iam.v1.GroupMember
-	(*operation.Operation)(nil),         // 17: corelib.operation.Operation
+	nil,                                 // 13: kaname.cloud.iam.v1.CreateGroupRequest.AccessLabelsEntry
+	nil,                                 // 14: kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntry
+	nil,                                 // 15: kaname.cloud.iam.v1.UpdateGroupRequest.AccessLabelsEntry
+	(*Group)(nil),                       // 16: kaname.cloud.iam.v1.Group
+	(*fieldmaskpb.FieldMask)(nil),       // 17: google.protobuf.FieldMask
+	(*GroupMember)(nil),                 // 18: kaname.cloud.iam.v1.GroupMember
+	(*operation.Operation)(nil),         // 19: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_group_service_proto_depIdxs = []int32{
-	14, // 0: kaname.cloud.iam.v1.ListGroupsResponse.groups:type_name -> kaname.cloud.iam.v1.Group
+	16, // 0: kaname.cloud.iam.v1.ListGroupsResponse.groups:type_name -> kaname.cloud.iam.v1.Group
 	12, // 1: kaname.cloud.iam.v1.CreateGroupRequest.labels:type_name -> kaname.cloud.iam.v1.CreateGroupRequest.LabelsEntry
-	15, // 2: kaname.cloud.iam.v1.UpdateGroupRequest.update_mask:type_name -> google.protobuf.FieldMask
-	13, // 3: kaname.cloud.iam.v1.UpdateGroupRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntry
-	16, // 4: kaname.cloud.iam.v1.ListGroupMembersResponse.members:type_name -> kaname.cloud.iam.v1.GroupMember
-	17, // 5: kaname.cloud.iam.v1.ListGroupOperationsResponse.operations:type_name -> corelib.operation.Operation
-	0,  // 6: kaname.cloud.iam.v1.GroupService.Get:input_type -> kaname.cloud.iam.v1.GetGroupRequest
-	1,  // 7: kaname.cloud.iam.v1.GroupService.List:input_type -> kaname.cloud.iam.v1.ListGroupsRequest
-	3,  // 8: kaname.cloud.iam.v1.GroupService.Create:input_type -> kaname.cloud.iam.v1.CreateGroupRequest
-	4,  // 9: kaname.cloud.iam.v1.GroupService.Update:input_type -> kaname.cloud.iam.v1.UpdateGroupRequest
-	5,  // 10: kaname.cloud.iam.v1.GroupService.Delete:input_type -> kaname.cloud.iam.v1.DeleteGroupRequest
-	6,  // 11: kaname.cloud.iam.v1.GroupService.AddMember:input_type -> kaname.cloud.iam.v1.AddGroupMemberRequest
-	7,  // 12: kaname.cloud.iam.v1.GroupService.RemoveMember:input_type -> kaname.cloud.iam.v1.RemoveGroupMemberRequest
-	8,  // 13: kaname.cloud.iam.v1.GroupService.ListMembers:input_type -> kaname.cloud.iam.v1.ListGroupMembersRequest
-	10, // 14: kaname.cloud.iam.v1.GroupService.ListOperations:input_type -> kaname.cloud.iam.v1.ListGroupOperationsRequest
-	14, // 15: kaname.cloud.iam.v1.GroupService.Get:output_type -> kaname.cloud.iam.v1.Group
-	2,  // 16: kaname.cloud.iam.v1.GroupService.List:output_type -> kaname.cloud.iam.v1.ListGroupsResponse
-	17, // 17: kaname.cloud.iam.v1.GroupService.Create:output_type -> corelib.operation.Operation
-	17, // 18: kaname.cloud.iam.v1.GroupService.Update:output_type -> corelib.operation.Operation
-	17, // 19: kaname.cloud.iam.v1.GroupService.Delete:output_type -> corelib.operation.Operation
-	17, // 20: kaname.cloud.iam.v1.GroupService.AddMember:output_type -> corelib.operation.Operation
-	17, // 21: kaname.cloud.iam.v1.GroupService.RemoveMember:output_type -> corelib.operation.Operation
-	9,  // 22: kaname.cloud.iam.v1.GroupService.ListMembers:output_type -> kaname.cloud.iam.v1.ListGroupMembersResponse
-	11, // 23: kaname.cloud.iam.v1.GroupService.ListOperations:output_type -> kaname.cloud.iam.v1.ListGroupOperationsResponse
-	15, // [15:24] is the sub-list for method output_type
-	6,  // [6:15] is the sub-list for method input_type
-	6,  // [6:6] is the sub-list for extension type_name
-	6,  // [6:6] is the sub-list for extension extendee
-	0,  // [0:6] is the sub-list for field type_name
+	13, // 2: kaname.cloud.iam.v1.CreateGroupRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateGroupRequest.AccessLabelsEntry
+	17, // 3: kaname.cloud.iam.v1.UpdateGroupRequest.update_mask:type_name -> google.protobuf.FieldMask
+	14, // 4: kaname.cloud.iam.v1.UpdateGroupRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateGroupRequest.LabelsEntry
+	15, // 5: kaname.cloud.iam.v1.UpdateGroupRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateGroupRequest.AccessLabelsEntry
+	18, // 6: kaname.cloud.iam.v1.ListGroupMembersResponse.members:type_name -> kaname.cloud.iam.v1.GroupMember
+	19, // 7: kaname.cloud.iam.v1.ListGroupOperationsResponse.operations:type_name -> corelib.operation.Operation
+	0,  // 8: kaname.cloud.iam.v1.GroupService.Get:input_type -> kaname.cloud.iam.v1.GetGroupRequest
+	1,  // 9: kaname.cloud.iam.v1.GroupService.List:input_type -> kaname.cloud.iam.v1.ListGroupsRequest
+	3,  // 10: kaname.cloud.iam.v1.GroupService.Create:input_type -> kaname.cloud.iam.v1.CreateGroupRequest
+	4,  // 11: kaname.cloud.iam.v1.GroupService.Update:input_type -> kaname.cloud.iam.v1.UpdateGroupRequest
+	5,  // 12: kaname.cloud.iam.v1.GroupService.Delete:input_type -> kaname.cloud.iam.v1.DeleteGroupRequest
+	6,  // 13: kaname.cloud.iam.v1.GroupService.AddMember:input_type -> kaname.cloud.iam.v1.AddGroupMemberRequest
+	7,  // 14: kaname.cloud.iam.v1.GroupService.RemoveMember:input_type -> kaname.cloud.iam.v1.RemoveGroupMemberRequest
+	8,  // 15: kaname.cloud.iam.v1.GroupService.ListMembers:input_type -> kaname.cloud.iam.v1.ListGroupMembersRequest
+	10, // 16: kaname.cloud.iam.v1.GroupService.ListOperations:input_type -> kaname.cloud.iam.v1.ListGroupOperationsRequest
+	16, // 17: kaname.cloud.iam.v1.GroupService.Get:output_type -> kaname.cloud.iam.v1.Group
+	2,  // 18: kaname.cloud.iam.v1.GroupService.List:output_type -> kaname.cloud.iam.v1.ListGroupsResponse
+	19, // 19: kaname.cloud.iam.v1.GroupService.Create:output_type -> corelib.operation.Operation
+	19, // 20: kaname.cloud.iam.v1.GroupService.Update:output_type -> corelib.operation.Operation
+	19, // 21: kaname.cloud.iam.v1.GroupService.Delete:output_type -> corelib.operation.Operation
+	19, // 22: kaname.cloud.iam.v1.GroupService.AddMember:output_type -> corelib.operation.Operation
+	19, // 23: kaname.cloud.iam.v1.GroupService.RemoveMember:output_type -> corelib.operation.Operation
+	9,  // 24: kaname.cloud.iam.v1.GroupService.ListMembers:output_type -> kaname.cloud.iam.v1.ListGroupMembersResponse
+	11, // 25: kaname.cloud.iam.v1.GroupService.ListOperations:output_type -> kaname.cloud.iam.v1.ListGroupOperationsResponse
+	17, // [17:26] is the sub-list for method output_type
+	8,  // [8:17] is the sub-list for method input_type
+	8,  // [8:8] is the sub-list for extension type_name
+	8,  // [8:8] is the sub-list for extension extendee
+	0,  // [0:8] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_group_service_proto_init() }
@@ -932,7 +972,7 @@ func file_kaname_cloud_iam_v1_group_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_group_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_group_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

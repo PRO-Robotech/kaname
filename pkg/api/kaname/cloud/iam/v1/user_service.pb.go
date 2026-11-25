@@ -95,6 +95,9 @@ type ListUsersRequest struct {
 	// `search` is the term a console types into: a User has no `name`, and the
 	// exact-match terms above only answer someone who already knows the whole
 	// value. `%` and `_` in its value are matched literally, not as wildcards.
+	//
+	// Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+	// Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
 	Filter        string `protobuf:"bytes,3,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -367,7 +370,14 @@ type UpdateUserRequest struct {
 	// Единственное применяемое mutable-поле; identity-поля (`external_id` и иные
 	// IdP-projected) hard-immutable и в request не переносятся. Аннотации
 	// (size/key/value pattern) — паритет account/project/group/role request `labels`.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels. Обычное право update
+	// не разрешает выдавать доступ: добавленный эффект требует Grant.
+	// update_mask без access_labels сохраняет их; с access_labels заменяет
+	// всю карту, в том числе очищает при пустом/отсутствующем поле.
+	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+	AccessLabels  map[string]string `protobuf:"bytes,5,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -419,6 +429,13 @@ func (x *UpdateUserRequest) GetUpdateMask() *fieldmaskpb.FieldMask {
 func (x *UpdateUserRequest) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *UpdateUserRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -861,13 +878,17 @@ const file_kaname_cloud_iam_v1_user_service_proto_rawDesc = "" +
 	"\x13ResendInviteRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId\"\xfc\x01\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"\x9c\x03\n" +
 	"\x11UpdateUserRequest\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
 	"updateMask\x12J\n" +
-	"\x06labels\x18\x04 \x03(\v22.kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x04 \x03(\v22.kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntryR\x06labels\x12]\n" +
+	"\raccess_labels\x18\x05 \x03(\v28.kaname.cloud.iam.v1.UpdateUserRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x03\x10\x04R\x04user\",\n" +
 	"\x11DeleteUserRequest\x12\x17\n" +
@@ -943,7 +964,7 @@ func file_kaname_cloud_iam_v1_user_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_user_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 15)
+var file_kaname_cloud_iam_v1_user_service_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_kaname_cloud_iam_v1_user_service_proto_goTypes = []any{
 	(*GetUserRequest)(nil),               // 0: kaname.cloud.iam.v1.GetUserRequest
 	(*ListUsersRequest)(nil),             // 1: kaname.cloud.iam.v1.ListUsersRequest
@@ -960,44 +981,46 @@ var file_kaname_cloud_iam_v1_user_service_proto_goTypes = []any{
 	(*ListUserOperationsRequest)(nil),    // 12: kaname.cloud.iam.v1.ListUserOperationsRequest
 	(*ListUserOperationsResponse)(nil),   // 13: kaname.cloud.iam.v1.ListUserOperationsResponse
 	nil,                                  // 14: kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
-	(*User)(nil),                         // 15: kaname.cloud.iam.v1.User
-	(*fieldmaskpb.FieldMask)(nil),        // 16: google.protobuf.FieldMask
-	(*operation.Operation)(nil),          // 17: corelib.operation.Operation
+	nil,                                  // 15: kaname.cloud.iam.v1.UpdateUserRequest.AccessLabelsEntry
+	(*User)(nil),                         // 16: kaname.cloud.iam.v1.User
+	(*fieldmaskpb.FieldMask)(nil),        // 17: google.protobuf.FieldMask
+	(*operation.Operation)(nil),          // 18: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_user_service_proto_depIdxs = []int32{
-	15, // 0: kaname.cloud.iam.v1.ListUsersResponse.users:type_name -> kaname.cloud.iam.v1.User
-	16, // 1: kaname.cloud.iam.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
+	16, // 0: kaname.cloud.iam.v1.ListUsersResponse.users:type_name -> kaname.cloud.iam.v1.User
+	17, // 1: kaname.cloud.iam.v1.UpdateUserRequest.update_mask:type_name -> google.protobuf.FieldMask
 	14, // 2: kaname.cloud.iam.v1.UpdateUserRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateUserRequest.LabelsEntry
-	17, // 3: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> corelib.operation.Operation
-	0,  // 4: kaname.cloud.iam.v1.UserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
-	1,  // 5: kaname.cloud.iam.v1.UserService.List:input_type -> kaname.cloud.iam.v1.ListUsersRequest
-	3,  // 6: kaname.cloud.iam.v1.UserService.Invite:input_type -> kaname.cloud.iam.v1.InviteUserRequest
-	4,  // 7: kaname.cloud.iam.v1.UserService.ResendInvite:input_type -> kaname.cloud.iam.v1.ResendInviteRequest
-	5,  // 8: kaname.cloud.iam.v1.UserService.Update:input_type -> kaname.cloud.iam.v1.UpdateUserRequest
-	6,  // 9: kaname.cloud.iam.v1.UserService.Delete:input_type -> kaname.cloud.iam.v1.DeleteUserRequest
-	7,  // 10: kaname.cloud.iam.v1.UserService.RemoveFromAccount:input_type -> kaname.cloud.iam.v1.RemoveUserFromAccountRequest
-	8,  // 11: kaname.cloud.iam.v1.UserService.Block:input_type -> kaname.cloud.iam.v1.BlockUserRequest
-	9,  // 12: kaname.cloud.iam.v1.UserService.Unblock:input_type -> kaname.cloud.iam.v1.UnblockUserRequest
-	10, // 13: kaname.cloud.iam.v1.UserService.ResetSecondFactor:input_type -> kaname.cloud.iam.v1.ResetSecondFactorRequest
-	11, // 14: kaname.cloud.iam.v1.UserService.ResetAccessKeys:input_type -> kaname.cloud.iam.v1.ResetAccessKeysRequest
-	12, // 15: kaname.cloud.iam.v1.UserService.ListOperations:input_type -> kaname.cloud.iam.v1.ListUserOperationsRequest
-	15, // 16: kaname.cloud.iam.v1.UserService.Get:output_type -> kaname.cloud.iam.v1.User
-	2,  // 17: kaname.cloud.iam.v1.UserService.List:output_type -> kaname.cloud.iam.v1.ListUsersResponse
-	17, // 18: kaname.cloud.iam.v1.UserService.Invite:output_type -> corelib.operation.Operation
-	17, // 19: kaname.cloud.iam.v1.UserService.ResendInvite:output_type -> corelib.operation.Operation
-	17, // 20: kaname.cloud.iam.v1.UserService.Update:output_type -> corelib.operation.Operation
-	17, // 21: kaname.cloud.iam.v1.UserService.Delete:output_type -> corelib.operation.Operation
-	17, // 22: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> corelib.operation.Operation
-	17, // 23: kaname.cloud.iam.v1.UserService.Block:output_type -> corelib.operation.Operation
-	17, // 24: kaname.cloud.iam.v1.UserService.Unblock:output_type -> corelib.operation.Operation
-	17, // 25: kaname.cloud.iam.v1.UserService.ResetSecondFactor:output_type -> corelib.operation.Operation
-	17, // 26: kaname.cloud.iam.v1.UserService.ResetAccessKeys:output_type -> corelib.operation.Operation
-	13, // 27: kaname.cloud.iam.v1.UserService.ListOperations:output_type -> kaname.cloud.iam.v1.ListUserOperationsResponse
-	16, // [16:28] is the sub-list for method output_type
-	4,  // [4:16] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	15, // 3: kaname.cloud.iam.v1.UpdateUserRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateUserRequest.AccessLabelsEntry
+	18, // 4: kaname.cloud.iam.v1.ListUserOperationsResponse.operations:type_name -> corelib.operation.Operation
+	0,  // 5: kaname.cloud.iam.v1.UserService.Get:input_type -> kaname.cloud.iam.v1.GetUserRequest
+	1,  // 6: kaname.cloud.iam.v1.UserService.List:input_type -> kaname.cloud.iam.v1.ListUsersRequest
+	3,  // 7: kaname.cloud.iam.v1.UserService.Invite:input_type -> kaname.cloud.iam.v1.InviteUserRequest
+	4,  // 8: kaname.cloud.iam.v1.UserService.ResendInvite:input_type -> kaname.cloud.iam.v1.ResendInviteRequest
+	5,  // 9: kaname.cloud.iam.v1.UserService.Update:input_type -> kaname.cloud.iam.v1.UpdateUserRequest
+	6,  // 10: kaname.cloud.iam.v1.UserService.Delete:input_type -> kaname.cloud.iam.v1.DeleteUserRequest
+	7,  // 11: kaname.cloud.iam.v1.UserService.RemoveFromAccount:input_type -> kaname.cloud.iam.v1.RemoveUserFromAccountRequest
+	8,  // 12: kaname.cloud.iam.v1.UserService.Block:input_type -> kaname.cloud.iam.v1.BlockUserRequest
+	9,  // 13: kaname.cloud.iam.v1.UserService.Unblock:input_type -> kaname.cloud.iam.v1.UnblockUserRequest
+	10, // 14: kaname.cloud.iam.v1.UserService.ResetSecondFactor:input_type -> kaname.cloud.iam.v1.ResetSecondFactorRequest
+	11, // 15: kaname.cloud.iam.v1.UserService.ResetAccessKeys:input_type -> kaname.cloud.iam.v1.ResetAccessKeysRequest
+	12, // 16: kaname.cloud.iam.v1.UserService.ListOperations:input_type -> kaname.cloud.iam.v1.ListUserOperationsRequest
+	16, // 17: kaname.cloud.iam.v1.UserService.Get:output_type -> kaname.cloud.iam.v1.User
+	2,  // 18: kaname.cloud.iam.v1.UserService.List:output_type -> kaname.cloud.iam.v1.ListUsersResponse
+	18, // 19: kaname.cloud.iam.v1.UserService.Invite:output_type -> corelib.operation.Operation
+	18, // 20: kaname.cloud.iam.v1.UserService.ResendInvite:output_type -> corelib.operation.Operation
+	18, // 21: kaname.cloud.iam.v1.UserService.Update:output_type -> corelib.operation.Operation
+	18, // 22: kaname.cloud.iam.v1.UserService.Delete:output_type -> corelib.operation.Operation
+	18, // 23: kaname.cloud.iam.v1.UserService.RemoveFromAccount:output_type -> corelib.operation.Operation
+	18, // 24: kaname.cloud.iam.v1.UserService.Block:output_type -> corelib.operation.Operation
+	18, // 25: kaname.cloud.iam.v1.UserService.Unblock:output_type -> corelib.operation.Operation
+	18, // 26: kaname.cloud.iam.v1.UserService.ResetSecondFactor:output_type -> corelib.operation.Operation
+	18, // 27: kaname.cloud.iam.v1.UserService.ResetAccessKeys:output_type -> corelib.operation.Operation
+	13, // 28: kaname.cloud.iam.v1.UserService.ListOperations:output_type -> kaname.cloud.iam.v1.ListUserOperationsResponse
+	17, // [17:29] is the sub-list for method output_type
+	5,  // [5:17] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_user_service_proto_init() }
@@ -1012,7 +1035,7 @@ func file_kaname_cloud_iam_v1_user_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_user_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_user_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   15,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

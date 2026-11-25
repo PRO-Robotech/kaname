@@ -47,11 +47,15 @@ func (p *resourceParentCapture) captureObjectProjection(ctx context.Context, typ
 		CreatorType   string            `json:"created_by_type"`
 		CreatorID     string            `json:"created_by_id"`
 		Labels        map[string]string `json:"labels"`
+		AccessLabels  map[string]string `json:"access_labels"`
 	}
 	if err = json.Unmarshal(rows[0].value, &row); err != nil {
 		return out, false, err
 	}
 	out = domain.MirrorObject{ObjectType: typ, ObjectID: id, Labels: row.Labels}
+	if len(row.AccessLabels) != 0 {
+		out.AccessLabels = row.AccessLabels
+	}
 	account, project := "", ""
 	if kind == resourceSourceMirror {
 		if row.ObjectType != typ || row.ObjectID != id {

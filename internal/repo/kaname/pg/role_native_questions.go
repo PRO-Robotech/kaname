@@ -33,8 +33,13 @@ func discoverRoleNativeQuestions(ctx context.Context, tx pgx.Tx, actor domain.Su
 	if !request.content {
 		role.Rules = nil
 	}
+	// У исходной роли и всех носителей одна и та же подтверждаемая форма правил.
+	_, capabilities, err := domain.SplitGrantCapabilityRules(role.Rules)
+	if err != nil {
+		return nil, 0, err
+	}
 	questions := newNativePolicyQuestions()
-	if err := questions.roleBase(actor, role, request.create); err != nil {
+	if err := questions.roleBase(actor, role, request.create, capabilities); err != nil {
 		return nil, 0, err
 	}
 	if request.create || !request.content {
@@ -78,7 +83,7 @@ func discoverRoleNativeQuestions(ctx context.Context, tx pgx.Tx, actor domain.Su
 				return nil, total, kaname.ErrCanonicalSourceInvalid
 			}
 			after = string(binding.ID)
-			if err = questions.roleCarrier(actor, binding); err != nil {
+			if err = questions.roleCarrier(actor, binding, capabilities); err != nil {
 				rows.Close()
 				return nil, total, err
 			}

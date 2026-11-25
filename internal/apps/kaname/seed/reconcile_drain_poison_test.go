@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/reconcile_outbox"
 )
 
@@ -59,6 +60,8 @@ type poisonQueue struct {
 	causes   []string
 	marked   []int64
 }
+
+func (*poisonQueue) DeferReconcileEvent(context.Context, int64) error { return nil }
 
 func (q *poisonQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox.Event, error) {
 	q.mu.Lock()
@@ -204,6 +207,8 @@ type countingOKQueue struct {
 	marked   int
 }
 
+func (*countingOKQueue) DeferReconcileEvent(context.Context, int64) error { return nil }
+
 func (q *countingOKQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox.Event, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -238,4 +243,40 @@ func (q *countingOKQueue) snapshot() (int, int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	return q.failures, q.marked
+}
+
+type pendingReconcileEngine struct{ failingEngine }
+
+func (*pendingReconcileEngine) ReconcileObject(_ context.Context, _, id string) error {
+	if id == "prj-pending" {
+		return kaname.ErrAccessLabelReconcilePending
+	}
+	return nil
+}
+
+type pendingReconcileQueue struct {
+	poisonQueue
+	deferred []int64
+}
+
+func (*pendingReconcileQueue) ClaimReconcileEvents(context.Context, int) ([]reconcile_outbox.Event, error) {
+	return []reconcile_outbox.Event{
+		{ID: 1, ObjectType: "iam.project", ObjectID: "prj-pending"},
+		{ID: 2, ObjectType: "iam.project", ObjectID: "prj-fresh"},
+	}, nil
+}
+
+func (q *pendingReconcileQueue) DeferReconcileEvent(_ context.Context, id int64) error {
+	q.deferred = append(q.deferred, id)
+	return nil
+}
+
+func TestReconcileDrainDefersPendingAccessLabelGeneration(t *testing.T) {
+	queue := &pendingReconcileQueue{}
+	worker := NewReconcileWorker(&pendingReconcileEngine{}, queue, ReconcileWorkerConfig{})
+	worker.drain(context.Background())
+	attempts, causes, marked := queue.snapshot()
+	if attempts != 0 || len(causes) != 0 || len(marked) != 1 || marked[0] != 2 || len(queue.deferred) != 1 || queue.deferred[0] != 1 {
+		t.Fatalf("ожидали отсрочку 1 и завершение 2 без учёта отказа, получили: deferred=%v sent=%v attempts=%d", queue.deferred, marked, attempts)
+	}
 }

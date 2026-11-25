@@ -22,15 +22,16 @@ const (
 )
 
 type resourceObjectPreparation struct {
-	lifetime *resourceAttemptLifetime
-	source   *resourceSourceCapture
-	route    resourceObjectRoute
-	root     *resourceOutputCapture
-	outputs  []*resourceOutputCapture
-	inputs   []reconcile.CapturedObjectDiff
-	commands []reconcile.BindingCommand
-	effects  *resourceObjectEffectProposal
-	additive bool
+	lifetime   *resourceAttemptLifetime
+	source     *resourceSourceCapture
+	route      resourceObjectRoute
+	root       *resourceOutputCapture
+	outputs    []*resourceOutputCapture
+	inputs     []reconcile.CapturedObjectDiff
+	commands   []reconcile.BindingCommand
+	effects    *resourceObjectEffectProposal
+	additive   bool
+	generation resourceGenerationProjection
 }
 
 // Маршруты сохраняют прежний выбор: обычный forward при standing members
@@ -41,13 +42,6 @@ func prepareResourceObject(ctx context.Context, parents *resourceParentCapture, 
 	if parents == nil || parents.source == nil || parents.source.sealed || facts == nil || !nativeQuestionToken(typ) || !nativeQuestionToken(id) || route < resourceObjectFull || route > resourceObjectForwardNoStale {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
-	object, present, err := parents.captureObjectProjection(ctx, typ, id)
-	if err != nil {
-		return nil, err
-	}
-	if !present {
-		object = domain.MirrorObject{ObjectType: typ, ObjectID: id}
-	}
 	capture, err := parents.catalog(ctx, typ)
 	if err != nil {
 		return nil, err
@@ -55,6 +49,35 @@ func prepareResourceObject(ctx context.Context, parents *resourceParentCapture, 
 	cat, known := capture.selected()
 	if !known || cat.identity.Dotted != typ {
 		return nil, kaname.ErrSourceUnconfirmed
+	}
+	var generation resourceGenerationProjection
+	if route == resourceObjectFull {
+		generation, err = captureResourceGeneration(ctx, parents, cat.identity.ObjectType, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	object, present, err := parents.captureObjectProjection(ctx, typ, id)
+	if err != nil {
+		return nil, err
+	}
+	if !present {
+		if generation.fingerprint != nil {
+			// Отсутствующий выход чужого поколения не определяет область корня.
+			if !slices.Contains(generation.externalRoots, domain.ResourceRef{Type: typ, ID: id}) {
+				return nil, kaname.ErrAccessLabelReconcilePending
+			}
+			// Сохранённый scope нужен SQL для проверки жизненного цикла под
+			// оградами. Пустой предикат оставляет событие в очереди.
+			scopes, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: resourceSourceRegistrationScopes, typ: cat.identity.ObjectType, id: id})
+			if err != nil {
+				return nil, err
+			}
+			if len(scopes) == 0 {
+				return nil, kaname.ErrAccessLabelReconcilePending
+			}
+		}
+		object = domain.MirrorObject{ObjectType: typ, ObjectID: id}
 	}
 	root, err := captureResourceOutput(ctx, parents, cat, id)
 	if err != nil {
@@ -69,7 +92,7 @@ func prepareResourceObject(ctx context.Context, parents *resourceParentCapture, 
 	if err = root.captureMatchingBindings(ctx, parents, object, present); err != nil {
 		return nil, err
 	}
-	result := &resourceObjectPreparation{lifetime: parents.source.lifetime, source: parents.source, route: route, root: root, outputs: []*resourceOutputCapture{root}, additive: additive}
+	result := &resourceObjectPreparation{lifetime: parents.source.lifetime, source: parents.source, route: route, root: root, outputs: []*resourceOutputCapture{root}, additive: additive, generation: generation}
 	var ancestors []domain.MirrorObject
 	if len(root.selected) > 0 {
 		// SQL certificate проверяет ancestry каждой выбранной координаты,

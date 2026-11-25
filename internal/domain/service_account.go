@@ -26,6 +26,8 @@ type ServiceAccount struct {
 	// наравне с account/project (ARM_LABELS-грант на iam.serviceAccount → v_list
 	// по `labels @> matchLabels`; List фильтрует viewer ∪ v_list).
 	Labels Labels
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
 	// CreatedBy — ФАКТ СОЗДАТЕЛЯ (kaname#1003, приёмка
 	// `service-account-creation-is-its-own-right.md`, Р4): принципал, вызвавший
 	// `ServiceAccountService.Create`. Пишется в транзакции создания и НЕ меняется
@@ -53,6 +55,7 @@ func (s ServiceAccount) Validate() error {
 	errs = multierr.Append(errs, s.Name.Validate())
 	errs = multierr.Append(errs, s.Description.Validate())
 	errs = multierr.Append(errs, s.Labels.Validate())
+	errs = multierr.Append(errs, s.AccessLabels.Validate())
 	if s.AccountID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
 	}

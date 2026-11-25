@@ -5,7 +5,6 @@ package pg
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
@@ -21,12 +20,7 @@ func (p *resourceObjectPreparation) apply(ctx context.Context, tx *resourceDecis
 	if p == nil || p.source == nil || !p.source.sealed || p.root == nil || facts == nil || tx == nil || tx.lifetime != p.lifetime || p.lifetime == nil || !p.lifetime.valid(tx.owner, p.lifetime.bundle) {
 		return kaname.ErrSourceUnconfirmed
 	}
-	intent, err := json.Marshal(struct {
-		Kind  string              `json:"kind"`
-		Type  string              `json:"object_type"`
-		ID    string              `json:"object_id"`
-		Route resourceObjectRoute `json:"route"`
-	}{"object", p.root.object.Type, p.root.object.ID, p.route})
+	intent, err := p.intent()
 	if err != nil {
 		return err
 	}
@@ -41,6 +35,7 @@ func (p *resourceObjectPreparation) apply(ctx context.Context, tx *resourceDecis
 	if err != nil {
 		return err
 	}
+	tx.accessLabelPending = *values.AccessLabelPending
 	store := &resourceObjectBodyStore{reconcileStore: &reconcileStore{tx: tx, cat: facts, decisionAt: p.lifetime.at}, transactionAt: values.TransactionAt, decisionAt: values.DecisionAt}
 	audits := make(map[int]*resourceObjectAuditValue, len(values.Audits))
 	for i := range values.Audits {

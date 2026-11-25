@@ -50,7 +50,12 @@ var _ rolerepo.GrantReferenceReader = (*roleWriter)(nil)
 func (w *roleWriter) LockGrantAuthoringAxes(ctx context.Context, caps []domain.GrantCapabilityRule) error {
 	needed := map[domain.GrantCapabilityKind]bool{}
 	for _, c := range caps {
-		needed[c.Kind] = true
+		switch c.Kind {
+		case domain.GrantCapabilityCreateBinding, domain.GrantCapabilityBindRole:
+			needed[c.Kind] = true
+		default:
+			return iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Grant authoring axis unavailable")
+		}
 	}
 	for _, axis := range []struct {
 		kind           domain.GrantCapabilityKind

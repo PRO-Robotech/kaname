@@ -70,11 +70,41 @@ func (s *nativePolicyQuestions) binding(actor domain.Subject, scope domain.Scope
 	return nil
 }
 
+// Объявление вопроса не является доказательством права. Exact apply всегда
+// сохраняет обе координаты: область настоящего носителя и UUID определения.
+func (s *nativePolicyQuestions) accessLabelCapabilities(actor domain.Subject, scope domain.ScopeAnchor, caps []domain.GrantCapabilityRule) error {
+	for _, cap := range caps {
+		if cap.Kind != domain.GrantCapabilityApplyAccessLabel {
+			continue
+		}
+		ref, err := grantcapability.Encode(grantcapability.Coordinate{Kind: cap.Kind, Anchor: scope, DefinitionID: cap.DefinitionID})
+		if err != nil {
+			return err
+		}
+		if err = s.add(actor, ref.Relation, ref.ObjectType, ref.ObjectID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Правила читаются из той же RR-роли, которая участвует в discovery.
+func (s *nativePolicyQuestions) bindingRole(actor domain.Subject, scope domain.ScopeAnchor, role domain.Role) error {
+	if err := s.binding(actor, scope, role.ID); err != nil {
+		return err
+	}
+	_, caps, err := domain.SplitGrantCapabilityRules(role.Rules)
+	if err != nil {
+		return err
+	}
+	return s.accessLabelCapabilities(actor, scope, caps)
+}
+
 // roleBase включает ВСЕ proposed references, даже system: лишний объявленный
 // вопрос не даёт allow, зато discovery не зависит от позднего изменения tier.
 // Для Update caller обязан дочитать population и вызвать roleCarrier для каждой
 // строки до capture. Этот builder не удостоверяет завершение чужого census.
-func (s *nativePolicyQuestions) roleBase(actor domain.Subject, r domain.Role, create bool) error {
+func (s *nativePolicyQuestions) roleBase(actor domain.Subject, r domain.Role, create bool, caps []domain.GrantCapabilityRule) error {
 	scope := domain.ScopeAnchor{Type: "account", ID: string(r.AccountID)}
 	if r.ProjectID != "" {
 		scope = domain.ScopeAnchor{Type: "project", ID: string(r.ProjectID)}
@@ -92,23 +122,37 @@ func (s *nativePolicyQuestions) roleBase(actor domain.Subject, r domain.Role, cr
 	if err := s.add(actor, relation, typ, id); err != nil {
 		return err
 	}
-	_, caps, err := domain.SplitGrantCapabilityRules(r.Rules)
-	if err != nil {
-		return err
-	}
 	for _, cap := range caps {
-		if cap.Kind == domain.GrantCapabilityBindRole {
+		switch cap.Kind {
+		case domain.GrantCapabilityCreateBinding:
+		case domain.GrantCapabilityApplyAccessLabel:
+			// Тот же fallback, что grantpolicy.roleScope. Наличие вопроса
+			// не требует покрытия fallback при живых носителях роли.
+			fallback := domain.ScopeAnchor{Type: "account", ID: string(r.AccountID)}
+			if r.ProjectID != "" {
+				fallback = domain.ScopeAnchor{Type: "project", ID: string(r.ProjectID)}
+			}
+			if err := s.accessLabelCapabilities(actor, fallback, []domain.GrantCapabilityRule{cap}); err != nil {
+				return err
+			}
+		case domain.GrantCapabilityBindRole:
 			for _, rel := range []string{"viewer", "v_list"} {
-				if err = s.add(actor, rel, "iam_role", string(cap.BoundRoleID)); err != nil {
+				if err := s.add(actor, rel, "iam_role", string(cap.BoundRoleID)); err != nil {
 					return err
 				}
 			}
+		default:
+			return kaname.ErrInvalidAuthorityFencePlan
 		}
 	}
 	return nil
 }
-func (s *nativePolicyQuestions) roleCarrier(actor domain.Subject, b domain.AccessBinding) error {
-	return s.scopeAdmin(actor, domain.ScopeAnchor{Type: string(b.ResourceType), ID: b.ResourceID})
+func (s *nativePolicyQuestions) roleCarrier(actor domain.Subject, b domain.AccessBinding, caps []domain.GrantCapabilityRule) error {
+	scope := domain.ScopeAnchor{Type: string(b.ResourceType), ID: b.ResourceID}
+	if err := s.scopeAdmin(actor, scope); err != nil {
+		return err
+	}
+	return s.accessLabelCapabilities(actor, scope, caps)
 }
 func (s *nativePolicyQuestions) groupBase(actor domain.Subject, g domain.Group) error {
 	if err := s.add(actor, "v_update", "iam_group", string(g.ID)); err != nil {

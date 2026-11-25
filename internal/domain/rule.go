@@ -39,6 +39,9 @@ type Rule struct {
 	Verbs         []string
 	ResourceNames []string
 	MatchLabels   map[string]string
+	// MatchAccessLabels выбирает отдельные метки доступа. Поле не меняет JSON
+	// прежнего Rule при прямом marshal (его использует capability fingerprint).
+	MatchAccessLabels map[string]string `json:",omitempty"`
 	// Children — вложенные правила (kaname#874, nested_rule.go): правила над
 	// типами, лежащими под типом-контейнером этого правила. nil — вложенных нет;
 	// пустой непустой срез формой не является (второй способ сказать «нет»).
@@ -82,11 +85,17 @@ const (
 	ArmAnchor Arm = iota
 	ArmNames
 	ArmLabels
+	// Значения прежних ветвей неизменны: они входят в существующие проекции.
+	ArmAccessLabels
 )
 
 // Arm reports the selector arm of the rule (resource_names XOR match_labels).
 func (r Rule) Arm() Arm {
 	switch {
+	// Даже пустой/несовместимый новый селектор не становится якорем в
+	// потребителе, который ещё не вызвал Validate.
+	case r.MatchAccessLabels != nil:
+		return ArmAccessLabels
 	case len(r.ResourceNames) > 0:
 		return ArmNames
 	case len(r.MatchLabels) > 0:
@@ -109,6 +118,10 @@ func (r Rule) Arm() Arm {
 func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 	var errs error
 
+	// Новый selector взаимоисключающ с каждым прежним; отсутствие — только nil.
+	if r.MatchAccessLabels != nil && (r.MatchLabels != nil || len(r.ResourceNames) > 0 || r.CreatedBySubject) {
+		errs = multierr.Append(errs, fmt.Errorf("Illegal argument: matchAccessLabels cannot combine with matchLabels, resourceNames or createdBySubject"))
+	}
 	// resource_names XOR match_labels.
 	if len(r.ResourceNames) > 0 && len(r.MatchLabels) > 0 {
 		errs = multierr.Append(errs, fmt.Errorf(
@@ -170,6 +183,22 @@ func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 		}
 	}
 
+	// Метки доступа имеют те же ограничения формы, но отдельную семантику.
+	if r.MatchAccessLabels != nil {
+		if len(r.MatchAccessLabels) == 0 {
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument matchAccessLabels (must be non-empty when set)"))
+		}
+		if len(r.MatchAccessLabels) > maxMatchLabels {
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument matchAccessLabels (cardinality must be <=%d keys)", maxMatchLabels))
+		}
+		for k, v := range r.MatchAccessLabels {
+			errs = multierr.Append(errs, multierr.Combine(LabelKey(k).Validate(), LabelVal(v).Validate()))
+		}
+		if r.hasAnyWildcard() {
+			errs = multierr.Append(errs, fmt.Errorf("Illegal argument: wildcard cannot combine with matchAccessLabels"))
+		}
+	}
+
 	// wildcard + selector combination: any `*` together with a selector
 	// is illegal.
 	if r.hasAnyWildcard() && (len(r.ResourceNames) > 0 || len(r.MatchLabels) > 0) {
@@ -185,7 +214,7 @@ func (r Rule) Validate(policy RulePolicy, modules ModuleSet) error {
 	errs = multierr.Append(errs, r.validateRetirementGate())
 
 	// feed-availability gate: match_labels only on fed types.
-	if len(r.MatchLabels) > 0 {
+	if len(r.MatchLabels) > 0 || r.MatchAccessLabels != nil {
 		errs = multierr.Append(errs, r.validateFeedGate())
 	}
 
@@ -442,8 +471,8 @@ func CompileRules(rules []Rule) (Permissions, error) {
 			continue
 		}
 		switch r.Arm() {
-		case ArmLabels:
-			continue // not compiled
+		case ArmLabels, ArmAccessLabels:
+			continue // Селектор нельзя выразить плоским permission.
 		case ArmNames:
 			for _, res := range r.Resources {
 				for _, id := range r.ResourceNames {

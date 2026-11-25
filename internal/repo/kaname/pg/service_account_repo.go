@@ -39,7 +39,7 @@ type saReader struct {
 // zero value: false for an enabled account and false for a disabled one, with
 // nothing able to tell them apart. That is not a missing convenience, it is a
 // state nobody downstream can read — including the operator who set it.
-const saCols = "id, account_id, name, description, labels, created_at, enabled"
+const saCols = "id, account_id, name, description, labels, created_at, enabled, access_labels"
 
 func (r *saReader) Get(ctx context.Context, id domain.ServiceAccountID) (domain.ServiceAccount, error) {
 	row := r.tx.QueryRow(ctx,
@@ -68,16 +68,12 @@ func (r *saReader) List(ctx context.Context, f service_account.ListFilter) ([]do
 		argIdx++
 	}
 	if f.Filter != "" {
-		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
-		// expression, so the column follows the whitelist instead of being
-		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
 		if ferr != nil {
 			return nil, "", ferr
 		}
 		if ast != nil {
-			frag, fargs := ast.ToSQL(argIdx)
+			frag, fargs := listFilterSQL(ast, argIdx)
 			conditions = append(conditions, frag)
 			args = append(args, fargs...)
 			argIdx += len(fargs)
@@ -361,8 +357,8 @@ func (w *saWriter) Delete(ctx context.Context, id domain.ServiceAccountID) error
 
 func scanSA(row scanner) (domain.ServiceAccount, error) {
 	var (
-		sa         domain.ServiceAccount
-		labelsJSON []byte
+		sa                           domain.ServiceAccount
+		labelsJSON, accessLabelsJSON []byte
 	)
 	err := row.Scan(
 		(*string)(&sa.ID),
@@ -372,11 +368,16 @@ func scanSA(row scanner) (domain.ServiceAccount, error) {
 		&labelsJSON,
 		&sa.CreatedAt,
 		&sa.Enabled,
+		&accessLabelsJSON,
 	)
 	if err != nil {
 		return domain.ServiceAccount{}, err
 	}
 	sa.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.ServiceAccount{}, err
+	}
+	sa.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
 	if err != nil {
 		return domain.ServiceAccount{}, err
 	}

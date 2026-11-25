@@ -60,6 +60,9 @@ func (h *Handler) WithListAllOperations(uc *ListAllOperationsUseCase) *Handler {
 
 // Create — sync-validation + create Operation + spawn worker.
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccountRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	a := domain.Account{
 		// Пусто — идентификатор чеканит генератор; указан — use-case судит его
 		// форму и право вызывающего задать его.
@@ -78,6 +81,11 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateAccountRequest) (
 
 // Update — sync mask validation + create Operation + spawn worker.
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateAccountRequest) (*operationpb.Operation, error) {
+	if h.update.accessLabelsWriter() == nil {
+		if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+			return nil, err
+		}
+	}
 	in := UpdateAccountInput{
 		ID: domain.AccountID(req.GetAccountId()),
 	}
@@ -91,6 +99,9 @@ func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateAccountRequest) (
 	}
 	if labels := req.GetLabels(); labels != nil {
 		in.Labels = labelsFromProto(labels)
+	}
+	if labels := req.GetAccessLabels(); labels != nil {
+		in.AccessLabels = labelsFromProto(labels)
 	}
 	if mask := req.GetUpdateMask(); mask != nil {
 		in.UpdateMask = append([]string{}, mask.GetPaths()...)

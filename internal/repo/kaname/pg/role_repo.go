@@ -48,7 +48,7 @@ type roleReader struct {
 // владельца у роли, которая им обладает, и судила бы её платформенной, то есть
 // САМОЙ МЯГКОЙ. Столбец, который пишут и не читают, невидим отовсюду; здесь цена
 // такой невидимости — послабление, выданное молча.
-const roleCols = "id, cluster_id, account_id, project_id, name, description, permissions, rules, is_system, owner_module, created_at, updated_at, labels"
+const roleCols = "id, cluster_id, account_id, project_id, name, description, permissions, rules, is_system, owner_module, created_at, updated_at, labels, access_labels"
 
 // rulesToJSON / rulesFromJSON delegate to the domain codec (domain.EncodeRules /
 // domain.DecodeRules) — the single source of truth for the roles.rules JSONB shape
@@ -375,16 +375,12 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 		argIdx++
 	}
 	if f.Filter != "" {
-		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
-		// expression, so the column follows the whitelist instead of being
-		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
 		if ferr != nil {
 			return nil, "", ferr
 		}
 		if ast != nil {
-			frag, fargs := ast.ToSQL(argIdx)
+			frag, fargs := listFilterSQL(ast, argIdx)
 			conditions = append(conditions, frag)
 			args = append(args, fargs...)
 			argIdx += len(fargs)
@@ -967,7 +963,7 @@ func (w *roleWriter) Delete(ctx context.Context, id domain.RoleID) error {
 
 // ReplaceRuleSelectors syncs role_rule_selectors with the role's UNIFIED
 // materializing rules (flat explicit RBAC model): ARM_ANCHOR(all) +
-// ARM_NAMES + ARM_LABELS. DELETE-all-then-INSERT keyed by role_id inside the caller
+// ARM_NAMES + ARM_LABELS + ARM_ACCESS_LABELS. DELETE-all-then-INSERT keyed by role_id inside the caller
 // tx, so a removed/edited rule drops/replaces its selector atomically with the rules
 // change (ban #10). A rule whose dotted-types are empty (wildcard `*.*` system form,
 // served by the cluster super-admin short-circuit) is NOT persisted — it materializes nothing.
@@ -1249,6 +1245,13 @@ func (w *roleWriter) upsertRuleSelector(ctx context.Context, roleID domain.RoleI
 	if string(labelsJSON) == "null" {
 		labelsJSON = []byte("{}")
 	}
+	accessLabelsJSON, err := json.Marshal(sel.MatchAccessLabels)
+	if err != nil {
+		return iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument matchAccessLabels: %s", err.Error())
+	}
+	if string(accessLabelsJSON) == "null" {
+		accessLabelsJSON = []byte("{}")
+	}
 	// pgx encodes a nil []string as SQL NULL, which violates the NOT NULL column
 	// (DEFAULT applies only when the column is OMITTED, not when NULL is passed
 	// explicitly). Normalize to an empty array so an anchor/labels selector (no
@@ -1265,30 +1268,32 @@ func (w *roleWriter) upsertRuleSelector(ctx context.Context, roleID domain.RoleI
 	if err != nil {
 		return err
 	}
-	// Контейнер вложенного правила (kaname#874) — четыре колонки; модельное
+	// Контейнер вложенного правила — пять колонок отбора; модельное
 	// имя типа контейнера выводит страж базы (`role_rule_selector_types_live`)
 	// из живой строки каталога, писатель его не пишет.
 	if _, err := w.tx.Exec(ctx,
 		`INSERT INTO kaname.role_rule_selectors
 		   (role_id, rule_fp, arm, object_types, resource_names, match_labels,
 		    container_type, container_arm, container_resource_names, container_match_labels,
-		    verbs_by_type, created_by_subject, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, now(), now())
+		    verbs_by_type, created_by_subject, match_access_labels, container_match_access_labels, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13::jsonb, $14::jsonb, now(), now())
 		 ON CONFLICT (role_id, rule_fp) DO UPDATE
 		    SET arm                      = EXCLUDED.arm,
 		        object_types             = EXCLUDED.object_types,
 		        resource_names           = EXCLUDED.resource_names,
 		        match_labels             = EXCLUDED.match_labels,
+		        match_access_labels      = EXCLUDED.match_access_labels,
 		        container_type           = EXCLUDED.container_type,
 		        container_arm            = EXCLUDED.container_arm,
 		        container_resource_names = EXCLUDED.container_resource_names,
 		        container_match_labels   = EXCLUDED.container_match_labels,
+		        container_match_access_labels = EXCLUDED.container_match_access_labels,
 		        verbs_by_type            = EXCLUDED.verbs_by_type,
 		        created_by_subject       = EXCLUDED.created_by_subject,
 		        updated_at               = now()`,
 		string(roleID), sel.RuleFP, armText(sel.Arm), sel.ObjectTypes, resourceNames, labelsJSON,
 		cont.typ, cont.arm, cont.names, cont.labels, grants,
-		sel.CreatedBySubject,
+		sel.CreatedBySubject, accessLabelsJSON, cont.accessLabels,
 	); err != nil {
 		// A CHECK violation (23514 — e.g. match_labels fails labels_valid)
 		// must surface as InvalidArgument, not INTERNAL; mapErr also keeps the pgx
@@ -1453,15 +1458,16 @@ func lockedCatalogTypesOf(selectors []domain.RuleSelector) []string {
 // У селектора правила верхнего уровня тип и ветвь — NULL, перечни пусты: так
 // их ждёт ограничение формы `role_rule_selectors_container_shape`.
 type selectorContainer struct {
-	typ    *string
-	arm    *string
-	names  []string
-	labels []byte
+	typ          *string
+	arm          *string
+	names        []string
+	labels       []byte
+	accessLabels []byte
 }
 
 // containerColumnsOf — колонки контейнера селектора.
 func containerColumnsOf(sel domain.RuleSelector) (selectorContainer, error) {
-	out := selectorContainer{names: []string{}, labels: []byte("{}")}
+	out := selectorContainer{names: []string{}, labels: []byte("{}"), accessLabels: []byte("{}")}
 	if sel.Container == nil {
 		return out, nil
 	}
@@ -1477,6 +1483,13 @@ func containerColumnsOf(sel domain.RuleSelector) (selectorContainer, error) {
 		}
 		out.labels = raw
 	}
+	if len(sel.Container.MatchAccessLabels) > 0 {
+		raw, err := json.Marshal(sel.Container.MatchAccessLabels)
+		if err != nil {
+			return out, iamerr.Wrapf(iamerr.ErrInvalidArg, "Illegal argument matchAccessLabels: %s", err.Error())
+		}
+		out.accessLabels = raw
+	}
 	return out, nil
 }
 
@@ -1487,8 +1500,13 @@ func armText(a domain.Arm) string {
 		return "names"
 	case domain.ArmLabels:
 		return "labels"
-	default:
+	case domain.ArmAccessLabels:
+		return "access_labels"
+	case domain.ArmAnchor:
 		return "anchor"
+	default:
+		// Ограничение role_rule_selectors отклонит неподдерживаемую ветвь.
+		return ""
 	}
 }
 
@@ -1547,13 +1565,13 @@ func scanRoleWithVersion(row scanner, versionOut ...*string) (domain.Role, error
 
 func scanRoleWithVersionAndTrailing(row scanner, versionOut []*string, trailing []any) (domain.Role, error) {
 	var (
-		ro                       domain.Role
-		clusterID, accID, projID sql.NullString
-		ownerModule              sql.NullString
-		permsJSON, rulesJSON     []byte
-		labelsJSON               []byte
+		ro                           domain.Role
+		clusterID, accID, projID     sql.NullString
+		ownerModule                  sql.NullString
+		permsJSON, rulesJSON         []byte
+		labelsJSON, accessLabelsJSON []byte
 	)
-	dest := make([]any, 0, 14)
+	dest := make([]any, 0, 15+len(trailing))
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -1571,6 +1589,7 @@ func scanRoleWithVersionAndTrailing(row scanner, versionOut []*string, trailing 
 		&ro.CreatedAt,
 		&ro.UpdatedAt,
 		&labelsJSON,
+		&accessLabelsJSON,
 	)
 	dest = append(dest, trailing...)
 	if err := row.Scan(dest...); err != nil {
@@ -1596,6 +1615,10 @@ func scanRoleWithVersionAndTrailing(row scanner, versionOut []*string, trailing 
 	}
 	var err error
 	ro.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.Role{}, err
+	}
+	ro.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
 	if err != nil {
 		return domain.Role{}, err
 	}

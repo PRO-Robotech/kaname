@@ -16,6 +16,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestPreparedRoleAuthoringAxesRequireExactCapability(t *testing.T) {
+	captured := domain.GrantCapabilityRule{
+		Kind:         domain.GrantCapabilityApplyAccessLabel,
+		RuleFP:       "captured-rule",
+		DefinitionID: "0a8326e4-52c8-4e78-b82b-c6a7039b7b2d",
+	}
+	stage := &roleMutationStage{}
+	stage.projection.Capabilities = []domain.GrantCapabilityRule{captured}
+	raw := &roleWriter{}
+	writer := &preparedRoleRowWriter{
+		WriterIface: raw,
+		owner:       &preparedRoleWriteTx{stage: stage},
+	}
+
+	t.Run("изменилось определение", func(t *testing.T) {
+		changed := captured
+		changed.DefinitionID = "9ca1658c-1ce8-408b-b051-9002f91cba51"
+		require.ErrorIs(t, writer.LockGrantAuthoringAxes(context.Background(), []domain.GrantCapabilityRule{changed}),
+			kaname.ErrInvalidAuthorityFencePlan)
+	})
+	t.Run("изменился отпечаток", func(t *testing.T) {
+		changed := captured
+		changed.RuleFP = "other-rule"
+		require.ErrorIs(t, writer.LockGrantAuthoringAxes(context.Background(), []domain.GrantCapabilityRule{changed}),
+			kaname.ErrInvalidAuthorityFencePlan)
+	})
+	t.Run("точное правило требует подтверждённого prepared writer", func(t *testing.T) {
+		require.ErrorIs(t, writer.LockGrantAuthoringAxes(context.Background(), []domain.GrantCapabilityRule{captured}),
+			kaname.ErrSourceUnconfirmed)
+	})
+}
+
 type roleProjectionStatement struct {
 	SQL  string
 	Args []any

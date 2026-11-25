@@ -28,6 +28,10 @@ import (
 func (c Config) Validate() error {
 	var errs error
 	errs = multierr.Append(errs, c.AuthorityProtocol.Validate())
+	errs = multierr.Append(errs, c.Repository.Postgres.RoleWriter.Validate())
+	if c.Repository.Postgres.RoleWriter.Enabled() && !c.AuthorityProtocol.FullSemantics {
+		errs = multierr.Append(errs, fmt.Errorf("repository.postgres.role-writer requires authority-protocol.full-semantics"))
+	}
 
 	errs = multierr.Append(errs, c.validateMode())
 

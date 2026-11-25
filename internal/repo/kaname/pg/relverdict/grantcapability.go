@@ -68,12 +68,15 @@ func askGrantCapability(ctx context.Context, tx pgx.Tx, in Query) (Verdict, Grou
 	if tx == nil {
 		return Unknown, g, fmt.Errorf("relverdict: grant capability transaction absent")
 	}
-	join := "JOIN kaname.role_create_binding_rule meta ON meta.role_id=owner.id"
-	if coordinate.Kind == domain.GrantCapabilityBindRole {
+	var join string
+	switch coordinate.Kind {
+	case domain.GrantCapabilityBindRole:
 		join = "JOIN kaname.role_bind_role_rule meta ON meta.role_id=owner.id AND meta.bound_role_id=$4::text JOIN kaname.roles referent ON referent.id=meta.bound_role_id AND referent.live"
-	} else {
+	case domain.GrantCapabilityCreateBinding:
 		// У каждого параметра есть тип и в форме создания привязки.
-		join += " AND $4::text=''"
+		join = "JOIN kaname.role_create_binding_rule meta ON meta.role_id=owner.id AND $4::text=''"
+	default:
+		return Unknown, g, fmt.Errorf("relverdict: unsupported grant capability source")
 	}
 	sql := strings.Replace(grantCapabilitySQL, "{{meta_join}}", join, 1)
 	speakers := strings.NewReplacer("$10", "$6", "$11", "$7").Replace(directSpeakerPairsSQL)

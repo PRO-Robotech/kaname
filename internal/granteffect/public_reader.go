@@ -48,7 +48,7 @@ func (c *Compiler) classDeclaration(s *Set, subject domain.Subject, typ, rel str
 // compilePublicReaders сначала доказывает отбор контейнера по owner-правилу,
 // цели и области. В модель передаётся отношение НА всём выбранном контейнере:
 // ограничение по запускающему ребёнку потеряло бы права других и будущих детей.
-func (c *Compiler) compilePublicReaders(s *Set, b Binding, selectors []domain.RuleSelector, origins map[string]string, p Provenance) {
+func (c *Compiler) compilePublicReaders(s *Set, b Binding, selectors []domain.RuleSelector, origins map[string]string, p Provenance, focal *MetadataObject) {
 	type selected struct {
 		region    []Constraint
 		owners    map[string]bool
@@ -68,7 +68,7 @@ func (c *Compiler) compilePublicReaders(s *Set, b Binding, selectors []domain.Ru
 				s.obligations = append(s.obligations, Obligation{"catalog_type", dotted, p})
 				continue
 			}
-			regions, err := c.selectorRegions(sel, dotted, typ, b)
+			regions, err := c.bindingSelectorRegions(sel, dotted, typ, b, focal)
 			if err != nil {
 				s.obligations = append(s.obligations, Obligation{"public_reader_selector", err.Error(), p})
 				continue

@@ -21,22 +21,25 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/clients"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 type UpdateProjectInput struct {
-	ID          domain.ProjectID
-	Name        *domain.ProjectName
-	Description *domain.Description
-	Labels      domain.Labels
-	UpdateMask  []string
+	ID           domain.ProjectID
+	Name         *domain.ProjectName
+	Description  *domain.Description
+	Labels       domain.Labels
+	AccessLabels domain.Labels
+	UpdateMask   []string
 }
 
 var projectMutableFields = map[string]struct{}{
-	"name":        {},
-	"description": {},
-	"labels":      {},
+	"name":          {},
+	"description":   {},
+	"labels":        {},
+	"access_labels": {},
 }
 
 var projectImmutableFields = map[string]string{
@@ -52,6 +55,7 @@ var projectImmutableFields = map[string]string{
 
 type UpdateProjectUseCase struct {
 	metadataConfigured bool
+	metadataLabelsOnly bool
 	metadataFactory    kanamerepo.ProjectMetadataWriterFactory
 	repo               Repo
 	opsRepo            operations.Repo
@@ -94,6 +98,11 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 	if err := authzguard.RequireAuthenticated(ctx); err != nil {
 		return nil, err
 	}
+	mask, nextAccessLabels, applyAccessLabels := shared.ResolveAccessLabelsUpdate(in.UpdateMask, in.AccessLabels)
+	in.UpdateMask = mask
+	if applyAccessLabels && u.accessLabelsWriter() == nil {
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Protected accessLabels writer unavailable")
+	}
 	if err := shared.ValidateUpdateMask(in.UpdateMask, projectMutableFields, projectImmutableFields); err != nil {
 		return nil, err
 	}
@@ -132,9 +141,15 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 		target.Description = *in.Description
 		changed = append(changed, "description")
 	}
-	if newLabels, apply := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels); apply && !shared.LabelsEqual(newLabels, current.Labels) {
+	newLabels, applyLabels := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels)
+	if applyLabels && !shared.LabelsEqual(newLabels, current.Labels) {
 		target.Labels = newLabels
 		changed = append(changed, "labels")
+	}
+
+	if applyAccessLabels && !shared.LabelsEqual(nextAccessLabels, current.AccessLabels) {
+		target.AccessLabels = nextAccessLabels
+		changed = append(changed, "access_labels")
 	}
 
 	if err := target.Validate(); err != nil {
@@ -158,6 +173,17 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 	}
 
 	maskCopy := append([]string{}, in.UpdateMask...)
+	// Отсутствие labels в implicit PATCH не разрешает записать их старый
+	// снимок поверх конкурентной правки. Остальные поля сохраняют full-PATCH.
+	if len(maskCopy) == 0 && (!applyLabels || applyAccessLabels) {
+		maskCopy = []string{"name", "description"}
+		if applyLabels {
+			maskCopy = append(maskCopy, "labels")
+		}
+		if applyAccessLabels {
+			maskCopy = append(maskCopy, "access_labels")
+		}
+	}
 	changedCopy := append([]string{}, changed...)
 	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
@@ -189,14 +215,28 @@ func (u *UpdateProjectUseCase) Execute(ctx context.Context, in UpdateProjectInpu
 // reconcile event above and the periodic sweep stay the at-least-once backstop, so this
 // changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, mask []string, actor string, changed []string) (*anypb.Any, error) {
+	// Результат несёт только дельту закоммиченной попытки: prepared executor
+	// вправе повторить тело с другим OLD после отката предыдущей попытки.
+	type updateResult struct {
+		resource domain.Project
+		changed  []string
+	}
 	updated, err := shared.DoWithWriteTx(ctx, u.metadataRepo(p, mask),
-		func(ctx context.Context, w Writer) (domain.Project, error) {
+		func(ctx context.Context, w Writer) (updateResult, error) {
+			attemptChanged := append([]string(nil), changed...)
+			if u.metadataRequired(mask) {
+				effects, ok := w.(kanamerepo.MetadataUpdateEffects)
+				if !ok {
+					return updateResult{}, iamerr.Wrapf(iamerr.ErrUnavailable, "Metadata update effects unavailable")
+				}
+				attemptChanged = append([]string(nil), effects.MetadataChangedFields()...)
+			}
 			upd, uerr := w.ProjectsW().Update(ctx, p, mask)
 			if uerr != nil {
-				return domain.Project{}, uerr
+				return updateResult{}, uerr
 			}
-			if len(changed) == 0 {
-				return upd, nil
+			if len(attemptChanged) == 0 {
+				return updateResult{resource: upd, changed: attemptChanged}, nil
 			}
 			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventProjectUpdated,
@@ -206,10 +246,10 @@ func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, m
 					"resource_type":  "project",
 					"resource_id":    string(upd.ID),
 					"account_id":     string(upd.AccountID),
-					"changed_fields": changed,
+					"changed_fields": attemptChanged,
 				},
 			}); aerr != nil {
-				return domain.Project{}, aerr
+				return updateResult{}, aerr
 			}
 			// T3/Q2: a project LABEL change can flip iam-direct selector membership
 			// (a selector matching the project by labels). Co-commit a reconcile
@@ -217,12 +257,12 @@ func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, m
 			// so the reconciler re-evaluates affected iam.project selector bindings
 			// (≤2s) instead of waiting for the periodic sweep. Only on a labels
 			// change — name/description do not affect selector membership.
-			if labelsChanged(changed) {
+			if labelsChanged(attemptChanged) {
 				if rerr := w.EmitReconcileEvent(ctx, "mirror.upsert", "iam.project", string(upd.ID)); rerr != nil {
-					return domain.Project{}, rerr
+					return updateResult{}, rerr
 				}
 			}
-			return upd, nil
+			return updateResult{resource: upd, changed: attemptChanged}, nil
 		})
 	if err != nil {
 		return nil, err
@@ -232,8 +272,8 @@ func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, m
 	// ReconcileObjectForward is the same entry point the cross-service register path
 	// uses: its delete-stale guard finds the existing members and delegates to the FULL
 	// ReconcileObject, which is what actually revokes a now-unmatched grant.
-	if labelsChanged(changed) && u.reconciler != nil {
-		id := string(updated.ID)
+	if labelsChanged(updated.changed) && u.reconciler != nil {
+		id := string(updated.resource.ID)
 		shared.GoPostCommit(ctx, u.logger, "project label re-materialization", func(ctx context.Context) {
 			if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.project", id); rerr != nil && u.logger != nil {
 				u.logger.Error("project update: label re-materialization failed (reconcile event + sweep will retry)",
@@ -241,5 +281,5 @@ func (u *UpdateProjectUseCase) doUpdate(ctx context.Context, p domain.Project, m
 			}
 		})
 	}
-	return marshalProject(updated)
+	return marshalProject(updated.resource)
 }

@@ -82,6 +82,32 @@
 {{- end }}
 {{- end }}
 {{- end }}
+{{- /* Bootstrap — отдельное явное действие владельца, не селектор FULL. */}}
+{{- $authority := .Values.authorityProtocol | default dict }}
+{{- $bootstrapRole := "" }}
+{{- if hasKey $authority "bootstrapRuntimeRole" }}
+{{- if not (kindIs "string" $authority.bootstrapRuntimeRole) }}
+{{- fail "authorityProtocol.bootstrapRuntimeRole: ожидается строка имени существующего runtime LOGIN" }}
+{{- end }}
+{{- $bootstrapRole = $authority.bootstrapRuntimeRole }}
+{{- end }}
+{{- if $bootstrapRole }}
+{{- if eq (trim $bootstrapRole) "" }}
+{{- fail "authorityProtocol.bootstrapRuntimeRole: имя runtime LOGIN не может состоять из пробелов" }}
+{{- end }}
+{{- if not (and .Values.db.migrationDSNSecretName .Values.db.migrationDSNSecretKey) }}
+{{- fail "authorityProtocol.bootstrapRuntimeRole требует db.migrationDSNSecretName и db.migrationDSNSecretKey владельца схемы" }}
+{{- end }}
+{{- $fullKnob := "KANAME_AUTHORITY_PROTOCOL__FULL_SEMANTICS" }}
+{{- if or (hasKey (.Values.secrets | default dict) $fullKnob) (and (hasKey (.Values.env | default dict) $fullKnob) (not (has (lower (toString (index .Values.env $fullKnob))) (list "false" "f" "0")))) }}
+{{- fail "authorityProtocol.bootstrapRuntimeRole несовместим с FULL: KANAME_AUTHORITY_PROTOCOL__FULL_SEMANTICS должен отсутствовать либо явно выключать FULL в env; secret не позволяет проверить режим" }}
+{{- end }}
+{{- range $knob := list "KANAME_MANIFESTS__DIR" "KANAME_MANIFESTS__REQUIRED" }}
+{{- if or (hasKey ($.Values.env | default dict) $knob) (hasKey ($.Values.secrets | default dict) $knob) }}
+{{- fail (printf "authorityProtocol.bootstrapRuntimeRole: %s в env либо secrets несовместим с общим источником moduleManifests" $knob) }}
+{{- end }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -284,6 +310,40 @@ spec:
                   name: {{ .Values.db.passwordSecretName }}
                   key: {{ .Values.db.passwordSecretKey }}
             {{- end }}
+        {{- if $bootstrapRole }}
+        # После наката владелец подтверждает Gen1 для явно названного LOGIN.
+        # Ни настройки службы, ни её пароль в этот контейнер не передаются.
+        - name: authority-bootstrap
+          image: "{{ .Values.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["/usr/local/bin/kaname-migrator", "authority-bundle", "bootstrap"]
+          args:
+            - "--runtime-role"
+            - {{ $bootstrapRole | quote }}
+            {{- if $mmList }}
+            - "--manifest-dir"
+            - {{ $mmDir | quote }}
+            {{- else }}
+            - "--image-only"
+            {{- end }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          {{- if $mmList }}
+          volumeMounts:
+            - name: module-manifests
+              mountPath: {{ $mmDir | quote }}
+              readOnly: true
+          {{- end }}
+          env:
+            - name: MIGRATOR_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.db.migrationDSNSecretName | quote }}
+                  key: {{ .Values.db.migrationDSNSecretKey | quote }}
+        {{- end }}
       containers:
         - name: {{ .Values.name }}
           image: "{{ .Values.image }}"

@@ -255,6 +255,7 @@ type RepositoryConfig struct {
 //
 //	подстановки в URL и SlaveURL. По умолчанию — KANAME_DB_PASSWORD.
 type PostgresConfig struct {
+	RoleWriter RoleWriterConfig `mapstructure:"role-writer"`
 	URL      string `mapstructure:"url"`
 	SlaveURL string `mapstructure:"slave-url"`
 	MaxConns int    `mapstructure:"max-conns"`

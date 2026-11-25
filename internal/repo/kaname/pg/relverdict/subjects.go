@@ -131,11 +131,11 @@ scope_distinct(s_type, s_id, depth) AS (
 fact_atom(parent_type, relation) AS (
     SELECT * FROM unnest($6::text[], $7::text[])
 ),
-named(subject) AS (
+named(subject, pending) AS (
     -- (1) прямой факт — на объекте ЛИБО на предке типа, названного планом. Без
     -- второго администратор облака не назвал бы себя: его строка лежит на
     -- кластере под именем system_admin, а спрашивают про глагол.
-    SELECT f.subject
+    SELECT f.subject, ` + factFreshSQL + ` IS NOT TRUE
       FROM kaname.relation_fact f
       JOIN scope_distinct sc ON sc.s_type = f.object_type AND sc.s_id = f.object_id
       JOIN fact_atom fa
@@ -146,7 +146,7 @@ named(subject) AS (
            END
   UNION
     -- (2) субъект выдачи (в том числе группа: она и есть адресат)
-    SELECT bs.subject_type || ':' || bs.subject_id
+    SELECT bs.subject_type || ':' || bs.subject_id, false
       FROM kaname.access_bindings b
       JOIN kaname.access_binding_subjects bs ON bs.binding_id = b.id
       JOIN kaname.role_verb rv
@@ -166,25 +166,30 @@ named(subject) AS (
        -- вопроса (grantArmPredicate, grantarm.go).
        AND ({{arm_predicate}})
 ),
-granted(subject) AS (
-    SELECT n.subject FROM named n
+granted(subject, pending) AS (
+    SELECT n.subject, n.pending FROM named n
   UNION
     -- ЧЛЕНЫ названной группы: разворот в обратную сторону. Обе формы остаются —
     -- и группа (адресат, который отзывают), и члены (те, кто правом пользуется).
-    SELECT gm.member_type || ':' || gm.member_id
+    SELECT gm.member_type || ':' || gm.member_id, n.pending
       FROM named n{{members_join}}
 )
-SELECT g.subject
-  FROM granted g
- WHERE g.subject > $3::text
- ORDER BY g.subject
- LIMIT $4::int`
+-- Sentinel не зависит от cursor/limit и существует даже при пустой странице.
+SELECT ''::text AS subject, true AS pending
+ WHERE EXISTS (SELECT 1 FROM named n WHERE n.pending)
+UNION ALL
+(SELECT DISTINCT g.subject, false AS pending
+   FROM granted g
+  WHERE NOT g.pending AND g.subject > $3::text
+  ORDER BY g.subject
+  LIMIT $4::int)
+ ORDER BY pending DESC, subject`
 
 // subjectsQuerySQL — ГОТОВЫЙ запрос перечисления субъектов для выбранной оси
 // меток (довод — у expandQuerySQL).
 func subjectsQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(subjectsSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", nesting))
+		grantArmPredicate("$9::text", "$1::text", "$2::text", "m.labels", "m.access_labels", nesting))
 	if err != nil {
 		return "", err
 	}
@@ -234,8 +239,12 @@ func Subjects(ctx context.Context, q pgx.Tx, in SubjectsQuery) (subjects []strin
 	defer rows.Close()
 	for rows.Next() {
 		var s string
-		if err := rows.Scan(&s); err != nil {
+		var pending bool
+		if err := rows.Scan(&s, &pending); err != nil {
 			return nil, "", fmt.Errorf("relverdict: чтение субъекта: %w", err)
+		}
+		if pending {
+			return nil, "", ErrAccessLabelProjectionPending
 		}
 		subjects = append(subjects, s)
 	}

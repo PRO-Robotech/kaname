@@ -31,7 +31,7 @@ func marshalProject(p domain.Project) (*anypb.Any, error) {
 // (T3/Q2). name/description do not affect selector matching.
 func labelsChanged(changed []string) bool {
 	for _, f := range changed {
-		if f == "labels" {
+		if f == "labels" || f == "access_labels" {
 			return true
 		}
 	}

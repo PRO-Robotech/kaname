@@ -20,7 +20,9 @@ type Project struct {
 	Name        ProjectName
 	Description Description
 	Labels      Labels
-	CreatedAt   time.Time
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
+	CreatedAt    time.Time
 }
 
 func (p Project) Validate() error {
@@ -28,6 +30,7 @@ func (p Project) Validate() error {
 	errs = multierr.Append(errs, p.Name.Validate())
 	errs = multierr.Append(errs, p.Description.Validate())
 	errs = multierr.Append(errs, p.Labels.Validate())
+	errs = multierr.Append(errs, p.AccessLabels.Validate())
 	if p.AccountID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
 	}

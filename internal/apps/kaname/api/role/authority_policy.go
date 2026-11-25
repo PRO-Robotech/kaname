@@ -38,6 +38,12 @@ func (h *Handler) WithRoleAuthorityWriter(f kaname.RoleAuthorityWriterFactory) *
 	return h
 }
 
+// Локальный внутренний порт: только prepared writer может записать результат
+// полного content gate. В общий публичный repository API его не добавляем.
+type preparedRoleContentApproval interface {
+	RecordRoleContentApproval(context.Context) error
+}
+
 var errRoleMutationCleanup = errors.New("role mutation cleanup failed")
 
 // Три полных попытки: фабрика, OLD-authority gate, тело и Commit. Ошибка
@@ -83,6 +89,16 @@ func (s rolePolicySelection) runUpdate(ctx context.Context, repo Repo, r domain.
 func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domain.Role, create, rules bool,
 	mask *[]string, version string, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (out domain.Role, result error) {
 	if !s.configured {
+		// Прямой запуск worker также требует подготовленной записи для accessLabels и apply.
+		if create || rules {
+			required, err := roleRulesRequirePreparedAuthoring(r.Rules)
+			if err != nil {
+				return out, shared.MapValidationErr(err)
+			}
+			if required {
+				return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared role authoring unavailable")
+			}
+		}
 		return shared.DoWithWriteTx(ctx, repo, body)
 	}
 	defer func() {
@@ -131,7 +147,16 @@ func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domai
 		// Фабрика уже удерживает весь mutation footprint и взяла final DB clock.
 		// Сама роль и её проекции пока OLD: собственная запись не доказывает право.
 		if create || rules {
-			err = grantpolicy.RequireRole(ctx, w, actor, r, create)
+			err = roleGrantPolicy.content(ctx, w, actor, r, create)
+			// RequireRole должен завершить все страницы и все scopes прежде,
+			// чем owner SQL получит подтверждение полного content gate.
+			if err == nil {
+				approval, ok := w.(preparedRoleContentApproval)
+				if !ok || approval == nil {
+					return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Role content approval unavailable")
+				}
+				err = approval.RecordRoleContentApproval(ctx)
+			}
 		} else {
 			err = grantpolicy.RequireRoleMethod(ctx, w, actor, r, false)
 		}

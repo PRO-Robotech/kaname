@@ -15,8 +15,28 @@ import (
 // CreateBinding и не превращает исход в разрешение мутации. Равенство регионов
 // с метками/creator и конечными ID судит прежнее проверенное ядро.
 func Prove(actor, proposed Set) grantcoverage.Result {
+	return NewProofBudget().Prove(actor, proposed)
+}
+
+// ProofBudget ограничивает суммарную работу серии доказательств одного запроса.
+type ProofBudget struct{ remaining int }
+
+func NewProofBudget() *ProofBudget { return &ProofBudget{remaining: MaxSteps} }
+
+func (b *ProofBudget) Charge(steps int) bool {
+	if b == nil || steps < 0 || steps > b.remaining {
+		return false
+	}
+	b.remaining -= steps
+	return true
+}
+
+func (b *ProofBudget) Prove(actor, proposed Set) grantcoverage.Result {
 	fail := func(reason grantcoverage.Reason, index int) grantcoverage.Result {
 		return grantcoverage.Result{Status: grantcoverage.NotProved, Reason: reason, Side: grantcoverage.ProposedSide, Index: index}
+	}
+	if b == nil || b.remaining < 0 {
+		return fail(grantcoverage.ReasonWorkLimit, -1)
 	}
 	if actor.identity != proposed.identity {
 		return fail(grantcoverage.ReasonIdentity, -1)
@@ -30,11 +50,11 @@ func Prove(actor, proposed Set) grantcoverage.Result {
 	if len(proposed.effects) == 0 {
 		return fail(grantcoverage.ReasonEmpty, -1)
 	}
-	steps := MaxSteps
+	steps := &b.remaining
 	for i, w := range proposed.effects {
 		// Декартово разбиение только по конечным именам каждого уровня. Его предел
 		// общий: children не могут умножить локальные лимиты ядра без ограничения.
-		cells, ok := splitFinite(w, &steps)
+		cells, ok := splitFinite(w, steps)
 		if !ok {
 			return fail(grantcoverage.ReasonWorkLimit, i)
 		}
@@ -42,18 +62,18 @@ func Prove(actor, proposed Set) grantcoverage.Result {
 			covered := false
 			unresolved := false
 			for _, h := range actor.effects {
-				steps--
-				if steps < 0 {
+				*steps--
+				if *steps < 0 {
 					return fail(grantcoverage.ReasonWorkLimit, i)
 				}
 				if residualObligation(h, cell) {
 					unresolved = true
 				}
-				if effectCovers(h, cell, actor.identity, &steps) {
+				if effectCovers(h, cell, actor.identity, steps) {
 					covered = true
 					break
 				}
-				if steps < 0 {
+				if *steps < 0 {
 					return fail(grantcoverage.ReasonWorkLimit, i)
 				}
 			}
@@ -113,6 +133,8 @@ func effectCovers(h, w Effect, identity grantcoverage.Identity, steps *int) bool
 		return h.Anchor == w.Anchor
 	case BindRole:
 		return h.Anchor == w.Anchor && h.RoleID == w.RoleID
+	case ApplyAccessLabel:
+		return h.Anchor == w.Anchor && h.DefinitionID == w.DefinitionID && w.DefinitionID.Validate() == nil
 	case Use:
 		if h.Type != w.Type || (h.Action != w.Action && (h.Action.Kind != grantcoverage.AllVerbs || w.Action.Kind != grantcoverage.Verb)) {
 			return false
@@ -162,7 +184,8 @@ func regionCovers(h, w Constraint, identity grantcoverage.Identity, steps *int) 
 	} else if w.Within != nil {
 		anchor = *w.Within
 	}
-	cost := len(h.Region.Objects.IDs) + len(w.Region.Objects.IDs) + len(h.Region.Labels) + len(w.Region.Labels) + 1
+	cost := len(h.Region.Objects.IDs) + len(w.Region.Objects.IDs) + len(h.Region.Labels) + len(w.Region.Labels) +
+		len(h.Region.AccessLabels) + len(w.Region.AccessLabels) + 1
 	*steps -= cost
 	if *steps < 0 {
 		return false

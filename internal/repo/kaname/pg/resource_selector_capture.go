@@ -17,13 +17,14 @@ import (
 // ограничен областью либо точной целью, как matchByArm. Это не allow и не LIMIT
 // вместо полноты: общий reader отвергает sentinel сверх остатка бюджета.
 type resourceSelectorPredicate struct {
-	Container bool               `json:"container"`
-	RuleFP    string             `json:"rule_fp"`
-	Targets   []string           `json:"targets"`
-	Arm       domain.Arm         `json:"arm"`
-	Names     []string           `json:"names"`
-	Labels    map[string]string  `json:"labels"`
-	Scope     domain.ScopeAnchor `json:"scope"`
+	Container    bool               `json:"container"`
+	RuleFP       string             `json:"rule_fp"`
+	Targets      []string           `json:"targets"`
+	Arm          domain.Arm         `json:"arm"`
+	Names        []string           `json:"names"`
+	Labels       map[string]string  `json:"labels"`
+	Scope        domain.ScopeAnchor `json:"scope"`
+	AccessLabels map[string]string  `json:"access_labels,omitempty"`
 }
 
 func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any, error) {
@@ -42,7 +43,22 @@ func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any
 		arm = "names"
 	case domain.ArmLabels:
 		arm = "labels"
+	case domain.ArmAccessLabels:
+		arm = "access_labels"
 	default:
+		return "", nil, kaname.ErrSourceUnconfirmed
+	}
+	// The new predicate has its own namespace; an ordinary arm cannot carry it.
+	if predicate.Arm == domain.ArmAccessLabels {
+		if len(predicate.AccessLabels) == 0 || len(predicate.AccessLabels) > 16 || len(predicate.Labels) != 0 || len(predicate.Names) != 0 {
+			return "", nil, kaname.ErrSourceUnconfirmed
+		}
+		for key, value := range predicate.AccessLabels {
+			if domain.LabelKey(key).Validate() != nil || domain.LabelVal(value).Validate() != nil {
+				return "", nil, kaname.ErrSourceUnconfirmed
+			}
+		}
+	} else if len(predicate.AccessLabels) != 0 {
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
 	if predicate.Scope.Type != "account" && predicate.Scope.Type != "project" && predicate.Scope.Type != "cluster" {
@@ -63,11 +79,18 @@ func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any
 	if predicate.Labels == nil {
 		labels = []byte("{}")
 	}
+	accessLabels, err := json.Marshal(predicate.AccessLabels)
+	if err != nil {
+		return "", nil, err
+	}
+	if predicate.AccessLabels == nil {
+		accessLabels = []byte("{}")
+	}
 	if predicate.Targets == nil {
 		predicate.Targets = []string{}
 	}
 	// Параметры типизированы во всех ветвях: один SQL shape для каждой таблицы.
-	args := []any{key.typ, limit, arm, predicate.Names, labels, predicate.Scope.Type, predicate.Scope.ID, predicate.Targets}
+	args := []any{key.typ, limit, arm, predicate.Names, labels, predicate.Scope.Type, predicate.Scope.ID, predicate.Targets, accessLabels}
 	source := "kaname.resource_mirror o LEFT JOIN kaname.projects p ON p.id=o.parent_project_id"
 	identity := "o.object_id"
 	typeFilter := "o.object_type=$1"
@@ -90,7 +113,7 @@ func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any
 	} else if domain.FeedSourceForType(key.typ) == domain.FeedIAMDirect {
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
-	query := "SELECT " + state + ",jsonb_build_object('object_type',$1::text,'object_id'," + identity + ")::text FROM " + source + " WHERE " + typeFilter + " AND (($3::text='names' AND " + identity + "=ANY($4::text[])) OR ($3::text='labels' AND o.labels @> $5::jsonb) OR ($3::text='anchor' AND ($6::text='cluster' OR ($6::text='account' AND (" + account + ")) OR ($6::text='project' AND (" + project + "))))) AND (cardinality($8::text[])=0 OR " + identity + "=ANY($8::text[])) LIMIT $2"
+	query := "SELECT " + state + ",jsonb_build_object('object_type',$1::text,'object_id'," + identity + ")::text FROM " + source + " WHERE " + typeFilter + " AND (($3::text='names' AND " + identity + "=ANY($4::text[])) OR ($3::text='labels' AND o.labels @> $5::jsonb) OR ($3::text='access_labels' AND o.access_labels @> $9::jsonb) OR ($3::text='anchor' AND ($6::text='cluster' OR ($6::text='account' AND (" + account + ")) OR ($6::text='project' AND (" + project + "))))) AND (cardinality($8::text[])=0 OR " + identity + "=ANY($8::text[])) LIMIT $2"
 	return query, args, nil
 }
 
@@ -107,12 +130,12 @@ func (p *resourceParentCapture) captureSelectorPredicate(ctx context.Context, bi
 	types := slices.Clone(selector.ObjectTypes)
 	slices.Sort(types)
 	types = slices.Compact(types)
-	if err := p.source.budget.Charge(len(types)+len(selector.ResourceNames)+len(selector.MatchLabels)+len(target.Resources), 0); err != nil {
+	if err := p.source.budget.Charge(len(types)+len(selector.ResourceNames)+len(selector.MatchLabels)+len(selector.MatchAccessLabels)+len(target.Resources), 0); err != nil {
 		return nil, err
 	}
 	var result []domain.MirrorObject
 	for _, typ := range types {
-		predicate := resourceSelectorPredicate{RuleFP: sourceFP, Container: container, Arm: selector.Arm, Names: selector.ResourceNames, Labels: selector.MatchLabels, Scope: scope}
+		predicate := resourceSelectorPredicate{RuleFP: sourceFP, Container: container, Arm: selector.Arm, Names: selector.ResourceNames, Labels: selector.MatchLabels, Scope: scope, AccessLabels: selector.MatchAccessLabels}
 		if len(target.Resources) > 0 {
 			predicate.Targets = target.ResourceIDsForTypes([]string{typ})
 			if len(predicate.Targets) == 0 {

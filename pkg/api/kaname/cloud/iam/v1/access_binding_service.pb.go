@@ -248,7 +248,11 @@ type CreateAccessBindingRequest struct {
 	// `resources` nor `allInScope`) → sync INVALID_ARGUMENT
 	// "target is required; use target.allInScope{} to grant all objects under the
 	// anchor". NEW tag (tags 9/11 stay tombstoned).
-	Target        *AccessTarget `protobuf:"bytes,15,opt,name=target,proto3" json:"target,omitempty"`
+	Target *AccessTarget `protobuf:"bytes,15,opt,name=target,proto3" json:"target,omitempty"`
+	// Начальные защищённые метки для IAM match_access_labels.
+	// Обычное право создать ресурс не разрешает выдавать доступ:
+	// весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+	AccessLabels  map[string]string `protobuf:"bytes,16,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -349,6 +353,13 @@ func (x *CreateAccessBindingRequest) GetLabels() map[string]string {
 func (x *CreateAccessBindingRequest) GetTarget() *AccessTarget {
 	if x != nil {
 		return x.Target
+	}
+	return nil
+}
+
+func (x *CreateAccessBindingRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -462,7 +473,14 @@ type UpdateAccessBindingRequest struct {
 	// Tenant-facing метки самого ресурса AccessBinding (mutable; `labels` в
 	// update_mask). Аннотации (size/key/value pattern) — паритет
 	// account/project/group request `labels`.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels. Обычное право update
+	// не разрешает выдавать доступ: добавленный эффект требует Grant.
+	// update_mask без access_labels сохраняет их; с access_labels заменяет
+	// всю карту, в том числе очищает при пустом/отсутствующем поле.
+	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+	AccessLabels  map[string]string `protobuf:"bytes,5,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -525,6 +543,13 @@ func (x *UpdateAccessBindingRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *UpdateAccessBindingRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
+	}
+	return nil
+}
+
 type ListAccessBindingsRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The maximum number of results per page to return. 0 selects the platform
@@ -538,6 +563,9 @@ type ListAccessBindingsRequest struct {
 	// predicate of the form `<key>="<value>"`, key ∈ {subject, role, scope, scopeId}
 	// (`scope` is the dotted scope-type `iam.account|iam.project|iam.cluster`). An
 	// unknown key → INVALID_ARGUMENT. Empty → no filter (all visible bindings).
+	//
+	// Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+	// Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
 	//
 	// Lifecycle status is NOT a filter key — it is the dedicated
 	// `include_revoked` flag below, so it composes with any predicate (the filter
@@ -2022,7 +2050,7 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\n" +
 	"0kaname/cloud/iam/v1/access_binding_service.proto\x12\x13kaname.cloud.iam.v1\x1a\x1cgoogle/api/annotations.proto\x1a google/protobuf/field_mask.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ecorelib/api/v1/operation.proto\x1a(kaname/cloud/iam/v1/access_binding.proto\x1a!corelib/operation/operation.proto\x1a$corelib/authz/v1/authz_options.proto\"E\n" +
 	"\x17GetAccessBindingRequest\x12*\n" +
-	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"\xf8\x04\n" +
+	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"\xa1\x06\n" +
 	"\x1aCreateAccessBindingRequest\x12!\n" +
 	"\fsubject_type\x18\x01 \x01(\tR\vsubjectType\x12\x1d\n" +
 	"\n" +
@@ -2036,8 +2064,12 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\bsubjects\x18\f \x03(\v2\x1c.kaname.cloud.iam.v1.SubjectR\bsubjects\x12/\n" +
 	"\x13deletion_protection\x18\r \x01(\bR\x12deletionProtection\x12S\n" +
 	"\x06labels\x18\x0e \x03(\v2;.kaname.cloud.iam.v1.CreateAccessBindingRequest.LabelsEntryR\x06labels\x129\n" +
-	"\x06target\x18\x0f \x01(\v2!.kaname.cloud.iam.v1.AccessTargetR\x06target\x1a9\n" +
+	"\x06target\x18\x0f \x01(\v2!.kaname.cloud.iam.v1.AccessTargetR\x06target\x12f\n" +
+	"\raccess_labels\x18\x10 \x03(\v2A.kaname.cloud.iam.v1.CreateAccessBindingRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01J\x04\b\x06\x10\aJ\x04\b\a\x10\bJ\x04\b\t\x10\n" +
 	"J\x04\b\n" +
@@ -2046,14 +2078,18 @@ const file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc = "" +
 	"\x1aDeleteAccessBindingRequest\x12*\n" +
 	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"H\n" +
 	"\x1aRevokeAccessBindingRequest\x12*\n" +
-	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"\xc6\x02\n" +
+	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\"\xef\x03\n" +
 	"\x1aUpdateAccessBindingRequest\x12*\n" +
 	"\x11access_binding_id\x18\x01 \x01(\tR\x0faccessBindingId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
 	"updateMask\x12/\n" +
 	"\x13deletion_protection\x18\x03 \x01(\bR\x12deletionProtection\x12S\n" +
-	"\x06labels\x18\x04 \x03(\v2;.kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x04 \x03(\v2;.kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntryR\x06labels\x12f\n" +
+	"\raccess_labels\x18\x05 \x03(\v2A.kaname.cloud.iam.v1.UpdateAccessBindingRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb7\x01\n" +
 	"\x19ListAccessBindingsRequest\x12\x1b\n" +
@@ -2237,7 +2273,7 @@ func file_kaname_cloud_iam_v1_access_binding_service_proto_rawDescGZIP() []byte 
 }
 
 var file_kaname_cloud_iam_v1_access_binding_service_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_kaname_cloud_iam_v1_access_binding_service_proto_msgTypes = make([]protoimpl.MessageInfo, 24)
+var file_kaname_cloud_iam_v1_access_binding_service_proto_msgTypes = make([]protoimpl.MessageInfo, 26)
 var file_kaname_cloud_iam_v1_access_binding_service_proto_goTypes = []any{
 	(Derivation)(0),                             // 0: kaname.cloud.iam.v1.Derivation
 	(ScopeGroup)(0),                             // 1: kaname.cloud.iam.v1.ScopeGroup
@@ -2264,72 +2300,76 @@ var file_kaname_cloud_iam_v1_access_binding_service_proto_goTypes = []any{
 	(*Principal)(nil),                           // 22: kaname.cloud.iam.v1.Principal
 	(*ExpandAccessResponse)(nil),                // 23: kaname.cloud.iam.v1.ExpandAccessResponse
 	nil,                                         // 24: kaname.cloud.iam.v1.CreateAccessBindingRequest.LabelsEntry
-	nil,                                         // 25: kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntry
-	(*timestamppb.Timestamp)(nil),               // 26: google.protobuf.Timestamp
-	(*Subject)(nil),                             // 27: kaname.cloud.iam.v1.Subject
-	(*AccessTarget)(nil),                        // 28: kaname.cloud.iam.v1.AccessTarget
-	(*fieldmaskpb.FieldMask)(nil),               // 29: google.protobuf.FieldMask
-	(*AccessBinding)(nil),                       // 30: kaname.cloud.iam.v1.AccessBinding
-	(*GrantSurfaceRecord)(nil),                  // 31: kaname.cloud.iam.v1.GrantSurfaceRecord
-	(*operation.Operation)(nil),                 // 32: corelib.operation.Operation
-	(AccessBinding_Scope)(0),                    // 33: kaname.cloud.iam.v1.AccessBinding.Scope
-	(AccessBinding_Status)(0),                   // 34: kaname.cloud.iam.v1.AccessBinding.Status
-	(SubjectType)(0),                            // 35: kaname.cloud.iam.v1.SubjectType
+	nil,                                         // 25: kaname.cloud.iam.v1.CreateAccessBindingRequest.AccessLabelsEntry
+	nil,                                         // 26: kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntry
+	nil,                                         // 27: kaname.cloud.iam.v1.UpdateAccessBindingRequest.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil),               // 28: google.protobuf.Timestamp
+	(*Subject)(nil),                             // 29: kaname.cloud.iam.v1.Subject
+	(*AccessTarget)(nil),                        // 30: kaname.cloud.iam.v1.AccessTarget
+	(*fieldmaskpb.FieldMask)(nil),               // 31: google.protobuf.FieldMask
+	(*AccessBinding)(nil),                       // 32: kaname.cloud.iam.v1.AccessBinding
+	(*GrantSurfaceRecord)(nil),                  // 33: kaname.cloud.iam.v1.GrantSurfaceRecord
+	(*operation.Operation)(nil),                 // 34: corelib.operation.Operation
+	(AccessBinding_Scope)(0),                    // 35: kaname.cloud.iam.v1.AccessBinding.Scope
+	(AccessBinding_Status)(0),                   // 36: kaname.cloud.iam.v1.AccessBinding.Status
+	(SubjectType)(0),                            // 37: kaname.cloud.iam.v1.SubjectType
 }
 var file_kaname_cloud_iam_v1_access_binding_service_proto_depIdxs = []int32{
-	26, // 0: kaname.cloud.iam.v1.CreateAccessBindingRequest.expires_at:type_name -> google.protobuf.Timestamp
-	27, // 1: kaname.cloud.iam.v1.CreateAccessBindingRequest.subjects:type_name -> kaname.cloud.iam.v1.Subject
+	28, // 0: kaname.cloud.iam.v1.CreateAccessBindingRequest.expires_at:type_name -> google.protobuf.Timestamp
+	29, // 1: kaname.cloud.iam.v1.CreateAccessBindingRequest.subjects:type_name -> kaname.cloud.iam.v1.Subject
 	24, // 2: kaname.cloud.iam.v1.CreateAccessBindingRequest.labels:type_name -> kaname.cloud.iam.v1.CreateAccessBindingRequest.LabelsEntry
-	28, // 3: kaname.cloud.iam.v1.CreateAccessBindingRequest.target:type_name -> kaname.cloud.iam.v1.AccessTarget
-	29, // 4: kaname.cloud.iam.v1.UpdateAccessBindingRequest.update_mask:type_name -> google.protobuf.FieldMask
-	25, // 5: kaname.cloud.iam.v1.UpdateAccessBindingRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntry
-	30, // 6: kaname.cloud.iam.v1.ListAccessBindingsResponse.access_bindings:type_name -> kaname.cloud.iam.v1.AccessBinding
-	31, // 7: kaname.cloud.iam.v1.ListAccessBindingsResponse.records:type_name -> kaname.cloud.iam.v1.GrantSurfaceRecord
-	32, // 8: kaname.cloud.iam.v1.ListAccessBindingOperationsResponse.operations:type_name -> corelib.operation.Operation
-	16, // 9: kaname.cloud.iam.v1.ListSubjectPrivilegesResponse.privileges:type_name -> kaname.cloud.iam.v1.SubjectPrivilege
-	33, // 10: kaname.cloud.iam.v1.SubjectPrivilege.scope:type_name -> kaname.cloud.iam.v1.AccessBinding.Scope
-	34, // 11: kaname.cloud.iam.v1.SubjectPrivilege.status:type_name -> kaname.cloud.iam.v1.AccessBinding.Status
-	26, // 12: kaname.cloud.iam.v1.SubjectPrivilege.created_at:type_name -> google.protobuf.Timestamp
-	26, // 13: kaname.cloud.iam.v1.SubjectPrivilege.expires_at:type_name -> google.protobuf.Timestamp
-	0,  // 14: kaname.cloud.iam.v1.SubjectPrivilege.derivation:type_name -> kaname.cloud.iam.v1.Derivation
-	19, // 15: kaname.cloud.iam.v1.ListAssignableRolesResponse.roles:type_name -> kaname.cloud.iam.v1.AssignableRole
-	1,  // 16: kaname.cloud.iam.v1.AssignableRole.scope_group:type_name -> kaname.cloud.iam.v1.ScopeGroup
-	26, // 17: kaname.cloud.iam.v1.AssignableRole.created_at:type_name -> google.protobuf.Timestamp
-	35, // 18: kaname.cloud.iam.v1.Principal.type:type_name -> kaname.cloud.iam.v1.SubjectType
-	22, // 19: kaname.cloud.iam.v1.ExpandAccessResponse.principals:type_name -> kaname.cloud.iam.v1.Principal
-	2,  // 20: kaname.cloud.iam.v1.AccessBindingService.Get:input_type -> kaname.cloud.iam.v1.GetAccessBindingRequest
-	3,  // 21: kaname.cloud.iam.v1.AccessBindingService.Create:input_type -> kaname.cloud.iam.v1.CreateAccessBindingRequest
-	4,  // 22: kaname.cloud.iam.v1.AccessBindingService.Delete:input_type -> kaname.cloud.iam.v1.DeleteAccessBindingRequest
-	6,  // 23: kaname.cloud.iam.v1.AccessBindingService.Update:input_type -> kaname.cloud.iam.v1.UpdateAccessBindingRequest
-	7,  // 24: kaname.cloud.iam.v1.AccessBindingService.List:input_type -> kaname.cloud.iam.v1.ListAccessBindingsRequest
-	8,  // 25: kaname.cloud.iam.v1.AccessBindingService.ListByScope:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByScopeRequest
-	9,  // 26: kaname.cloud.iam.v1.AccessBindingService.ListBySubject:input_type -> kaname.cloud.iam.v1.ListAccessBindingsBySubjectRequest
-	14, // 27: kaname.cloud.iam.v1.AccessBindingService.ListSubjectPrivileges:input_type -> kaname.cloud.iam.v1.ListSubjectPrivilegesRequest
-	17, // 28: kaname.cloud.iam.v1.AccessBindingService.ListAssignableRoles:input_type -> kaname.cloud.iam.v1.ListAssignableRolesRequest
-	20, // 29: kaname.cloud.iam.v1.AccessBindingService.ListByRole:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByRoleRequest
-	21, // 30: kaname.cloud.iam.v1.AccessBindingService.ExpandAccess:input_type -> kaname.cloud.iam.v1.ExpandAccessRequest
-	10, // 31: kaname.cloud.iam.v1.AccessBindingService.ListByAccount:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByAccountRequest
-	12, // 32: kaname.cloud.iam.v1.AccessBindingService.ListOperations:input_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsRequest
-	5,  // 33: kaname.cloud.iam.v1.AccessBindingService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeAccessBindingRequest
-	30, // 34: kaname.cloud.iam.v1.AccessBindingService.Get:output_type -> kaname.cloud.iam.v1.AccessBinding
-	32, // 35: kaname.cloud.iam.v1.AccessBindingService.Create:output_type -> corelib.operation.Operation
-	32, // 36: kaname.cloud.iam.v1.AccessBindingService.Delete:output_type -> corelib.operation.Operation
-	32, // 37: kaname.cloud.iam.v1.AccessBindingService.Update:output_type -> corelib.operation.Operation
-	11, // 38: kaname.cloud.iam.v1.AccessBindingService.List:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
-	11, // 39: kaname.cloud.iam.v1.AccessBindingService.ListByScope:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
-	11, // 40: kaname.cloud.iam.v1.AccessBindingService.ListBySubject:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
-	15, // 41: kaname.cloud.iam.v1.AccessBindingService.ListSubjectPrivileges:output_type -> kaname.cloud.iam.v1.ListSubjectPrivilegesResponse
-	18, // 42: kaname.cloud.iam.v1.AccessBindingService.ListAssignableRoles:output_type -> kaname.cloud.iam.v1.ListAssignableRolesResponse
-	11, // 43: kaname.cloud.iam.v1.AccessBindingService.ListByRole:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
-	23, // 44: kaname.cloud.iam.v1.AccessBindingService.ExpandAccess:output_type -> kaname.cloud.iam.v1.ExpandAccessResponse
-	11, // 45: kaname.cloud.iam.v1.AccessBindingService.ListByAccount:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
-	13, // 46: kaname.cloud.iam.v1.AccessBindingService.ListOperations:output_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsResponse
-	32, // 47: kaname.cloud.iam.v1.AccessBindingService.Revoke:output_type -> corelib.operation.Operation
-	34, // [34:48] is the sub-list for method output_type
-	20, // [20:34] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	30, // 3: kaname.cloud.iam.v1.CreateAccessBindingRequest.target:type_name -> kaname.cloud.iam.v1.AccessTarget
+	25, // 4: kaname.cloud.iam.v1.CreateAccessBindingRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateAccessBindingRequest.AccessLabelsEntry
+	31, // 5: kaname.cloud.iam.v1.UpdateAccessBindingRequest.update_mask:type_name -> google.protobuf.FieldMask
+	26, // 6: kaname.cloud.iam.v1.UpdateAccessBindingRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateAccessBindingRequest.LabelsEntry
+	27, // 7: kaname.cloud.iam.v1.UpdateAccessBindingRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateAccessBindingRequest.AccessLabelsEntry
+	32, // 8: kaname.cloud.iam.v1.ListAccessBindingsResponse.access_bindings:type_name -> kaname.cloud.iam.v1.AccessBinding
+	33, // 9: kaname.cloud.iam.v1.ListAccessBindingsResponse.records:type_name -> kaname.cloud.iam.v1.GrantSurfaceRecord
+	34, // 10: kaname.cloud.iam.v1.ListAccessBindingOperationsResponse.operations:type_name -> corelib.operation.Operation
+	16, // 11: kaname.cloud.iam.v1.ListSubjectPrivilegesResponse.privileges:type_name -> kaname.cloud.iam.v1.SubjectPrivilege
+	35, // 12: kaname.cloud.iam.v1.SubjectPrivilege.scope:type_name -> kaname.cloud.iam.v1.AccessBinding.Scope
+	36, // 13: kaname.cloud.iam.v1.SubjectPrivilege.status:type_name -> kaname.cloud.iam.v1.AccessBinding.Status
+	28, // 14: kaname.cloud.iam.v1.SubjectPrivilege.created_at:type_name -> google.protobuf.Timestamp
+	28, // 15: kaname.cloud.iam.v1.SubjectPrivilege.expires_at:type_name -> google.protobuf.Timestamp
+	0,  // 16: kaname.cloud.iam.v1.SubjectPrivilege.derivation:type_name -> kaname.cloud.iam.v1.Derivation
+	19, // 17: kaname.cloud.iam.v1.ListAssignableRolesResponse.roles:type_name -> kaname.cloud.iam.v1.AssignableRole
+	1,  // 18: kaname.cloud.iam.v1.AssignableRole.scope_group:type_name -> kaname.cloud.iam.v1.ScopeGroup
+	28, // 19: kaname.cloud.iam.v1.AssignableRole.created_at:type_name -> google.protobuf.Timestamp
+	37, // 20: kaname.cloud.iam.v1.Principal.type:type_name -> kaname.cloud.iam.v1.SubjectType
+	22, // 21: kaname.cloud.iam.v1.ExpandAccessResponse.principals:type_name -> kaname.cloud.iam.v1.Principal
+	2,  // 22: kaname.cloud.iam.v1.AccessBindingService.Get:input_type -> kaname.cloud.iam.v1.GetAccessBindingRequest
+	3,  // 23: kaname.cloud.iam.v1.AccessBindingService.Create:input_type -> kaname.cloud.iam.v1.CreateAccessBindingRequest
+	4,  // 24: kaname.cloud.iam.v1.AccessBindingService.Delete:input_type -> kaname.cloud.iam.v1.DeleteAccessBindingRequest
+	6,  // 25: kaname.cloud.iam.v1.AccessBindingService.Update:input_type -> kaname.cloud.iam.v1.UpdateAccessBindingRequest
+	7,  // 26: kaname.cloud.iam.v1.AccessBindingService.List:input_type -> kaname.cloud.iam.v1.ListAccessBindingsRequest
+	8,  // 27: kaname.cloud.iam.v1.AccessBindingService.ListByScope:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByScopeRequest
+	9,  // 28: kaname.cloud.iam.v1.AccessBindingService.ListBySubject:input_type -> kaname.cloud.iam.v1.ListAccessBindingsBySubjectRequest
+	14, // 29: kaname.cloud.iam.v1.AccessBindingService.ListSubjectPrivileges:input_type -> kaname.cloud.iam.v1.ListSubjectPrivilegesRequest
+	17, // 30: kaname.cloud.iam.v1.AccessBindingService.ListAssignableRoles:input_type -> kaname.cloud.iam.v1.ListAssignableRolesRequest
+	20, // 31: kaname.cloud.iam.v1.AccessBindingService.ListByRole:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByRoleRequest
+	21, // 32: kaname.cloud.iam.v1.AccessBindingService.ExpandAccess:input_type -> kaname.cloud.iam.v1.ExpandAccessRequest
+	10, // 33: kaname.cloud.iam.v1.AccessBindingService.ListByAccount:input_type -> kaname.cloud.iam.v1.ListAccessBindingsByAccountRequest
+	12, // 34: kaname.cloud.iam.v1.AccessBindingService.ListOperations:input_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsRequest
+	5,  // 35: kaname.cloud.iam.v1.AccessBindingService.Revoke:input_type -> kaname.cloud.iam.v1.RevokeAccessBindingRequest
+	32, // 36: kaname.cloud.iam.v1.AccessBindingService.Get:output_type -> kaname.cloud.iam.v1.AccessBinding
+	34, // 37: kaname.cloud.iam.v1.AccessBindingService.Create:output_type -> corelib.operation.Operation
+	34, // 38: kaname.cloud.iam.v1.AccessBindingService.Delete:output_type -> corelib.operation.Operation
+	34, // 39: kaname.cloud.iam.v1.AccessBindingService.Update:output_type -> corelib.operation.Operation
+	11, // 40: kaname.cloud.iam.v1.AccessBindingService.List:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
+	11, // 41: kaname.cloud.iam.v1.AccessBindingService.ListByScope:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
+	11, // 42: kaname.cloud.iam.v1.AccessBindingService.ListBySubject:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
+	15, // 43: kaname.cloud.iam.v1.AccessBindingService.ListSubjectPrivileges:output_type -> kaname.cloud.iam.v1.ListSubjectPrivilegesResponse
+	18, // 44: kaname.cloud.iam.v1.AccessBindingService.ListAssignableRoles:output_type -> kaname.cloud.iam.v1.ListAssignableRolesResponse
+	11, // 45: kaname.cloud.iam.v1.AccessBindingService.ListByRole:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
+	23, // 46: kaname.cloud.iam.v1.AccessBindingService.ExpandAccess:output_type -> kaname.cloud.iam.v1.ExpandAccessResponse
+	11, // 47: kaname.cloud.iam.v1.AccessBindingService.ListByAccount:output_type -> kaname.cloud.iam.v1.ListAccessBindingsResponse
+	13, // 48: kaname.cloud.iam.v1.AccessBindingService.ListOperations:output_type -> kaname.cloud.iam.v1.ListAccessBindingOperationsResponse
+	34, // 49: kaname.cloud.iam.v1.AccessBindingService.Revoke:output_type -> corelib.operation.Operation
+	36, // [36:50] is the sub-list for method output_type
+	22, // [22:36] is the sub-list for method input_type
+	22, // [22:22] is the sub-list for extension type_name
+	22, // [22:22] is the sub-list for extension extendee
+	0,  // [0:22] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_access_binding_service_proto_init() }
@@ -2344,7 +2384,7 @@ func file_kaname_cloud_iam_v1_access_binding_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_access_binding_service_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   24,
+			NumMessages:   26,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

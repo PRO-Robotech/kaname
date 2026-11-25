@@ -37,8 +37,10 @@ type Account struct {
 	Name        AccountName
 	Description Description
 	Labels      Labels
-	OwnerUserID UserID
-	CreatedAt   time.Time
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
+	OwnerUserID  UserID
+	CreatedAt    time.Time
 }
 
 // Validate — multierr.Combine всех полей.
@@ -56,6 +58,7 @@ func (a Account) Validate() error {
 	}
 	errs = multierr.Append(errs, a.Description.Validate())
 	errs = multierr.Append(errs, a.Labels.Validate())
+	errs = multierr.Append(errs, a.AccessLabels.Validate())
 	if a.OwnerUserID == "" {
 		errs = multierr.Append(errs, ErrEmpty)
 	}

@@ -202,19 +202,29 @@ func (r *ResourceDecisionRunner) runResourceObjectOnce(ctx context.Context, conn
 		return nil, err
 	}
 	active = nil
+	// Подтверждаем событие только после успешного COMMIT. Открытые факты
+	// остаются для следующего прохода очереди без повтора этой транзакции.
+	if decision.accessLabelPending > 0 {
+		return nil, kaname.ErrAccessLabelReconcilePending
+	}
 	return sizes, nil
+}
+
+func (p *resourceObjectPreparation) intent() (json.RawMessage, error) {
+	return json.Marshal(struct {
+		Kind                  string              `json:"kind"`
+		Type                  string              `json:"object_type"`
+		ID                    string              `json:"object_id"`
+		Route                 resourceObjectRoute `json:"route"`
+		GenerationFingerprint *string             `json:"generation_fingerprint,omitempty"`
+	}{"object", p.root.object.Type, p.root.object.ID, p.route, p.generation.fingerprint})
 }
 
 func makeResourceObjectProposal(prepared *resourceObjectPreparation, parents *resourceParentCapture, footprint resourceFenceFootprint) (*resourceDecisionProposal, error) {
 	if prepared == nil || prepared.root == nil || parents == nil || parents.source == nil || prepared.source != parents.source || prepared.lifetime != parents.source.lifetime || prepared.route < resourceObjectFull || prepared.route > resourceObjectForwardNoStale {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
-	intent, err := json.Marshal(struct {
-		Kind  string              `json:"kind"`
-		Type  string              `json:"object_type"`
-		ID    string              `json:"object_id"`
-		Route resourceObjectRoute `json:"route"`
-	}{"object", prepared.root.object.Type, prepared.root.object.ID, prepared.route})
+	intent, err := prepared.intent()
 	if err != nil {
 		return nil, err
 	}

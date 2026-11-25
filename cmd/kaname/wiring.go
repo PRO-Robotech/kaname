@@ -37,6 +37,7 @@ import (
 	moduleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/module"
 	permissioncatalogapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/permission_catalog"
 	projectapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/project"
+	resourcemetadataapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/resource_metadata"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	sakeysapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/sa_keys"
 	serviceaccountapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/service_account"
@@ -128,6 +129,7 @@ type services struct {
 	// таксономии назначаемых правил ролей. Метаданные платформы (без чувствительных
 	// инфраструктурных сведений — G-D3); доступны аутентифицированным на публичном слушателе.
 	permissionCatalogHandler *permissioncatalogapp.Handler
+	resourceMetadata         *resourcemetadataapp.Handler
 
 	// Обработчик SAKey — публичный.
 	saKeysHandler *sakeysapp.Handler
@@ -1140,6 +1142,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 
 		// Модель правил RBAC G — публичный каталог назначаемых правил ролей.
 		permissionCatalogHandler: permissionCatalogHandler,
+		resourceMetadata:         resourcemetadataapp.NewHandler(kanamepg.NewResourceMetadataRepo(pool, rolePlans)),
 
 		// SAKey (статические ключи класса A; токен чеканит наш подписант).
 		saKeysHandler: saKeysH,

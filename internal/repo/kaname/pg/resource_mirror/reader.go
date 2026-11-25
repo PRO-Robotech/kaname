@@ -47,6 +47,7 @@ type MirrorRow struct {
 	ParentProjectID string
 	ParentAccountID string
 	Labels          map[string]string
+	AccessLabels    map[string]string
 }
 
 // querier — the minimal surface both *pgxpool.Pool and pgx.Tx satisfy, so the
@@ -62,14 +63,19 @@ type querier interface {
 // shapes synchronously; this is a defensive belt). The GIN index on labels
 // serves the `@>` probe.
 func MatchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string) ([]MirrorRow, error) {
-	return matchByLabels(ctx, q, types, matchLabels, decodeLabels)
+	return matchByLabels(ctx, q, types, matchLabels, false, decodeLabels)
 }
 
 // MatchByLabelsReadOnly сохраняет SQL и ошибки обычного reader. Переданный decoder
 // может разделять Labels только между объектами закрытого readonly расчёта правил.
 // Публичный MatchByLabels по-прежнему возвращает независимые изменяемые maps.
 func MatchByLabelsReadOnly(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
-	return matchByLabels(ctx, q, types, matchLabels, decode)
+	return matchByLabels(ctx, q, types, matchLabels, false, decode)
+}
+
+// MatchByAccessLabels читает кандидатов только по защищённому полю зеркала.
+func MatchByAccessLabels(ctx context.Context, q querier, types []string, labels map[string]string) ([]MirrorRow, error) {
+	return matchByLabels(ctx, q, types, labels, true, decodeLabels)
 }
 
 // LabelSelector задаёт один предикат по типам и меткам зеркала.
@@ -115,7 +121,7 @@ func MatchLabelSelectorUnionReadOnly(ctx context.Context, q querier, selectors [
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.resource_mirror m
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE `+strings.Join(predicates, " OR ")+`
@@ -151,7 +157,7 @@ func MatchLabelSelectorUnionReadOnly(ctx context.Context, q querier, selectors [
 	return out, true, nil
 }
 
-func matchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
+func matchByLabels(ctx context.Context, q querier, types []string, matchLabels map[string]string, protected bool, decode func([]byte) (map[string]string, error)) ([]MirrorRow, error) {
 	if len(types) == 0 || len(matchLabels) == 0 {
 		return nil, nil
 	}
@@ -159,14 +165,18 @@ func matchByLabels(ctx context.Context, q querier, types []string, matchLabels m
 	if err != nil {
 		return nil, fmt.Errorf("resource_mirror: marshal matchLabels: %w", err)
 	}
+	column := "m.labels"
+	if protected {
+		column = "m.access_labels"
+	}
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.resource_mirror m
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE m.object_type = ANY($1)
-		    AND m.labels @> $2::jsonb
+		    AND `+column+` @> $2::jsonb
 		  ORDER BY m.object_type ASC, m.object_id ASC`,
 		types, payload,
 	)
@@ -218,7 +228,7 @@ func AllByTypes(ctx context.Context, q querier, types []string, scopeType, scope
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.resource_mirror m
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE m.object_type = ANY($1)`+scopeClause+`
@@ -242,7 +252,7 @@ func ByTypesAndIDs(ctx context.Context, q querier, types, ids []string) ([]Mirro
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.resource_mirror m
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE m.object_type = ANY($1) AND m.object_id = ANY($2)
@@ -261,18 +271,18 @@ func ByTypesAndIDs(ctx context.Context, q querier, types, ids []string) ([]Mirro
 // (the grant arrived before the owner's RegisterResource).
 func GetByObject(ctx context.Context, q querier, objectType, objectID string) (MirrorRow, bool, error) {
 	var (
-		out        MirrorRow
-		labelsJSON []byte
+		out                          MirrorRow
+		labelsJSON, accessLabelsJSON []byte
 	)
 	err := q.QueryRow(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.resource_mirror m
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
 		  WHERE m.object_type = $1 AND m.object_id = $2`,
 		objectType, objectID,
-	).Scan(&out.ObjectType, &out.ObjectID, &out.ParentProjectID, &out.ParentAccountID, &labelsJSON)
+	).Scan(&out.ObjectType, &out.ObjectID, &out.ParentProjectID, &out.ParentAccountID, &labelsJSON, &accessLabelsJSON)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return MirrorRow{}, false, nil
@@ -281,6 +291,10 @@ func GetByObject(ctx context.Context, q querier, objectType, objectID string) (M
 	}
 	if err := json.Unmarshal(labelsJSON, &out.Labels); err != nil {
 		return MirrorRow{}, false, fmt.Errorf("resource_mirror: unmarshal labels: %w", err)
+	}
+	out.AccessLabels, err = decodeAccessLabels(accessLabelsJSON)
+	if err != nil {
+		return MirrorRow{}, false, fmt.Errorf("resource_mirror: unmarshal access_labels: %w", err)
 	}
 	return out, true, nil
 }
@@ -293,10 +307,10 @@ func scanRowsWithDecoder(rows pgx.Rows, decode func([]byte) (map[string]string, 
 	var out []MirrorRow
 	for rows.Next() {
 		var (
-			r          MirrorRow
-			labelsJSON []byte
+			r                            MirrorRow
+			labelsJSON, accessLabelsJSON []byte
 		)
-		if err := rows.Scan(&r.ObjectType, &r.ObjectID, &r.ParentProjectID, &r.ParentAccountID, &labelsJSON); err != nil {
+		if err := rows.Scan(&r.ObjectType, &r.ObjectID, &r.ParentProjectID, &r.ParentAccountID, &labelsJSON, &accessLabelsJSON); err != nil {
 			return nil, fmt.Errorf("resource_mirror: scan: %w", err)
 		}
 		labels, err := decode(labelsJSON)
@@ -304,6 +318,10 @@ func scanRowsWithDecoder(rows pgx.Rows, decode func([]byte) (map[string]string, 
 			return nil, fmt.Errorf("resource_mirror: unmarshal labels: %w", err)
 		}
 		r.Labels = labels
+		r.AccessLabels, err = decodeAccessLabels(accessLabelsJSON)
+		if err != nil {
+			return nil, fmt.Errorf("resource_mirror: unmarshal access_labels: %w", err)
+		}
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -333,7 +351,7 @@ func AncestorsOf(ctx context.Context, q querier, objectType, objectID string) ([
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.catalog_resource co
 		   JOIN kaname.resource_parent_edge pe
 		     ON pe.object_type = co.object_type AND pe.object_id = $2
@@ -359,7 +377,7 @@ func AncestorsSnapshot(ctx context.Context, q querier, objectType, objectID stri
 	rows, err := q.Query(ctx,
 		`SELECT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.catalog_resource co
 		   JOIN kaname.resource_parent_edge pe
 		     ON pe.object_type = co.object_type AND pe.object_id = $2
@@ -392,7 +410,7 @@ func DescendantsOf(ctx context.Context, q querier, types []string, containerType
 	rows, err := q.Query(ctx,
 		`SELECT DISTINCT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels
+		        m.labels,m.access_labels
 		   FROM kaname.catalog_resource cc
 		   JOIN kaname.resource_parent_edge pe
 		     ON pe.parent_type = cc.object_type AND pe.parent_id = ANY($3)

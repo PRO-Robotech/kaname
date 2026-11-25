@@ -34,6 +34,7 @@ func (userObj) toPb(u domain.User) (*iamv1.User, error) {
 		InviteStatus: inviteStatusToPb(u.InviteStatus),
 		InvitedBy:    string(u.InvitedBy),
 		Labels:       labelsToStringMap(u.Labels),
+		AccessLabels: labelsToStringMap(u.AccessLabels),
 	}, nil
 }
 

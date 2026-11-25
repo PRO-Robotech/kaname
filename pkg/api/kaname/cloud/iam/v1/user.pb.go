@@ -186,7 +186,13 @@ type User struct {
 	// Mutable через UserService.Update (`labels` в update_mask). Аннотации
 	// (size/key/value pattern) энфорсят sync-INVALID_ARGUMENT на request-layer —
 	// паритет account/project/group request `labels`.
-	Labels        map[string]string `protobuf:"bytes,9,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,9,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	// User — глобальная личность: эффект этих меток учитывается во всех scopes,
+	// а не только в аккаунте, из которого пришло изменение.
+	AccessLabels  map[string]string `protobuf:"bytes,10,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -273,6 +279,13 @@ func (x *User) GetInvitedBy() string {
 func (x *User) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *User) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -781,7 +794,7 @@ var File_kaname_cloud_iam_v1_user_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_user_proto_rawDesc = "" +
 	"\n" +
-	"\x1ekaname/cloud/iam/v1/user.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xf8\x03\n" +
+	"\x1ekaname/cloud/iam/v1/user.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8b\x05\n" +
 	"\x04User\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1f\n" +
 	"\vexternal_id\x18\x02 \x01(\tR\n" +
@@ -793,8 +806,13 @@ const file_kaname_cloud_iam_v1_user_proto_rawDesc = "" +
 	"\rinvite_status\x18\a \x01(\x0e2&.kaname.cloud.iam.v1.User.InviteStatusR\finviteStatus\x12\x1d\n" +
 	"\n" +
 	"invited_by\x18\b \x01(\tR\tinvitedBy\x12=\n" +
-	"\x06labels\x18\t \x03(\v2%.kaname.cloud.iam.v1.User.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\t \x03(\v2%.kaname.cloud.iam.v1.User.LabelsEntryR\x06labels\x12P\n" +
+	"\raccess_labels\x18\n" +
+	" \x03(\v2+.kaname.cloud.iam.v1.User.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"S\n" +
 	"\fInviteStatus\x12\x1d\n" +
@@ -854,7 +872,7 @@ func file_kaname_cloud_iam_v1_user_proto_rawDescGZIP() []byte {
 }
 
 var file_kaname_cloud_iam_v1_user_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_kaname_cloud_iam_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(User_InviteStatus)(0),                // 0: kaname.cloud.iam.v1.User.InviteStatus
 	(*User)(nil),                          // 1: kaname.cloud.iam.v1.User
@@ -868,17 +886,19 @@ var file_kaname_cloud_iam_v1_user_proto_goTypes = []any{
 	(*InviteUserMetadata)(nil),            // 9: kaname.cloud.iam.v1.InviteUserMetadata
 	(*ResendInviteMetadata)(nil),          // 10: kaname.cloud.iam.v1.ResendInviteMetadata
 	nil,                                   // 11: kaname.cloud.iam.v1.User.LabelsEntry
-	(*timestamppb.Timestamp)(nil),         // 12: google.protobuf.Timestamp
+	nil,                                   // 12: kaname.cloud.iam.v1.User.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil),         // 13: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_user_proto_depIdxs = []int32{
-	12, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
+	13, // 0: kaname.cloud.iam.v1.User.created_at:type_name -> google.protobuf.Timestamp
 	0,  // 1: kaname.cloud.iam.v1.User.invite_status:type_name -> kaname.cloud.iam.v1.User.InviteStatus
 	11, // 2: kaname.cloud.iam.v1.User.labels:type_name -> kaname.cloud.iam.v1.User.LabelsEntry
-	3,  // [3:3] is the sub-list for method output_type
-	3,  // [3:3] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	12, // 3: kaname.cloud.iam.v1.User.access_labels:type_name -> kaname.cloud.iam.v1.User.AccessLabelsEntry
+	4,  // [4:4] is the sub-list for method output_type
+	4,  // [4:4] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_user_proto_init() }
@@ -892,7 +912,7 @@ func file_kaname_cloud_iam_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_user_proto_rawDesc), len(file_kaname_cloud_iam_v1_user_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   11,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

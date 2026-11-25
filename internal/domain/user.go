@@ -109,6 +109,8 @@ type User struct {
 	// account/project: ARM_LABELS-грант на iam.user материализует v_list по
 	// `labels @> matchLabels`, а List фильтрует через viewer ∪ v_list.
 	Labels Labels
+	// AccessLabels — отдельные защищённые метки доступа самого ресурса.
+	AccessLabels Labels `json:",omitempty"`
 }
 
 // InviteExpired — истёк ли срок приглашения к моменту now. Строка без срока
@@ -133,6 +135,7 @@ func (u User) Validate() error {
 	// стадии S4).
 	errs = multierr.Append(errs, u.Email.Validate())
 	errs = multierr.Append(errs, u.Labels.Validate())
+	errs = multierr.Append(errs, u.AccessLabels.Validate())
 	if u.DisplayName != "" {
 		errs = multierr.Append(errs, u.DisplayName.Validate())
 	}

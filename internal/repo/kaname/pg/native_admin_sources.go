@@ -382,7 +382,7 @@ func (s *nativeAdministrativeSources) bindingProduces(ctx context.Context, id do
 		return false, nil
 	}
 	role.Lifecycle.State = domain.RoleLifecycleDeclared
-	checkpoint, cost, err := readRoleProjectionCheckpoint(ctx, s.transaction(), s.bundle, role.ID)
+	checkpoint, cost, err := readRoleProjectionCheckpoint(ctx, s.transaction(), s.bundle, role.ID, budget, nil)
 	if charge := budget.Charge(cost.Rows, cost.Reads); charge != nil {
 		return false, charge
 	}

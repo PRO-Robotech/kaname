@@ -25,7 +25,7 @@ func (p *resourceObjectPreparation) emptySnapshot(ctx context.Context, parents *
 	}
 	// Исключение принадлежит только полному ReconcileObject, не регистрации и
 	// не добавляющим forward/NoStale маршрутам.
-	if p.route != resourceObjectFull {
+	if p.route != resourceObjectFull || p.generation.fingerprint != nil {
 		return false, nil
 	}
 	if !nativeQuestionToken(p.root.object.Type) || !nativeQuestionToken(p.root.object.ID) || !nativeQuestionToken(p.root.modelType) {

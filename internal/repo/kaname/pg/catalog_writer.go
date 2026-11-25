@@ -125,8 +125,9 @@ const ModuleStateExpr = `(SELECT md5(coalesce(string_agg(x, '|' ORDER BY x), '')
 
 // CatalogWriteRepo — исполнитель транзакций применителя каталога над пулом.
 type CatalogWriteRepo struct {
-	pool         *pgxpool.Pool
-	fullContract *FullWriterContract
+	pool              *pgxpool.Pool
+	fullContract      *FullWriterContract
+	metadataBootstrap bool
 }
 
 // NewCatalogWriteRepo собирает исполнителя транзакций поверх пула.
@@ -134,11 +135,16 @@ func NewCatalogWriteRepo(pool *pgxpool.Pool) *CatalogWriteRepo {
 	return &CatalogWriteRepo{pool: pool}
 }
 
+// NewMetadataBootstrapCatalogRepo принимает запись только до первого owner handoff.
+func NewMetadataBootstrapCatalogRepo(pool *pgxpool.Pool) *CatalogWriteRepo {
+	return &CatalogWriteRepo{pool: pool, metadataBootstrap: true}
+}
+
 // WithFullWriterContract retains the validated immutable profile on this
 // executor. RPC contexts do not inherit startup contexts. The returned copy
 // selects v3 at every transaction entry; the original stays generation1.
 func (r *CatalogWriteRepo) WithFullWriterContract(contract *FullWriterContract) (*CatalogWriteRepo, error) {
-	if r == nil || contract == nil || !contract.profile.UsesPool(r.pool) {
+	if r == nil || r.metadataBootstrap || contract == nil || !contract.profile.UsesPool(r.pool) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	copy := *r
@@ -156,6 +162,20 @@ func (r *CatalogWriteRepo) RunInWriteTx(
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
 	apply := func(ctx context.Context, tx pgx.Tx) error {
+		if r.metadataBootstrap {
+			// Installation entry уже держит GLOBAL перед бизнес-замками.
+			// После concurrent Stage/Activate применитель не увидит callback.
+			if _, err := tx.Exec(ctx, `SELECT kaname.authority_protocol_require_owner()`); err != nil {
+				return err
+			}
+			genOne, initial, err := metadataBootstrapState(ctx, tx)
+			if err != nil {
+				return err
+			}
+			if !genOne || !initial {
+				return kaname.ErrSemanticIdentityUnavailable
+			}
+		}
 		// После глобальной ограды видна любая ранее завершённая публикация.
 		// Изменение строк теперь допускается только с записью новой редакции.
 		var published bool

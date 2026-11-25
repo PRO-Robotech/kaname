@@ -103,7 +103,7 @@ func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.Mirr
 			if !nestedCoversObject(sel, bs, o, ancestors) {
 				continue
 			}
-		} else if !inTarget || !selectorMatchesObject(sel, o) {
+		} else if !inTarget || !sel.MatchesObject(o) {
 			continue
 		}
 		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
@@ -165,29 +165,6 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 		Derivation: derivation, RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 		Status: domain.VerificationActive, Tuples: tuples,
 	}, true
-}
-
-func selectorMatchesObject(sel domain.RuleSelector, o domain.MirrorObject) bool {
-	if !containsStringForward(sel.ObjectTypes, o.ObjectType) {
-		return false
-	}
-	switch sel.Arm {
-	case domain.ArmNames:
-		return containsStringForward(sel.ResourceNames, o.ObjectID)
-	case domain.ArmLabels:
-		return o.MatchesLabels(sel.MatchLabels)
-	default: // ArmAnchor
-		return true
-	}
-}
-
-func containsStringForward(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }
 
 func grantees(bs ObjectBinding, verbs []string, nested bool) []grantee {
@@ -377,16 +354,17 @@ func containerMembers(cat *catalog.Facts, bs ObjectBinding) []ObjectDesiredMembe
 func ownerSelectorOf(sel domain.RuleSelector) domain.RuleSelector {
 	c := sel.Container
 	return domain.RuleSelector{
-		RuleFP:        c.OwnerFP,
-		Arm:           c.Arm,
-		ObjectTypes:   []string{c.Type},
-		ResourceNames: c.ResourceNames,
-		MatchLabels:   c.MatchLabels,
+		RuleFP:            c.OwnerFP,
+		Arm:               c.Arm,
+		ObjectTypes:       []string{c.Type},
+		ResourceNames:     c.ResourceNames,
+		MatchLabels:       c.MatchLabels,
+		MatchAccessLabels: c.MatchAccessLabels,
 	}
 }
 
 func containerSelected(sel domain.RuleSelector, bs ObjectBinding, a domain.MirrorObject) bool {
-	if a.ObjectType != sel.Container.Type || !selectorMatchesObject(ownerSelectorOf(sel), a) {
+	if a.ObjectType != sel.Container.Type || !ownerSelectorOf(sel).MatchesObject(a) {
 		return false
 	}
 	if len(bs.Target.Resources) > 0 && !bs.Target.Contains(a.ObjectType, a.ObjectID) {
@@ -396,7 +374,7 @@ func containerSelected(sel domain.RuleSelector, bs ObjectBinding, a domain.Mirro
 }
 
 func nestedCoversObject(sel domain.RuleSelector, bs ObjectBinding, o domain.MirrorObject, ancestors []domain.MirrorObject) bool {
-	if !hasNonClassSubject(bs) || !selectorMatchesObject(sel, o) {
+	if !hasNonClassSubject(bs) || !sel.MatchesObject(o) {
 		return false
 	}
 	for _, a := range ancestors {

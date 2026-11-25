@@ -77,15 +77,15 @@ type Creator struct {
 	Subject domain.Subject
 }
 
-// Region — пересечение Objects, равенств Labels и Creator. Пустая карта
-// Labels означает отсутствие ограничений по меткам. Фактические метки
-// сегодняшнего объекта нельзя добавлять сюда как вечные ограничения права.
-// Наличие IDs и Labels вместе отражает уже доказанное пересечение target и
-// селектора, а не изменение публичного XOR-контракта Rule.
+// Region пересекает отбор объектов, создателя и равенства в двух картах меток.
+// Пустая карта оставляет своё поле без ограничений. Фактические метки объекта
+// используют при проверке снимка, а не как постоянное условие полномочия.
+// IDs вместе с метками сохраняют пересечение цели выдачи и селектора.
 type Region struct {
-	Objects Objects
-	Labels  map[string]string
-	Creator Creator
+	Objects      Objects
+	Labels       map[string]string
+	AccessLabels map[string]string `json:",omitempty"`
+	Creator      Creator
 }
 
 type Resource struct {

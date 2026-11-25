@@ -47,6 +47,9 @@ func (h *Handler) WithListOperations(uc *shared.ListOperationsUseCase) *Handler 
 }
 
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateGroupRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	g := domain.Group{
 		AccountID:   domain.AccountID(req.GetAccountId()),
 		Name:        domain.GroupName(req.GetName()),
@@ -61,6 +64,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateGroupRequest) (*o
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateGroupRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+		return nil, err
+	}
 	in := UpdateGroupInput{
 		ID: domain.GroupID(req.GetGroupId()),
 	}

@@ -13,9 +13,10 @@ import (
 )
 
 type scopeObject struct {
-	anchor  domain.ScopeAnchor
-	account domain.AccountID
-	labels  domain.Labels
+	anchor       domain.ScopeAnchor
+	account      domain.AccountID
+	labels       domain.Labels
+	accessLabels domain.Labels
 }
 
 func scopeObjects(ctx context.Context, w kaname.SemanticAuthorityWriter, scope domain.ScopeAnchor) (map[string]scopeObject, error) {
@@ -34,7 +35,7 @@ func scopeObjects(ctx context.Context, w kaname.SemanticAuthorityWriter, scope d
 			return nil, e
 		}
 		account = p.AccountID
-		out["project"] = scopeObject{anchor: scope, account: account, labels: p.Labels}
+		out["project"] = scopeObject{anchor: scope, account: account, labels: p.Labels, accessLabels: p.AccessLabels}
 	default:
 		return nil, denied()
 	}
@@ -43,7 +44,7 @@ func scopeObjects(ctx context.Context, w kaname.SemanticAuthorityWriter, scope d
 		if e != nil {
 			return nil, e
 		}
-		out["account"] = scopeObject{anchor: domain.ScopeAnchor{Type: "account", ID: string(a.ID)}, account: a.ID, labels: a.Labels}
+		out["account"] = scopeObject{anchor: domain.ScopeAnchor{Type: "account", ID: string(a.ID)}, account: a.ID, labels: a.Labels, accessLabels: a.AccessLabels}
 	}
 	return out, nil
 }
@@ -125,6 +126,11 @@ func scopeEffectMatches(e granteffect.Effect, scope domain.ScopeAnchor, objects 
 		}
 		for k, v := range c.Region.Labels {
 			if got, ok := o.labels[domain.LabelKey(k)]; !ok || got != domain.LabelVal(v) {
+				return false
+			}
+		}
+		for k, v := range c.Region.AccessLabels {
+			if got, ok := o.accessLabels[domain.LabelKey(k)]; !ok || got != domain.LabelVal(v) {
 				return false
 			}
 		}

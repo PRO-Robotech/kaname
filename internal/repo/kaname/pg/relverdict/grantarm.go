@@ -222,7 +222,7 @@ import (
 // necessaryOnly используется только предварительным фильтром List: true даёт
 // общую ветвь объекта с глаголом правила, без права разрешать доступ. Обычные
 // вызовы без этого аргумента получают прежний полный предикат.
-func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr string, nesting bool, necessaryOnly ...bool) string {
+func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labelsExpr, accessLabelsExpr string, nesting bool, necessaryOnly ...bool) string {
 	// Глагол вопроса входит в глаголы ЭТОГО правила на типе объекта
 	// (`rs.verbs_by_type`, kaname#878).
 	//
@@ -284,6 +284,10 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
           OR (rs.arm = 'names'  AND ` + objectIDExpr + ` = ANY (rs.resource_names))
           OR (rs.arm = 'labels' AND ` + labelsExpr + ` IS NOT NULL
                                 AND ` + labelsExpr + ` @> rs.match_labels)
+          OR (rs.arm = 'access_labels' AND ` + accessLabelsExpr + ` IS NOT NULL
+                                AND jsonb_typeof(rs.match_access_labels) = 'object'
+                                AND rs.match_access_labels <> '{}'::jsonb
+                                AND ` + accessLabelsExpr + ` @> rs.match_access_labels)
          )`
 	// List сначала проверяет только необходимую собственную ветвь объекта.
 	// Текст остаётся в единственном доме: scope/target/creator и окончательный
@@ -315,7 +319,12 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                      OR (rs.container_arm = 'labels' AND EXISTS (
                             SELECT 1 FROM kaname.resource_mirror cm
                              WHERE cm.object_type = rs.container_type AND cm.object_id = ce.parent_id
-                               AND cm.labels @> rs.container_match_labels)))
+                               AND cm.labels @> rs.container_match_labels))
+                     OR (CASE WHEN rs.container_arm = 'access_labels'
+                         AND jsonb_typeof(rs.container_match_access_labels) = 'object'
+                         AND rs.container_match_access_labels <> '{}'::jsonb
+                         THEN ` + containerAccessLabels("rs.container_object_type", "rs.container_type", "ce.parent_id") + `
+                             @> rs.container_match_access_labels ELSE false END))
                 AND (` + wholeScopeTarget + `
                      OR ` + namedInTarget("rs.container_type", "ce.parent_id") + `))))`
 	// Часть 2 — строка верхнего уровня (точно).

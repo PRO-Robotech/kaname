@@ -42,6 +42,12 @@ func (r Rule) Fingerprint() string {
 	writeSortedList(h, "v", r.Verbs)
 	writeSortedList(h, "n", r.ResourceNames)
 	writeSortedLabels(h, r.MatchLabels)
+	// Отдельный discriminator присутствует только у нового selector: старые
+	// правила, включая nested/creator, сохраняют прежние байты fingerprint.
+	if r.MatchAccessLabels != nil {
+		_, _ = h.Write([]byte("access_labels\x00"))
+		writeSortedLabels(h, r.MatchAccessLabels)
+	}
 	// Вложенные правила — своей секцией и ТОЛЬКО когда они есть: отпечаток
 	// правила без вложенных не сдвигается ни на байт (kaname#874).
 	writeChildren(h, r.Children)
@@ -141,12 +147,13 @@ func (rs Rules) LabelSelectors() []RuleLabelSelector {
 // role's compiled permissions — ARM_LABELS/ARM_ANCHOR-materialized rules are not in
 // CompileRules). Pure domain, no pgx/grpc.
 type RuleSelector struct {
-	RuleFP        string
-	Arm           Arm
-	ObjectTypes   []string
-	ResourceNames []string          // ARM_NAMES only
-	MatchLabels   map[string]string // ARM_LABELS only
-	Verbs         []string
+	RuleFP            string
+	Arm               Arm
+	ObjectTypes       []string
+	ResourceNames     []string          // ARM_NAMES only
+	MatchLabels       map[string]string // ARM_LABELS only
+	MatchAccessLabels map[string]string `json:",omitempty"` // ArmAccessLabels only
+	Verbs             []string
 	// Container — контейнер вложенного правила (kaname#874); nil у правила
 	// верхнего уровня. Селектор с контейнером охватывает объекты своих
 	// ObjectTypes, у которых среди предков есть объект типа Container.Type,
@@ -184,10 +191,11 @@ type ContainerSelector struct {
 	// По нему разворачивание выдачи классу узнаёт, что контейнер в составе выдачи
 	// ИМЕННО этим правилом (а не соседним), прежде чем писать `public_reader`.
 	// В хранимую строку селектора не едет: решению о доступе он не нужен.
-	OwnerFP       string
-	Arm           Arm
-	ResourceNames []string          // ArmNames only
-	MatchLabels   map[string]string // ArmLabels only
+	OwnerFP           string
+	Arm               Arm
+	ResourceNames     []string          // ArmNames only
+	MatchLabels       map[string]string // ArmLabels only
+	MatchAccessLabels map[string]string `json:",omitempty"` // ArmAccessLabels only
 }
 
 // MaterializingSelectors projects a role's rules to the UNIFIED selector set the
@@ -263,6 +271,8 @@ func (rs Rules) materializingSelectorsFrom(expandWildcard bool, allTypes func() 
 				ml[k] = v
 			}
 			sel.MatchLabels = ml
+		case ArmAccessLabels:
+			sel.MatchAccessLabels = cloneAccessLabels(r.MatchAccessLabels)
 		}
 		out = append(out, sel)
 		// Вложенные правила — СВОИМИ селекторами над своими типами, каждый с
@@ -295,6 +305,17 @@ func materializableTypesFromModule(module string, types []string) []string {
 		if len(ty) > len(prefix) && ty[:len(prefix)] == prefix {
 			out = append(out, ty)
 		}
+	}
+	return out
+}
+
+func cloneAccessLabels(labels map[string]string) map[string]string {
+	if labels == nil {
+		return nil
+	}
+	out := make(map[string]string, len(labels))
+	for key, value := range labels {
+		out[key] = value
 	}
 	return out
 }

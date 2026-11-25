@@ -112,7 +112,7 @@ func administrativeQuerySQL(labelTable string, nesting bool) (string, error) {
 	}
 	replacements := [][2]string{
 		{"SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm", "SELECT ''::text AS cond_name, '{}'::jsonb AS cond_params, rs.arm AS arm, ''::text AS object_type, ''::text AS object_id, ''::text AS relation, ''::text AS subject"},
-		{"''::text AS arm\n      FROM kaname.relation_fact f", "''::text AS arm, f.object_type, f.object_id, f.relation, f.subject\n      FROM kaname.relation_fact f"},
+		{factFreshnessArmSQL + "\n      FROM kaname.relation_fact f", factFreshnessArmSQL + ", f.object_type, f.object_id, f.relation, f.subject\n      FROM kaname.relation_fact f"},
 		{"SELECT src.cond_name, src.cond_params, src.arm FROM (", "SELECT src.cond_name, src.cond_params, src.arm, src.object_type, src.object_id, src.relation, src.subject, src.cond_params::text FROM ("},
 		{"b.expires_at > now()", "b.expires_at > $13::timestamptz"},
 		{") src\nLIMIT $8::int", ") src\nWHERE (src.object_type COLLATE \"C\",src.object_id COLLATE \"C\",src.relation COLLATE \"C\",src.subject COLLATE \"C\",src.cond_name COLLATE \"C\",src.cond_params::text COLLATE \"C\") > ($14::text COLLATE \"C\",$15::text COLLATE \"C\",$16::text COLLATE \"C\",$17::text COLLATE \"C\",$18::text COLLATE \"C\",$19::text COLLATE \"C\")\nORDER BY src.object_type COLLATE \"C\",src.object_id COLLATE \"C\",src.relation COLLATE \"C\",src.subject COLLATE \"C\",src.cond_name COLLATE \"C\",src.cond_params::text COLLATE \"C\"\nLIMIT $8::int"},
@@ -196,7 +196,13 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 		if err = budget.Charge(0, 1); err != nil {
 			return Unknown, g, err
 		}
-		args := []any{in.Subject, in.ObjectType, in.ObjectID, parents, relations, verbs, MaxAncestorDepth, 256, cat, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents, in.DecisionAt, cursor[0], cursor[1], cursor[2], cursor[3], cursor[4], cursor[5]}
+		// Каждый факт добавляет один exact-key freshness lookup. Ограничиваем
+		// страницу остатком той же попытки; новый счётчик helper не заводит.
+		pageLimit := min(256, budget.RemainingReads(), budget.RemainingRows()/2)
+		if pageLimit < 1 {
+			return Unknown, g, ErrAdministrativeSourceLimit
+		}
+		args := []any{in.Subject, in.ObjectType, in.ObjectID, parents, relations, verbs, MaxAncestorDepth, pageLimit, cat, classSlot(in.Subject, 0), classSlot(in.Subject, 1), hierarchy.MaxImmediateParents, in.DecisionAt, cursor[0], cursor[1], cursor[2], cursor[3], cursor[4], cursor[5]}
 		if bound && !global {
 			args = append(args, scopeJSON)
 		}
@@ -208,7 +214,7 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 			fact     AdministrativeFact
 			arm, raw string
 		}
-		page := make([]candidate, 0, 256)
+		page := make([]candidate, 0, pageLimit)
 		for rows.Next() {
 			var c candidate
 			if e = rows.Scan(&c.fact.ConditionName, &c.fact.ConditionParameters, &c.arm, &c.fact.ObjectType, &c.fact.ObjectID, &c.fact.Relation, &c.fact.Subject, &c.raw); e != nil {
@@ -223,12 +229,22 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 		if e != nil {
 			return Unknown, g, e
 		}
-		if err = budget.Charge(len(page), 0); err != nil {
+		factLookups := 0
+		for _, c := range page {
+			if c.fact.ObjectType != "" {
+				factLookups++
+			}
+		}
+		if err = budget.Charge(len(page)+factLookups, factLookups); err != nil {
 			return Unknown, g, err
 		}
 		for _, c := range page {
 			if err = ctx.Err(); err != nil {
 				return Unknown, g, err
+			}
+			if c.arm == pendingFactArm {
+				unknown = ErrAccessLabelProjectionPending
+				continue
 			}
 			c.fact.QuestionRelation = in.Relation
 			c.fact.QuestionSubject = in.Subject
@@ -254,7 +270,7 @@ func askAdministrativeBound(ctx context.Context, tx pgx.Tx, in Query, verify Adm
 			}
 			return Allow, g, nil
 		}
-		if len(page) < 256 {
+		if len(page) < pageLimit {
 			g.SetExhausted = true
 			if unknown != nil {
 				return Unknown, g, unknown

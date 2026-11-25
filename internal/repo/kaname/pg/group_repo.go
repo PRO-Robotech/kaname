@@ -34,7 +34,7 @@ type groupReader struct {
 	tx pgx.Tx
 }
 
-const groupCols = "id, account_id, name, description, labels, created_at"
+const groupCols = "id, account_id, name, description, labels, created_at, access_labels"
 
 // groupUpdateQ — оператор записи группы. СТАТИЧЕСКИЙ: набор колонок известен
 // компилятору, применимость поля приезжает параметром (kacho#2065; разбор —
@@ -81,16 +81,12 @@ func (r *groupReader) List(ctx context.Context, f group.ListFilter) ([]domain.Gr
 		argIdx += 2
 	}
 	if f.Filter != "" {
-		// Whitelist `name="value"`; anything else is refused by name, never
-		// accepted-and-ignored (kacho#445). The predicate is built from the parsed
-		// expression, so the column follows the whitelist instead of being
-		// restated here and drifting from it.
 		ast, ferr := parseListFilter(f.Filter, "name")
 		if ferr != nil {
 			return nil, "", ferr
 		}
 		if ast != nil {
-			frag, fargs := ast.ToSQL(argIdx)
+			frag, fargs := listFilterSQL(ast, argIdx)
 			conditions = append(conditions, frag)
 			args = append(args, fargs...)
 			argIdx += len(fargs)
@@ -513,8 +509,8 @@ func (w *groupWriter) RemoveMember(ctx context.Context, groupID domain.GroupID, 
 
 func scanGroup(row scanner) (domain.Group, error) {
 	var (
-		g          domain.Group
-		labelsJSON []byte
+		g                            domain.Group
+		labelsJSON, accessLabelsJSON []byte
 	)
 	err := row.Scan(
 		(*string)(&g.ID),
@@ -523,11 +519,16 @@ func scanGroup(row scanner) (domain.Group, error) {
 		(*string)(&g.Description),
 		&labelsJSON,
 		&g.CreatedAt,
+		&accessLabelsJSON,
 	)
 	if err != nil {
 		return domain.Group{}, err
 	}
 	g.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.Group{}, err
+	}
+	g.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
 	if err != nil {
 		return domain.Group{}, err
 	}

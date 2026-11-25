@@ -1442,6 +1442,10 @@ type iam_grant_role
   relations
     define bind: [user, service_account, group#member]
 
+type iam_grant_access_label
+  relations
+    define apply: [user, service_account, group#member]
+
 
 condition mfa_fresh(amr_claims: list<string>, acr_value: string, current_time: timestamp, mfa_at: timestamp) {
   acr_value == "3" &&

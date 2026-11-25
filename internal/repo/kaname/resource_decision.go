@@ -5,11 +5,17 @@ package kaname
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"slices"
 
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 )
+
+// ErrAccessLabelReconcilePending означает, что наблюдаемое поколение отзыва ещё открыто.
+// Очередь повторяет работу отдельной попыткой и сохраняет неснятое событие.
+var ErrAccessLabelReconcilePending = fmt.Errorf("access label generation still pending: %w", iamerr.ErrUnavailable)
 
 // ResourceDecisionAction задаёт закрытый сценарий, а не произвольный TX callback.
 // Все prepared rows, источники и effect footprint вычисляет доверенный runner.

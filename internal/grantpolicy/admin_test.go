@@ -45,7 +45,9 @@ func TestScopeAdminWitnessPreservesTypedPathNamesLabelsAndCreator(t *testing.T) 
 }
 func TestProposedControlCarrierRejectsFiniteTargetBeforeAdmin(t *testing.T) {
 	b := granteffect.Binding{SourceID: "proposed", Role: domain.Role{ID: "rol_a", Rules: domain.Rules{{Module: "iam", Resources: []string{"accessBinding"}, Verbs: []string{"create"}}}}, Scope: domain.ScopeAnchor{Type: "account", ID: "acc_a"}, Recipient: domain.Subject{Type: domain.SubjectTypeUser, ID: "usr_a"}, Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "iam.role", ID: "rol_a"}}}, CapabilityVersion: 1}
-	require.Error(t, validateProposed(b))
+	_, err := validateProposed(b)
+	require.Error(t, err)
 	b.Target = domain.AccessTarget{AllInScope: true}
-	require.NoError(t, validateProposed(b))
+	_, err = validateProposed(b)
+	require.NoError(t, err)
 }

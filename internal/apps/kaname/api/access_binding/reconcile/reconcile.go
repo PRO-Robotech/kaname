@@ -1275,6 +1275,12 @@ func (r *Reconciler) matchSelectorObjects(ctx context.Context, s ReconcileStore,
 	return matched, nil
 }
 
+// protectedSelectorReader требуется только для выдач с accessLabels. Store без
+// этого порта не может объявить защищённый селектор пустым совпадением.
+type protectedSelectorReader interface {
+	MatchAccessLabelObjects(context.Context, []string, map[string]string, bool) ([]domain.MirrorObject, error)
+}
+
 // matchByArm направляет отбор ветви к нужному источнику (зеркало или iam-direct).
 // Ветвь ANCHOR передаёт `scope` выдачи для сужения области в SQL; ветви NAMES/LABELS
 // уже узкие (конкретные id / метки), И совпадение чужой области нужно для
@@ -1296,7 +1302,13 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 			return s.MatchIAMDirect(ctx, types, sel.MatchLabels)
 		}
 		return s.MatchSelector(ctx, types, sel.MatchLabels)
-	default: // ArmAnchor (все).
+	case domain.ArmAccessLabels:
+		reader, ok := s.(protectedSelectorReader)
+		if !ok {
+			return nil, fmt.Errorf("protected selector %s has no access label reader", sel.RuleFP)
+		}
+		return reader.MatchAccessLabelObjects(ctx, types, sel.MatchAccessLabels, iamDirect)
+	case domain.ArmAnchor:
 		if len(target.Resources) > 0 {
 			// Пообъектная цель: находим кандидатов якоря по id цели этих
 			// типов (никогда не читаем всю область). Пусто ⇒ кандидатов этих типов нет.
@@ -1313,6 +1325,8 @@ func (r *Reconciler) matchByArm(ctx context.Context, sel domain.RuleSelector, ty
 			return s.MatchAllInScopeIAMDirect(ctx, types, scope)
 		}
 		return s.MatchAllInScope(ctx, types, scope)
+	default:
+		return nil, fmt.Errorf("неподдерживаемая ветвь селектора роли: %d", sel.Arm)
 	}
 }
 
@@ -1486,7 +1500,7 @@ func (r *Reconciler) desiredRuleMembers(ctx context.Context, s ReconcileStore, b
 			return nil, err
 		}
 		for _, o := range matched {
-			if complete && (!selectorMatchesObject(sel, o) || (perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID))) {
+			if complete && (!sel.MatchesObject(o) || (perObject && !bs.Target.Contains(o.ObjectType, o.ObjectID))) {
 				continue
 			}
 			// Пообъектное решение ОБЩЕЕ с быстрым прямым путём

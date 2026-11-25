@@ -7,6 +7,7 @@ package role
 import (
 	"context"
 	"fmt"
+	"maps"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -50,6 +51,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 	if len(req.GetPermissions()) > 0 { //nolint:staticcheck // A-02: deprecated field read solely to reject it
 		return nil, shared.InvalidArg("permissions", "Illegal argument permissions (compiled/output-only)")
 	}
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
 		return nil, err
 	}
@@ -65,6 +69,9 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateRoleRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+		return nil, err
+	}
 	if err := refuseNestedRulesOnInput(req.GetRules()); err != nil {
 		return nil, err
 	}
@@ -201,17 +208,17 @@ func roleFromCreateReq(req *iamv1.CreateRoleRequest) (domain.Role, error) {
 	return r, nil
 }
 
-// rulesFromProto maps the authored proto rules into domain.Rule, preserving the
-// selector arm (resource_names XOR match_labels). Empty input → empty slice.
+// rulesFromProto сохраняет обычный или защищённый селектор авторского правила.
 func rulesFromProto(in []*iamv1.Rule) domain.Rules {
 	out := make(domain.Rules, 0, len(in))
 	for _, r := range in {
 		out = append(out, domain.Rule{
-			Module:        r.GetModule(),
-			Resources:     append([]string(nil), r.GetResources()...),
-			Verbs:         append([]string(nil), r.GetVerbs()...),
-			ResourceNames: append([]string(nil), r.GetResourceNames()...),
-			MatchLabels:   r.GetMatchLabels(),
+			Module:            r.GetModule(),
+			Resources:         append([]string(nil), r.GetResources()...),
+			Verbs:             append([]string(nil), r.GetVerbs()...),
+			ResourceNames:     append([]string(nil), r.GetResourceNames()...),
+			MatchLabels:       r.GetMatchLabels(),
+			MatchAccessLabels: maps.Clone(r.GetMatchAccessLabels()),
 		})
 	}
 	return out
@@ -253,6 +260,7 @@ func refuseNestedRulesOnInput(rules []*iamv1.Rule) error {
 		// форме: объявляет его только манифест модуля, а роль аккаунта, несущая
 		// его, вела бы «созданное субъектом» по правилу, которое автор аккаунта мог
 		// не понять (§8 В6).
+		// Пустая подстановка селектора расширила бы правило до всей области.
 		if r.GetCreatedBySubject() {
 			return shared.InvalidArg(fmt.Sprintf("rules[%d].createdBySubject", i), textCreatorRulesNotOnInput)
 		}

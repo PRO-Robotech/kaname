@@ -18,10 +18,11 @@ import (
 // Команды — проверенные ветви исходного Go diff после общего TTL collector,
 // audit ID/tenant/time — подготовленные сервером значения, а не новый lookup.
 type resourceObjectBodyValues struct {
-	Commands      []reconcile.BindingCommand `json:"commands"`
-	TransactionAt time.Time                  `json:"transaction_at"`
-	DecisionAt    time.Time                  `json:"decision_at"`
-	Audits        []resourceObjectAuditValue `json:"audits"`
+	Commands           []reconcile.BindingCommand `json:"commands"`
+	TransactionAt      time.Time                  `json:"transaction_at"`
+	DecisionAt         time.Time                  `json:"decision_at"`
+	Audits             []resourceObjectAuditValue `json:"audits"`
+	AccessLabelPending *int                       `json:"access_label_pending"`
 }
 type resourceObjectAuditValue struct {
 	Command int `json:"command"`
@@ -43,6 +44,9 @@ func readResourceObjectBodyValues(ctx context.Context, tx *resourceDecisionTx) (
 	}
 	if err := json.Unmarshal(encoded, &result); err != nil {
 		return result, err
+	}
+	if result.AccessLabelPending == nil || *result.AccessLabelPending < 0 || *result.AccessLabelPending > 100000 {
+		return result, kaname.ErrSourceUnconfirmed
 	}
 	if result.TransactionAt.IsZero() || !result.DecisionAt.Equal(tx.lifetime.at) || result.Commands == nil || len(result.Commands) > 100000 {
 		return result, kaname.ErrSourceUnconfirmed

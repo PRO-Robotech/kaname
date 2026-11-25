@@ -78,6 +78,15 @@ func TestObjectDesiredFlatSelectorsTargetAndContainment(t *testing.T) {
 			b.Selectors[0].Arm = domain.ArmLabels
 			b.Selectors[0].MatchLabels = map[string]string{"team": "blue"}
 		}},
+		{name: "access_labels_match", change: func(b *resourceeffect.ObjectBinding, o *domain.MirrorObject) {
+			b.Selectors[0].Arm = domain.ArmAccessLabels
+			b.Selectors[0].MatchAccessLabels = map[string]string{"team": "blue"}
+			o.AccessLabels = map[string]string{"team": "blue"}
+		}, status: domain.VerificationActive},
+		{name: "ordinary_labels_do_not_satisfy_access_selector", change: func(b *resourceeffect.ObjectBinding, _ *domain.MirrorObject) {
+			b.Selectors[0].Arm = domain.ArmAccessLabels
+			b.Selectors[0].MatchAccessLabels = map[string]string{"team": "red"}
+		}},
 		{name: "outside_scope_is_rejected", change: func(_ *resourceeffect.ObjectBinding, o *domain.MirrorObject) { o.ParentAccountIDs = []string{"other"} }, status: domain.VerificationRejected},
 		{name: "finite_target_match", change: func(b *resourceeffect.ObjectBinding, _ *domain.MirrorObject) {
 			b.Target = domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "probe.boxes", ID: "x"}}}

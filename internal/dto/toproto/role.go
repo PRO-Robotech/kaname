@@ -51,12 +51,13 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 	rules := make([]*iamv1.Rule, 0, len(r.Rules))
 	for _, rl := range r.Rules {
 		rules = append(rules, &iamv1.Rule{
-			Module:        rl.Module,
-			Resources:     rl.Resources,
-			Verbs:         rl.Verbs,
-			ResourceNames: rl.ResourceNames,
-			MatchLabels:   rl.MatchLabels,
-			Children:      childRulesToPb(rl.Children),
+			Module:            rl.Module,
+			Resources:         rl.Resources,
+			Verbs:             rl.Verbs,
+			ResourceNames:     rl.ResourceNames,
+			MatchLabels:       rl.MatchLabels,
+			MatchAccessLabels: rl.MatchAccessLabels,
+			Children:          childRulesToPb(rl.Children),
 			// Селектор создателя (kaname#1003, Р2а): правило без него показывалось бы
 			// «глаголами на всех объектах типа» — больше, чем роль даёт.
 			CreatedBySubject: rl.CreatedBySubject,
@@ -83,6 +84,7 @@ func (roleObj) toPb(r domain.Role) (*iamv1.Role, error) {
 		UpdatedAt:       updatedAt,
 		CreatedByUserId: string(r.CreatedByUserID),
 		Labels:          labelsToStringMap(r.Labels),
+		AccessLabels:    labelsToStringMap(r.AccessLabels),
 		// redesign-2026 F6: honest effective-verb preview + catalog metadata
 		// (output-only derived; editor's effective set carries `delete*`).
 		AuthoredVerbs:  r.AuthoredVerbs(r.TypeVerbs),
@@ -281,10 +283,11 @@ func childRulesToPb(in []domain.Rule) []*iamv1.Rule {
 	out := make([]*iamv1.Rule, 0, len(in))
 	for _, c := range in {
 		out = append(out, &iamv1.Rule{
-			Resources:     c.Resources,
-			Verbs:         c.Verbs,
-			ResourceNames: c.ResourceNames,
-			MatchLabels:   c.MatchLabels,
+			Resources:         c.Resources,
+			Verbs:             c.Verbs,
+			ResourceNames:     c.ResourceNames,
+			MatchLabels:       c.MatchLabels,
+			MatchAccessLabels: c.MatchAccessLabels,
 		})
 	}
 	return out

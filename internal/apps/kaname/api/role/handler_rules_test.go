@@ -79,6 +79,19 @@ func TestRoleHandler_RulesFromProto(t *testing.T) {
 	}
 }
 
+func TestRoleHandlerRefusesUnwiredOwnAccessLabelMutations(t *testing.T) {
+	h := &Handler{}
+	ctx := context.Background()
+	_, err := h.Create(ctx, &iamv1.CreateRoleRequest{AccessLabels: map[string]string{"team": "platform"}})
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("Create с защищённой меткой: %v", err)
+	}
+	_, err = h.Update(ctx, &iamv1.UpdateRoleRequest{UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"access_labels"}}})
+	if got := status.Code(err); got != codes.FailedPrecondition {
+		t.Fatalf("Update со снятием защищённых меток: %v", err)
+	}
+}
+
 // kacho-iam#184: List with page_size > 1000 → sync INVALID_ARGUMENT (no silent clamp).
 // The reject is the first statement (validate.PageSize) so a nil use-case is safe.
 func TestRoleHandler_184_ListRejectsPageSizeOverMax(t *testing.T) {

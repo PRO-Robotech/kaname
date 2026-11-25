@@ -21,14 +21,15 @@ import (
 // roleMutationStage сохраняет только ограниченные страницы в памяти. Полный
 // OLD/NEW набор живёт в private temp spool той же leased connection.
 type roleMutationStage struct {
-	request    kaname.RoleMutationRequest
-	projection catalog.GrantProjection
-	plan       *policyPlan
-	epochs     json.RawMessage
-	accounts   map[string]bool
-	global     bool
-	rows       int
-	reads      int
+	accessLabelMode roleAccessLabelMode
+	request         kaname.RoleMutationRequest
+	projection      catalog.GrantProjection
+	plan            *policyPlan
+	epochs          json.RawMessage
+	accounts        map[string]bool
+	global          bool
+	rows            int
+	reads           int
 }
 
 func (s *roleMutationStage) charge(n int) error {
@@ -171,7 +172,7 @@ CREATE TEMP TABLE kaname_role_stage_tuples(binding_id text NOT NULL,side text NO
 		if err != nil {
 			return nil, err
 		}
-		s.projection, err = facts.ProjectGrantRules(request.Role.Rules, domain.PolicyOfRole(request.Role.IsSystem, request.Role.OwnerModule))
+		s.projection, err = facts.ProjectRoleMutationRules(request.Role.Rules, domain.PolicyOfRole(request.Role.IsSystem, request.Role.OwnerModule))
 		if err != nil {
 			return nil, err
 		}
@@ -459,9 +460,14 @@ func (s *roleMutationStage) visitTuples(ctx context.Context, tx pgx.Tx, id, side
 
 type preparedRoleWriteTx struct {
 	*semanticAuthorityWriteTx
-	conn    *pgxpool.Conn
-	stage   *roleMutationStage
-	applied bool
+	conn                      *pgxpool.Conn
+	stage                     *roleMutationStage
+	applied                   bool
+	roleWriteStarted          bool
+	contentApprovalAttempted  bool
+	contentApprovalRecorded   bool
+	roleWriteSucceeded        bool
+	grantCapabilitiesReplaced bool
 }
 
 func (w *preparedRoleWriteTx) ApplyPreparedRoleTuples(ctx context.Context, id domain.RoleID) error {

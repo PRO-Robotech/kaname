@@ -62,7 +62,11 @@ type Project struct {
 	// Resource labels as `key:value` pairs.
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Creation timestamp.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	AccessLabels  map[string]string `protobuf:"bytes,7,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -135,6 +139,13 @@ func (x *Project) GetLabels() map[string]string {
 func (x *Project) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Project) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -308,7 +319,7 @@ var File_kaname_cloud_iam_v1_project_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_project_proto_rawDesc = "" +
 	"\n" +
-	"!kaname/cloud/iam/v1/project.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa6\x02\n" +
+	"!kaname/cloud/iam/v1/project.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbc\x03\n" +
 	"\aProject\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -317,8 +328,12 @@ const file_kaname_cloud_iam_v1_project_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12@\n" +
 	"\x06labels\x18\x05 \x03(\v2(.kaname.cloud.iam.v1.Project.LabelsEntryR\x06labels\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x1a9\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12S\n" +
+	"\raccess_labels\x18\a \x03(\v2..kaname.cloud.iam.v1.Project.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"U\n" +
 	"\x15CreateProjectMetadata\x12\x1d\n" +
@@ -349,23 +364,25 @@ func file_kaname_cloud_iam_v1_project_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_project_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_project_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_kaname_cloud_iam_v1_project_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_kaname_cloud_iam_v1_project_proto_goTypes = []any{
 	(*Project)(nil),               // 0: kaname.cloud.iam.v1.Project
 	(*CreateProjectMetadata)(nil), // 1: kaname.cloud.iam.v1.CreateProjectMetadata
 	(*UpdateProjectMetadata)(nil), // 2: kaname.cloud.iam.v1.UpdateProjectMetadata
 	(*DeleteProjectMetadata)(nil), // 3: kaname.cloud.iam.v1.DeleteProjectMetadata
 	nil,                           // 4: kaname.cloud.iam.v1.Project.LabelsEntry
-	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	nil,                           // 5: kaname.cloud.iam.v1.Project.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil), // 6: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_project_proto_depIdxs = []int32{
 	4, // 0: kaname.cloud.iam.v1.Project.labels:type_name -> kaname.cloud.iam.v1.Project.LabelsEntry
-	5, // 1: kaname.cloud.iam.v1.Project.created_at:type_name -> google.protobuf.Timestamp
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	6, // 1: kaname.cloud.iam.v1.Project.created_at:type_name -> google.protobuf.Timestamp
+	5, // 2: kaname.cloud.iam.v1.Project.access_labels:type_name -> kaname.cloud.iam.v1.Project.AccessLabelsEntry
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_project_proto_init() }
@@ -379,7 +396,7 @@ func file_kaname_cloud_iam_v1_project_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_project_proto_rawDesc), len(file_kaname_cloud_iam_v1_project_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

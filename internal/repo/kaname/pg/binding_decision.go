@@ -208,7 +208,7 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 		questions = newNativePolicyQuestions()
 		scope := domain.ScopeAnchor{Type: string(b.ResourceType), ID: b.ResourceID}
 		if create {
-			err = questions.binding(actor, scope, b.RoleID)
+			err = questions.bindingRole(actor, scope, role)
 		} else {
 			err = questions.scopeAdmin(actor, scope)
 		}
@@ -263,7 +263,8 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 	}); err != nil {
 		return err
 	}
-	if _, err = w.tx.Exec(ctx, `SELECT id FROM kaname.roles WHERE id=$1 FOR SHARE`, string(b.RoleID)); err != nil {
+	prepaid, err := holdBindingRoleForPreparation(ctx, w, role, create && !checkOnly)
+	if err != nil {
 		return err
 	}
 	// Только точный уже вычисленный emitter set. Новые locks после решения не
@@ -287,7 +288,7 @@ func (p *GrantPolicyWriters) bindingDecisionOnce(ctx context.Context, actor doma
 	if err = bindingDecisionPreflight(ctx, w.tx, b, create); err != nil {
 		return err
 	}
-	if err = prepareBindingSequenceProgram(ctx, w, b, metadata, create, checkOnly); err != nil {
+	if err = prepareBindingSequenceProgram(ctx, w, b, prepaid, metadata, create, checkOnly); err != nil {
 		return err
 	}
 	if err = p.protectPolicyPlan(ctx, w, plan); err != nil {
@@ -395,7 +396,7 @@ var _ kaname.BindingAuthorizationDecisionRunner = (*GrantPolicyWriters)(nil)
 
 // Запрос несёт только поля существующего UC. Кортежи и origin выводит owner SQL
 // из сохранённой роли и этих полей; caller не передаёт программу или reserved ID.
-func prepareBindingSequenceProgram(ctx context.Context, w *authorityWriteTx, b domain.AccessBinding,
+func prepareBindingSequenceProgram(ctx context.Context, w *authorityWriteTx, b domain.AccessBinding, prepaid kaname.SourceReadCost,
 	metadata *kaname.BindingMetadataDecision, create, checkOnly bool) error {
 	mode := "authorize"
 	input := map[string]any{"id": string(b.ID)}
@@ -426,6 +427,9 @@ func prepareBindingSequenceProgram(ctx context.Context, w *authorityWriteTx, b d
 			"target": json.RawMessage(target), "target_digest": b.Target.Digest(), "granted_relation": b.GrantedRelation,
 			"is_system": b.System, "delegation_id": string(b.DelegationID), "subjects": subjects,
 		}
+		if prepaid.Rows > 0 {
+			input["_access_label_prepaid"] = map[string]int{"rows": prepaid.Rows, "reads": prepaid.Reads}
+		}
 	} else if !checkOnly {
 		if metadata == nil || metadata.ID != b.ID {
 			return kaname.ErrInvalidAuthorityFencePlan
@@ -448,4 +452,59 @@ func prepareBindingSequenceProgram(ctx context.Context, w *authorityWriteTx, b d
 	}
 	_, err = w.tx.Exec(ctx, `SELECT kaname.authority_binding_sequence_prepare_v3($1,$2::jsonb)`, mode, raw)
 	return err
+}
+
+// Для apply получаем правила той же строкой, которая удерживает роль.
+// Обычные привязки сохраняют прежний lock-only запрос. SQL compiler отдельно
+// проверяет фактический объём перед чтением определений.
+func holdBindingRoleForPreparation(ctx context.Context, w *authorityWriteTx, role domain.Role, create bool) (kaname.SourceReadCost, error) {
+	var cost kaname.SourceReadCost
+	var observedApply bool
+	if create {
+		_, caps, err := domain.SplitGrantCapabilityRules(role.Rules)
+		if err != nil {
+			return cost, err
+		}
+		observedApply = slices.ContainsFunc(caps, func(cap domain.GrantCapabilityRule) bool {
+			return cap.Kind == domain.GrantCapabilityApplyAccessLabel
+		})
+	}
+	if !observedApply {
+		_, err := w.tx.Exec(ctx, `SELECT id FROM kaname.roles WHERE id=$1 FOR SHARE`, string(role.ID))
+		return cost, err
+	}
+	if w.producerBudget == nil || !w.policyGuards["role:"+string(role.ID)] {
+		return cost, kaname.ErrSourceUnconfirmed
+	}
+	if err := chargeNativePolicyBudget(w.producerBudget, 1, 1); err != nil {
+		return cost, err
+	}
+	var raw []byte
+	if err := w.tx.QueryRow(ctx, `SELECT rules FROM kaname.roles WHERE id=$1 FOR SHARE`, string(role.ID)).Scan(&raw); err != nil {
+		return cost, err
+	}
+	rules, err := domain.DecodeRules(raw)
+	if err != nil {
+		return cost, err
+	}
+	_, caps, err := domain.SplitGrantCapabilityRules(rules)
+	if err != nil {
+		return cost, err
+	}
+	definitions := make(map[domain.AccessLabelDefinitionID]struct{})
+	pairs := 0
+	for _, cap := range caps {
+		if cap.Kind == domain.GrantCapabilityApplyAccessLabel {
+			pairs++
+			definitions[cap.DefinitionID] = struct{}{}
+		}
+	}
+	if pairs == 0 {
+		return cost, nil
+	}
+	if pairs > 16384 || len(definitions) > 2048 {
+		return cost, kaname.ErrSourceReadLimit
+	}
+	cost = kaname.SourceReadCost{Rows: pairs + 2*len(definitions), Reads: 2 + len(definitions)}
+	return cost, chargeNativePolicyBudget(w.producerBudget, cost.Rows, cost.Reads)
 }

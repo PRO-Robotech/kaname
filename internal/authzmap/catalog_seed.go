@@ -24,12 +24,18 @@ package authzmap
 // сделать его ВИДИМЫМ». Отсюда две проверки поверх одного перечня: гейт дерева
 // сверяет литерал с текстом миграции, страж старта — литерал с живыми строками.
 
-import "sort"
+import (
+	"sort"
+
+	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
+)
 
 // CatalogSeedRow — одна строка посева каталога ресурсов.
 type CatalogSeedRow struct {
-	Module   string
-	Resource string
+	Module     string
+	Resource   string
+	ObjectType string
 	// Dotted — производная форма, та же, какой говорит `role_verb.object_type` и
 	// `role_rule_selectors.object_types`. Хранится колонкой под проверкой
 	// согласия, а не собирается читателем: словарей имени типа в дереве ровно
@@ -136,14 +142,24 @@ func CatalogSeedModules() []string {
 // CatalogSeedResources — грантуемые пары в порядке точечного ключа.
 func CatalogSeedResources() []CatalogSeedRow {
 	entries := Catalog()
-	out := make([]CatalogSeedRow, 0, len(entries))
+	out := make([]CatalogSeedRow, 0, len(entries)+1)
 	for _, e := range entries {
+		objectType, ok := ObjectType(e.Module, e.Resource)
+		if !ok {
+			continue
+		}
 		out = append(out, CatalogSeedRow{
-			Module:   e.Module,
-			Resource: e.Resource,
-			Dotted:   e.Module + "." + e.Resource,
+			Module:     e.Module,
+			Resource:   e.Resource,
+			Dotted:     e.Module + "." + e.Resource,
+			ObjectType: objectType,
 		})
 	}
+	// Внутренняя координата объявляет авторский глагол. Она не входит в
+	// ObjectType, который описывает типы обычных зарегистрированных объектов.
+	ref, _ := domain.GrantCapabilityApplyAccessLabel.RuleRef()
+	out = append(out, CatalogSeedRow{Module: ref.Module, Resource: ref.Resource, Dotted: ref.Module + "." + ref.Resource, ObjectType: grantcapability.AccessLabelObjectType})
+	sort.Slice(out, func(i, j int) bool { return out[i].Dotted < out[j].Dotted })
 	return out
 }
 
@@ -160,11 +176,13 @@ func CatalogSeedResources() []CatalogSeedRow {
 func CatalogSeedVerbs() []CatalogSeedVerb {
 	out := make([]CatalogSeedVerb, 0, 160)
 	for _, r := range CatalogSeedResources() {
-		fgaType, ok := ObjectType(r.Module, r.Resource)
-		if !ok {
+		if r.ObjectType == grantcapability.AccessLabelObjectType {
+			for _, v := range GrantAuthoringVerbs(r.Module, r.Resource) {
+				out = append(out, CatalogSeedVerb{Module: r.Module, Resource: r.Resource, Verb: v})
+			}
 			continue
 		}
-		verbs := VerbsOfType(fgaType)
+		verbs := VerbsOfType(r.ObjectType)
 		sort.Strings(verbs)
 		declared := make(map[string]bool, len(verbs))
 		for _, v := range verbs {
@@ -205,6 +223,9 @@ func GrantAuthoringVerbs(module, resource string) []string {
 		return []string{"bind"}
 	case "accessBinding":
 		return []string{"create"}
+	case "accessLabel":
+		ref, _ := domain.GrantCapabilityApplyAccessLabel.RuleRef()
+		return []string{ref.Verb}
 	}
 	return nil
 }

@@ -423,6 +423,7 @@ func (u *ListUseCase) collectVisiblePage(
 			RoleID:    f.RoleID,
 			ScopeType: f.ScopeType,
 			ScopeID:   f.ScopeID,
+			Label:     f.Label,
 			// Фильтр пересобирается по полю, а не копируется целиком, поэтому
 			// новый предикат обязан быть перечислен ЗДЕСЬ. Пропуск не ломает
 			// сборку и не виден в диффе: поле приняли бы и молча выбросили —

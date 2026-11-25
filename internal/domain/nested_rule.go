@@ -141,6 +141,8 @@ func containerOf(owner Rule) *ContainerSelector {
 		for k, v := range owner.MatchLabels {
 			c.MatchLabels[k] = v
 		}
+	case ArmAccessLabels:
+		c.MatchAccessLabels = cloneAccessLabels(owner.MatchAccessLabels)
 	}
 	return c
 }
@@ -167,6 +169,8 @@ func nestedSelectors(owner Rule) []RuleSelector {
 			for k, v := range child.MatchLabels {
 				sel.MatchLabels[k] = v
 			}
+		case ArmAccessLabels:
+			sel.MatchAccessLabels = cloneAccessLabels(child.MatchAccessLabels)
 		}
 		out = append(out, sel)
 	}

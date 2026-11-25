@@ -48,6 +48,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
 )
 
@@ -107,6 +108,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		return Declared{}, errors.Join(faults...)
 	}
 	out := Declared{Module: m.Module}
+	apply, _ := domain.GrantCapabilityApplyAccessLabel.RuleRef()
 
 	resources := make([]manifest.Resource, len(m.Resources))
 	copy(resources, m.Resources)
@@ -116,6 +118,9 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 
 	for i := range resources {
 		r := &resources[i]
+		if r.ObjectType == grantcapability.AccessLabelObjectType || (m.Module == apply.Module && r.Name == apply.Resource) {
+			return Declared{}, fmt.Errorf("зарезервированная координата каталога %s.%s", m.Module, r.Name)
+		}
 		if strings.TrimSpace(r.Name) == "" {
 			return Declared{}, fmt.Errorf("%w: модуль %s", ErrResourceNameEmpty, m.Module)
 		}
@@ -252,6 +257,14 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				Module: m.Module, Resource: r.Name, Verb: class,
 			})
 		}
+	}
+	if m.Module == apply.Module {
+		// Нативная координата остаётся в каталоге при повторном применении IAM.
+		// Манифест ресурса не может объявлять её как объект или добавлять ярусы.
+		out.Resources = append(out.Resources, catalog.ResourceRow{Module: apply.Module, Resource: apply.Resource, ObjectType: grantcapability.AccessLabelObjectType})
+		out.Verbs = append(out.Verbs, catalog.VerbRow{Module: apply.Module, Resource: apply.Resource, Verb: apply.Verb})
+		sort.SliceStable(out.Resources, func(i, j int) bool { return out.Resources[i].Resource < out.Resources[j].Resource })
+		sort.SliceStable(out.Verbs, func(i, j int) bool { return out.Verbs[i].Resource < out.Verbs[j].Resource })
 	}
 	return out, nil
 }

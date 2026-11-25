@@ -442,31 +442,8 @@ func (c CatalogParityCensus) BootRefusal() error {
 func LiteralRows() catalog.Rows {
 	rows := catalog.Rows{Modules: authzmap.CatalogSeedModules()}
 	for _, r := range authzmap.CatalogSeedResources() {
-		// Имя типа модели берётся у переходника ЛИТЕРАЛА, и это его законное
-		// место: левая сторона паритета обязана быть выводима ИЗ ДЕРЕВА — её
-		// спрашивает страж старта и оснастка, у которой базы нет by construction.
-		// Правая сторона читает ту же величину КОЛОНКОЙ, и расхождение двух
-		// сторон — предмет стража.
-		// `ok` читается, а не отбрасывается (kacho#1980). Промах невозможен by
-		// construction — строка посева производна от `Catalog()`, — и предпосылка
-		// держится пробой `TestCatalogPairsAlwaysResolveBackToTheirType`.
-		//
-		// Пропуск, а не пустой тип, и не отказ. Пустой тип уехал бы в ЛЕВУЮ сторону
-		// паритета значением, и «пары нет» стало бы неотличимо от «пара с пустым
-		// типом» — сверка сравнивала бы фантом с живой строкой. Пропущенная строка
-		// же выходит наружу той величиной, которая для этого и заведена: живая
-		// строка без пары в литерале называется стражем `ExtraRows`, то есть
-		// расхождение становится ВИДНЫМ, а не тихим. Отказа здесь нет, потому что
-		// подписи под него нет: у функции 40+ вызывающих и возврата ошибки она не
-		// несёт; заводить его ради недостижимой ветви значило бы менять контракт
-		// ради того, чего не бывает. Тот же выбор уже сделан соседом —
-		// `CatalogSeedVerbs()` на промахе тоже пропускает.
-		fgaType, ok := authzmap.ObjectType(r.Module, r.Resource)
-		if !ok {
-			continue
-		}
 		rows.Resources = append(rows.Resources, catalog.ResourceRow{
-			Module: r.Module, Resource: r.Resource, ObjectType: fgaType,
+			Module: r.Module, Resource: r.Resource, ObjectType: r.ObjectType,
 		})
 	}
 	for _, v := range authzmap.CatalogSeedVerbs() {

@@ -27,7 +27,71 @@ func (p *resourceObjectPreparation) captureFoldOutputs(ctx context.Context, pare
 		}
 		seen[out.object] = true
 	}
-	refs := map[string]bool{}
+	addOutput := func(cat resourceCatalogRow, coordinate domain.ResourceRef) error {
+		if seen[coordinate] {
+			return nil
+		}
+		out, err := captureResourceOutput(ctx, parents, cat, coordinate.ID)
+		if err != nil {
+			return err
+		}
+		p.outputs = append(p.outputs, out)
+		seen[coordinate] = true
+		return nil
+	}
+	for _, root := range p.generation.externalRoots {
+		capture, err := parents.catalog(ctx, root.Type)
+		if err != nil {
+			return err
+		}
+		cat, ok := capture.selected()
+		if !ok || len(capture.rows) != 1 || cat.identity.Dotted != root.Type {
+			return kaname.ErrSourceUnconfirmed
+		}
+		// Даже пустой пересчёт должен сохранить родительскую цепь и привязку
+		// к проекту, включая доказательство отсутствия этих строк.
+		for _, kind := range []resourceSourceKind{resourceSourceParentEdges, resourceSourceProjectBinding} {
+			if _, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: kind, typ: cat.identity.ObjectType, id: root.ID}); err != nil {
+				return err
+			}
+		}
+		// OLD scopes сохраняют все проекты lifecycle, включая уже удалённые.
+		// Читаем их K1 в том же RR до seal; владельца scope не переопределяем.
+		rows, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: resourceSourceRegistrationScopes, typ: cat.identity.ObjectType, id: root.ID})
+		if err != nil {
+			return err
+		}
+		scopes, err := resourceDecodeRows[struct {
+			Project string `json:"project_id"`
+		}](rows)
+		if err != nil {
+			return err
+		}
+		projects := make(map[string]bool, len(scopes))
+		for _, scope := range scopes {
+			if scope.Project == "" {
+				continue
+			}
+			if !nativeQuestionToken(scope.Project) {
+				return kaname.ErrSourceUnconfirmed
+			}
+			projects[scope.Project] = true
+		}
+		for _, project := range resourceSortedSet(projects) {
+			if _, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: resourceSourceProject, typ: "project", id: project}); err != nil {
+				return err
+			}
+		}
+		if err := addOutput(cat, root); err != nil {
+			return err
+		}
+	}
+	refs := make(map[string]bool, len(p.generation.outputRefs))
+	// Факты поколения тоже требуют полной защиты выходных графов,
+	// даже когда штатный пересчёт не подготовил для них запись или удаление.
+	for _, ref := range p.generation.outputRefs {
+		refs[ref] = true
+	}
 	for _, binding := range p.effects.Bindings {
 		for _, commands := range [][]reconcile.BindingCommand{binding.Live, binding.Expired} {
 			for _, command := range commands {
@@ -62,15 +126,9 @@ func (p *resourceObjectPreparation) captureFoldOutputs(ctx context.Context, pare
 			}
 		}
 		coordinate := domain.ResourceRef{Type: cat.identity.Dotted, ID: id}
-		if seen[coordinate] {
-			continue
-		}
-		out, err := captureResourceOutput(ctx, parents, cat, id)
-		if err != nil {
+		if err := addOutput(cat, coordinate); err != nil {
 			return err
 		}
-		p.outputs = append(p.outputs, out)
-		seen[coordinate] = true
 	}
 	return ctx.Err()
 }

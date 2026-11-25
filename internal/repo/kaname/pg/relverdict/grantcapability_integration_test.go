@@ -188,6 +188,10 @@ func TestGrantCapabilityNativeIndependentSourcesAndDecisionInstant(t *testing.T)
 	})
 }
 
+type admittedCapabilitySlot struct{ *authzmodel.Plans }
+
+func (admittedCapabilitySlot) GrantCapabilityPlan(string, string) error { return nil }
+
 func TestGrantCapabilityNativeFailuresRemainUnknown(t *testing.T) {
 	base := capabilityQuestion(t, "project", "prj-1", "")
 	modelMissing, err := authzmodel.New("model\n  schema 1.1\ntype user\n")
@@ -198,7 +202,21 @@ func TestGrantCapabilityNativeFailuresRemainUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cases := []relverdict.Query{base, base, base, base, base}
+	labelRef, err := grantcapability.Encode(grantcapability.Coordinate{
+		Kind:         domain.GrantCapabilityApplyAccessLabel,
+		Anchor:       domain.ScopeAnchor{Type: "project", ID: "prj-1"},
+		DefinitionID: "3d9cd5bf-906f-4bbe-8a8b-234ba2efa54a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	labelQuery := base
+	labelQuery.ObjectType, labelQuery.ObjectID, labelQuery.Relation = labelRef.ObjectType, labelRef.ObjectID, labelRef.Relation
+	labelQueryWithPlan := labelQuery
+	// Даже модель, признавшая новую координату, не подключает для неё
+	// чтение существующего источника create_binding с тем же якорем.
+	labelQueryWithPlan.PreparedPlans = admittedCapabilitySlot{modelMissing}
+	cases := []relverdict.Query{base, base, base, base, base, labelQuery, labelQueryWithPlan}
 	cases[0].ObjectID = "bad"
 	cases[1].Relation = "bind"
 	cases[2].DecisionAt = time.Time{}

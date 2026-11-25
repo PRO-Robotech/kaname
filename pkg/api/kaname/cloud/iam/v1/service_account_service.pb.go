@@ -84,7 +84,10 @@ type ListServiceAccountsRequest struct {
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// A filter expression. Supports filtering by [ServiceAccount.name].
+	// Выражение фильтра с одним сравнением по `name` или по обычной метке.
+	//
+	// Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+	// Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
 	Filter        string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -212,7 +215,11 @@ type CreateServiceAccountRequest struct {
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	// Tenant-facing метки (делают SA label-selectable наравне с account/project).
 	// Аннотации (size/key/value pattern) — паритет account/project/group request.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Начальные защищённые метки для IAM match_access_labels.
+	// Обычное право создать ресурс не разрешает выдавать доступ:
+	// весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+	AccessLabels  map[string]string `protobuf:"bytes,5,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -275,6 +282,13 @@ func (x *CreateServiceAccountRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *CreateServiceAccountRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
+	}
+	return nil
+}
+
 type UpdateServiceAccountRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the ServiceAccount resource to update.
@@ -288,7 +302,14 @@ type UpdateServiceAccountRequest struct {
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Tenant-facing метки (mutable; `labels` в update_mask).
 	// Аннотации (size/key/value pattern) — паритет account/project/group request.
-	Labels        map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels. Обычное право update
+	// не разрешает выдавать доступ: добавленный эффект требует Grant.
+	// update_mask без access_labels сохраняет их; с access_labels заменяет
+	// всю карту, в том числе очищает при пустом/отсутствующем поле.
+	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+	AccessLabels  map[string]string `protobuf:"bytes,6,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -354,6 +375,13 @@ func (x *UpdateServiceAccountRequest) GetDescription() string {
 func (x *UpdateServiceAccountRequest) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *UpdateServiceAccountRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -631,24 +659,32 @@ const file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc = "" +
 	"\x06filter\x18\x04 \x01(\tR\x06filter\"\x95\x01\n" +
 	"\x1bListServiceAccountsResponse\x12N\n" +
 	"\x10service_accounts\x18\x01 \x03(\v2#.kaname.cloud.iam.v1.ServiceAccountR\x0fserviceAccounts\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x83\x02\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xad\x03\n" +
 	"\x1bCreateServiceAccountRequest\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12T\n" +
-	"\x06labels\x18\x04 \x03(\v2<.kaname.cloud.iam.v1.CreateServiceAccountRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x04 \x03(\v2<.kaname.cloud.iam.v1.CreateServiceAccountRequest.LabelsEntryR\x06labels\x12g\n" +
+	"\raccess_labels\x18\x05 \x03(\v2B.kaname.cloud.iam.v1.CreateServiceAccountRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xcf\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xf9\x03\n" +
 	"\x1bUpdateServiceAccountRequest\x12,\n" +
 	"\x12service_account_id\x18\x01 \x01(\tR\x10serviceAccountId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
 	"updateMask\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12T\n" +
-	"\x06labels\x18\x05 \x03(\v2<.kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x05 \x03(\v2<.kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntryR\x06labels\x12g\n" +
+	"\raccess_labels\x18\x06 \x03(\v2B.kaname.cloud.iam.v1.UpdateServiceAccountRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"K\n" +
 	"\x1bDeleteServiceAccountRequest\x12,\n" +
@@ -702,7 +738,7 @@ func file_kaname_cloud_iam_v1_service_account_service_proto_rawDescGZIP() []byte
 	return file_kaname_cloud_iam_v1_service_account_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_service_account_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_kaname_cloud_iam_v1_service_account_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_kaname_cloud_iam_v1_service_account_service_proto_goTypes = []any{
 	(*GetServiceAccountRequest)(nil),             // 0: kaname.cloud.iam.v1.GetServiceAccountRequest
 	(*ListServiceAccountsRequest)(nil),           // 1: kaname.cloud.iam.v1.ListServiceAccountsRequest
@@ -715,38 +751,42 @@ var file_kaname_cloud_iam_v1_service_account_service_proto_goTypes = []any{
 	(*ListServiceAccountOperationsRequest)(nil),  // 8: kaname.cloud.iam.v1.ListServiceAccountOperationsRequest
 	(*ListServiceAccountOperationsResponse)(nil), // 9: kaname.cloud.iam.v1.ListServiceAccountOperationsResponse
 	nil,                           // 10: kaname.cloud.iam.v1.CreateServiceAccountRequest.LabelsEntry
-	nil,                           // 11: kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
-	(*ServiceAccount)(nil),        // 12: kaname.cloud.iam.v1.ServiceAccount
-	(*fieldmaskpb.FieldMask)(nil), // 13: google.protobuf.FieldMask
-	(*operation.Operation)(nil),   // 14: corelib.operation.Operation
+	nil,                           // 11: kaname.cloud.iam.v1.CreateServiceAccountRequest.AccessLabelsEntry
+	nil,                           // 12: kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
+	nil,                           // 13: kaname.cloud.iam.v1.UpdateServiceAccountRequest.AccessLabelsEntry
+	(*ServiceAccount)(nil),        // 14: kaname.cloud.iam.v1.ServiceAccount
+	(*fieldmaskpb.FieldMask)(nil), // 15: google.protobuf.FieldMask
+	(*operation.Operation)(nil),   // 16: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_service_account_service_proto_depIdxs = []int32{
-	12, // 0: kaname.cloud.iam.v1.ListServiceAccountsResponse.service_accounts:type_name -> kaname.cloud.iam.v1.ServiceAccount
+	14, // 0: kaname.cloud.iam.v1.ListServiceAccountsResponse.service_accounts:type_name -> kaname.cloud.iam.v1.ServiceAccount
 	10, // 1: kaname.cloud.iam.v1.CreateServiceAccountRequest.labels:type_name -> kaname.cloud.iam.v1.CreateServiceAccountRequest.LabelsEntry
-	13, // 2: kaname.cloud.iam.v1.UpdateServiceAccountRequest.update_mask:type_name -> google.protobuf.FieldMask
-	11, // 3: kaname.cloud.iam.v1.UpdateServiceAccountRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
-	14, // 4: kaname.cloud.iam.v1.ListServiceAccountOperationsResponse.operations:type_name -> corelib.operation.Operation
-	0,  // 5: kaname.cloud.iam.v1.ServiceAccountService.Get:input_type -> kaname.cloud.iam.v1.GetServiceAccountRequest
-	1,  // 6: kaname.cloud.iam.v1.ServiceAccountService.List:input_type -> kaname.cloud.iam.v1.ListServiceAccountsRequest
-	3,  // 7: kaname.cloud.iam.v1.ServiceAccountService.Create:input_type -> kaname.cloud.iam.v1.CreateServiceAccountRequest
-	4,  // 8: kaname.cloud.iam.v1.ServiceAccountService.Update:input_type -> kaname.cloud.iam.v1.UpdateServiceAccountRequest
-	5,  // 9: kaname.cloud.iam.v1.ServiceAccountService.Delete:input_type -> kaname.cloud.iam.v1.DeleteServiceAccountRequest
-	6,  // 10: kaname.cloud.iam.v1.ServiceAccountService.Disable:input_type -> kaname.cloud.iam.v1.DisableServiceAccountRequest
-	7,  // 11: kaname.cloud.iam.v1.ServiceAccountService.Enable:input_type -> kaname.cloud.iam.v1.EnableServiceAccountRequest
-	8,  // 12: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:input_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsRequest
-	12, // 13: kaname.cloud.iam.v1.ServiceAccountService.Get:output_type -> kaname.cloud.iam.v1.ServiceAccount
-	2,  // 14: kaname.cloud.iam.v1.ServiceAccountService.List:output_type -> kaname.cloud.iam.v1.ListServiceAccountsResponse
-	14, // 15: kaname.cloud.iam.v1.ServiceAccountService.Create:output_type -> corelib.operation.Operation
-	14, // 16: kaname.cloud.iam.v1.ServiceAccountService.Update:output_type -> corelib.operation.Operation
-	14, // 17: kaname.cloud.iam.v1.ServiceAccountService.Delete:output_type -> corelib.operation.Operation
-	14, // 18: kaname.cloud.iam.v1.ServiceAccountService.Disable:output_type -> corelib.operation.Operation
-	14, // 19: kaname.cloud.iam.v1.ServiceAccountService.Enable:output_type -> corelib.operation.Operation
-	9,  // 20: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:output_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsResponse
-	13, // [13:21] is the sub-list for method output_type
-	5,  // [5:13] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	11, // 2: kaname.cloud.iam.v1.CreateServiceAccountRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateServiceAccountRequest.AccessLabelsEntry
+	15, // 3: kaname.cloud.iam.v1.UpdateServiceAccountRequest.update_mask:type_name -> google.protobuf.FieldMask
+	12, // 4: kaname.cloud.iam.v1.UpdateServiceAccountRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateServiceAccountRequest.LabelsEntry
+	13, // 5: kaname.cloud.iam.v1.UpdateServiceAccountRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateServiceAccountRequest.AccessLabelsEntry
+	16, // 6: kaname.cloud.iam.v1.ListServiceAccountOperationsResponse.operations:type_name -> corelib.operation.Operation
+	0,  // 7: kaname.cloud.iam.v1.ServiceAccountService.Get:input_type -> kaname.cloud.iam.v1.GetServiceAccountRequest
+	1,  // 8: kaname.cloud.iam.v1.ServiceAccountService.List:input_type -> kaname.cloud.iam.v1.ListServiceAccountsRequest
+	3,  // 9: kaname.cloud.iam.v1.ServiceAccountService.Create:input_type -> kaname.cloud.iam.v1.CreateServiceAccountRequest
+	4,  // 10: kaname.cloud.iam.v1.ServiceAccountService.Update:input_type -> kaname.cloud.iam.v1.UpdateServiceAccountRequest
+	5,  // 11: kaname.cloud.iam.v1.ServiceAccountService.Delete:input_type -> kaname.cloud.iam.v1.DeleteServiceAccountRequest
+	6,  // 12: kaname.cloud.iam.v1.ServiceAccountService.Disable:input_type -> kaname.cloud.iam.v1.DisableServiceAccountRequest
+	7,  // 13: kaname.cloud.iam.v1.ServiceAccountService.Enable:input_type -> kaname.cloud.iam.v1.EnableServiceAccountRequest
+	8,  // 14: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:input_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsRequest
+	14, // 15: kaname.cloud.iam.v1.ServiceAccountService.Get:output_type -> kaname.cloud.iam.v1.ServiceAccount
+	2,  // 16: kaname.cloud.iam.v1.ServiceAccountService.List:output_type -> kaname.cloud.iam.v1.ListServiceAccountsResponse
+	16, // 17: kaname.cloud.iam.v1.ServiceAccountService.Create:output_type -> corelib.operation.Operation
+	16, // 18: kaname.cloud.iam.v1.ServiceAccountService.Update:output_type -> corelib.operation.Operation
+	16, // 19: kaname.cloud.iam.v1.ServiceAccountService.Delete:output_type -> corelib.operation.Operation
+	16, // 20: kaname.cloud.iam.v1.ServiceAccountService.Disable:output_type -> corelib.operation.Operation
+	16, // 21: kaname.cloud.iam.v1.ServiceAccountService.Enable:output_type -> corelib.operation.Operation
+	9,  // 22: kaname.cloud.iam.v1.ServiceAccountService.ListOperations:output_type -> kaname.cloud.iam.v1.ListServiceAccountOperationsResponse
+	15, // [15:23] is the sub-list for method output_type
+	7,  // [7:15] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_service_account_service_proto_init() }
@@ -761,7 +801,7 @@ func file_kaname_cloud_iam_v1_service_account_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_service_account_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

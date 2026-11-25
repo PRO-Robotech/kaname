@@ -131,6 +131,7 @@ func ClaimBatch(ctx context.Context, q querier, limit int) ([]Event, error) {
 		   FROM kaname.resource_reconcile_outbox
 		  WHERE sent_at IS NULL
 		    AND attempt_count < $2
+		    AND kaname.resource_reconcile_is_due_v1(id)
 		  ORDER BY id ASC
 		  LIMIT $1
 		  FOR UPDATE SKIP LOCKED`,
@@ -148,6 +149,14 @@ func ClaimBatch(ctx context.Context, q querier, limit int) ([]Event, error) {
 		out = append(out, e)
 	}
 	return out, rows.Err()
+}
+
+// DeferPending переносит неполностью пересчитанное событие, сохраняя счётчик ошибок.
+func DeferPending(ctx context.Context, q execQuerier, id int64) error {
+	if _, err := q.Exec(ctx, `SELECT kaname.resource_reconcile_defer_pending_v1($1)`, id); err != nil {
+		return fmt.Errorf("reconcile_outbox: defer pending event: %w", err)
+	}
+	return nil
 }
 
 // RecordFailure учитывает ОДИН отказ дренажа по строке: увеличивает счётчик

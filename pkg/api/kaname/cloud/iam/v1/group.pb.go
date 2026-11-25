@@ -45,7 +45,11 @@ type Group struct {
 	// Resource labels as `key:value` pairs.
 	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Creation timestamp.
-	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	CreatedAt *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	// Защищённые метки для IAM match_access_labels, отдельные от labels.
+	// Обычное право update не разрешает выдавать доступ: изменение проверяется
+	// по полному добавленному эффекту Grant. Чтение поля не даёт права его менять.
+	AccessLabels  map[string]string `protobuf:"bytes,7,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -118,6 +122,13 @@ func (x *Group) GetLabels() map[string]string {
 func (x *Group) GetCreatedAt() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *Group) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -502,7 +513,7 @@ var File_kaname_cloud_iam_v1_group_proto protoreflect.FileDescriptor
 
 const file_kaname_cloud_iam_v1_group_proto_rawDesc = "" +
 	"\n" +
-	"\x1fkaname/cloud/iam/v1/group.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xa2\x02\n" +
+	"\x1fkaname/cloud/iam/v1/group.proto\x12\x13kaname.cloud.iam.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb6\x03\n" +
 	"\x05Group\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x1d\n" +
 	"\n" +
@@ -511,8 +522,12 @@ const file_kaname_cloud_iam_v1_group_proto_rawDesc = "" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12>\n" +
 	"\x06labels\x18\x05 \x03(\v2&.kaname.cloud.iam.v1.Group.LabelsEntryR\x06labels\x129\n" +
 	"\n" +
-	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x1a9\n" +
+	"created_at\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x12Q\n" +
+	"\raccess_labels\x18\a \x03(\v2,.kaname.cloud.iam.v1.Group.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\x82\x01\n" +
 	"\vGroupMember\x12\x1f\n" +
@@ -559,7 +574,7 @@ func file_kaname_cloud_iam_v1_group_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_group_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_group_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_kaname_cloud_iam_v1_group_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_kaname_cloud_iam_v1_group_proto_goTypes = []any{
 	(*Group)(nil),                     // 0: kaname.cloud.iam.v1.Group
 	(*GroupMember)(nil),               // 1: kaname.cloud.iam.v1.GroupMember
@@ -569,17 +584,19 @@ var file_kaname_cloud_iam_v1_group_proto_goTypes = []any{
 	(*AddGroupMemberMetadata)(nil),    // 5: kaname.cloud.iam.v1.AddGroupMemberMetadata
 	(*RemoveGroupMemberMetadata)(nil), // 6: kaname.cloud.iam.v1.RemoveGroupMemberMetadata
 	nil,                               // 7: kaname.cloud.iam.v1.Group.LabelsEntry
-	(*timestamppb.Timestamp)(nil),     // 8: google.protobuf.Timestamp
+	nil,                               // 8: kaname.cloud.iam.v1.Group.AccessLabelsEntry
+	(*timestamppb.Timestamp)(nil),     // 9: google.protobuf.Timestamp
 }
 var file_kaname_cloud_iam_v1_group_proto_depIdxs = []int32{
 	7, // 0: kaname.cloud.iam.v1.Group.labels:type_name -> kaname.cloud.iam.v1.Group.LabelsEntry
-	8, // 1: kaname.cloud.iam.v1.Group.created_at:type_name -> google.protobuf.Timestamp
-	8, // 2: kaname.cloud.iam.v1.GroupMember.added_at:type_name -> google.protobuf.Timestamp
-	3, // [3:3] is the sub-list for method output_type
-	3, // [3:3] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	9, // 1: kaname.cloud.iam.v1.Group.created_at:type_name -> google.protobuf.Timestamp
+	8, // 2: kaname.cloud.iam.v1.Group.access_labels:type_name -> kaname.cloud.iam.v1.Group.AccessLabelsEntry
+	9, // 3: kaname.cloud.iam.v1.GroupMember.added_at:type_name -> google.protobuf.Timestamp
+	4, // [4:4] is the sub-list for method output_type
+	4, // [4:4] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_group_proto_init() }
@@ -593,7 +610,7 @@ func file_kaname_cloud_iam_v1_group_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_group_proto_rawDesc), len(file_kaname_cloud_iam_v1_group_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

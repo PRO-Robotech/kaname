@@ -88,7 +88,7 @@ func rolePolicyRequest(r domain.Role, create bool, actor domain.Subject) policyW
 		in.owners = append(in.owners, kaname.AuthorityOwnerRef{Kind: "project", ID: string(r.ProjectID)})
 	}
 	for _, rule := range r.Rules {
-		if len(rule.ResourceNames) > 0 || len(rule.MatchLabels) > 0 || len(rule.Children) > 0 || rule.CreatedBySubject {
+		if rule.Arm() != domain.ArmAnchor || len(rule.Children) > 0 || rule.CreatedBySubject {
 			in.global = true
 		}
 	}

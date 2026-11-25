@@ -9,6 +9,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzmap"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 )
 
 // Facts — НЕИЗМЕНЯЕМЫЙ каталожный факт на один момент времени.
@@ -173,8 +174,16 @@ func NewFacts(h Halves) (*Facts, error) {
 	live := make(map[string]bool, len(rows.Resources))
 	fgaTypeByDotted := make(map[string]string, len(rows.Resources))
 	resources := make([]ResourceEntry, 0, len(rows.Resources))
+	apply, _ := domain.GrantCapabilityApplyAccessLabel.RuleRef()
+	applyDotted := apply.Module + "." + apply.Resource
 	for _, r := range rows.Resources {
 		dotted := r.Module + "." + r.Resource
+		if dotted == applyDotted || r.ObjectType == grantcapability.AccessLabelObjectType {
+			if dotted != applyDotted || r.ObjectType != grantcapability.AccessLabelObjectType ||
+				len(r.ParentTypes) != 0 || len(r.ParentNames) != 0 || r.PublicReadToChildren {
+				return nil, fmt.Errorf("каталог %s содержит недопустимый тип для отдельного права на определение", dotted)
+			}
+		}
 		live[dotted] = true
 		// Строка БЕЗ имени типа — ОТКАЗ, а не пропуск. Пропуск здесь и есть тот
 		// дефект, ради снятия которого колонка заведена: ресурс существует,
@@ -219,6 +228,11 @@ func NewFacts(h Halves) (*Facts, error) {
 		// формы снятия: ресурс без живой строки глаголов не объявляет.
 		if !live[dotted] {
 			continue
+		}
+		// Право на конкретное определение не входит в набор обычных глаголов
+		// или контейнерных отношений. Иначе его мог бы выдать старый wildcard.
+		if dotted == applyDotted && (v.Verb != apply.Verb || v.PerObject || v.ContainerParent != "" || v.IsContainer()) {
+			return nil, fmt.Errorf("каталог %s.%s должен объявить отдельное право на определение", dotted, v.Verb)
 		}
 		// Контейнерное действие — своей картой: набор глаголов типа оно не
 		// пополняет (строка ярусная), а подстановка его не достигает (Р2а).
@@ -505,6 +519,9 @@ func (f *Facts) RolePreviewLookup() domain.TypeVerbLookup {
 // Повторить вычисление здесь значило бы завести второе место об одном предмете:
 // ровно так роль-администратор однажды давала движку всё, а проекции — ничего.
 func (f *Facts) GrantedVerbs(fgaType string, authored, typeVerbs []string, policy domain.RulePolicy) []string {
+	if fgaType == grantcapability.AccessLabelObjectType {
+		return nil
+	}
 	return authzmap.GrantedVerbsWithDeclared(fgaType, len(f.verbsByFGAType[fgaType]) > 0,
 		authored, typeVerbs, policy)
 }

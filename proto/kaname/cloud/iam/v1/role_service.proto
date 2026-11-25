@@ -174,6 +174,9 @@ message ListRolesRequest {
   string page_token = 2;
 
   // A filter expression. Supports filtering by is_system / name.
+  //
+  // Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+  // Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
   string filter = 3;
 
   // Scope the role catalog to a single Account.
@@ -238,6 +241,11 @@ message CreateRoleRequest {
   // is B3-gated). When set it takes precedence; the legacy account_id/project_id are
   // still accepted for back-compat when definition_tier is omitted.
   DefinitionTier definition_tier = 8;
+
+  // Начальные защищённые метки для IAM match_access_labels.
+  // Обычное право создать ресурс не разрешает выдавать доступ:
+  // весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+  map<string, string> access_labels = 9;
 }
 
 message UpdateRoleRequest {
@@ -272,6 +280,14 @@ message UpdateRoleRequest {
   // НЕ путать с `Rule.match_labels`. Аннотации (size/key/value pattern) —
   // паритет account/project/group request `labels`.
   map<string, string> labels = 8;
+
+  // Защищённые метки для IAM match_access_labels. Обычное право update
+  // не разрешает выдавать доступ: добавленный эффект требует Grant.
+  // update_mask без access_labels сохраняет их; с access_labels заменяет
+  // всю карту, в том числе очищает при пустом/отсутствующем поле.
+  // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+  // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+  map<string, string> access_labels = 9;
 }
 
 message DeleteRoleRequest {

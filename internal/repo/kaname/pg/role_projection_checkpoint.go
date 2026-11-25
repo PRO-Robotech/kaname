@@ -13,7 +13,9 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 const maxProjectionRows = 4096
@@ -23,10 +25,23 @@ const maxProjectionRows = 4096
 // Никакой timestamp/boolean Ready не подменяет сравнение. Старые роли без
 // доказанной projection остаются ordinary компонентами с obligation.
 func (w *semanticAuthorityWriteTx) RoleProjectionCheckpoint(ctx context.Context, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
-	return readRoleProjectionCheckpoint(ctx, w.tx, w.bundle, id)
+	return w.roleProjectionCheckpoint(ctx, id, nil)
 }
 
-func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bundle, id domain.RoleID) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
+func (w *semanticAuthorityWriteTx) roleProjectionCheckpoint(ctx context.Context, id domain.RoleID, source *kaname.RoleProjectionSourceSnapshot) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
+	budget := w.producerBudget
+	if w.nativeRead != nil {
+		budget = w.nativeRead.budget
+	} else if budget == nil {
+		// Вне общей попытки остаётся локальный предел maxProjectionRows.
+		budget = &relverdict.AdministrativeReadBudget{}
+	}
+	return readRoleProjectionCheckpoint(ctx, w.tx, w.bundle, id, budget, source)
+}
+
+func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bundle, id domain.RoleID,
+	budget *relverdict.AdministrativeReadBudget, source *kaname.RoleProjectionSourceSnapshot,
+) (granteffect.ProjectionCheckpoint, kaname.SourceReadCost, error) {
 	cost := kaname.SourceReadCost{Reads: 1}
 	// Первый input нужен только для определения relevant modules. Полный снимок
 	// ниже перечитывает роль и сравнивает authored digest; смена правил закрыта.
@@ -51,17 +66,85 @@ func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *grante
 	var authored, catalogRaw, selectorRaw, verbRaw, capsRaw []byte
 	var pending bool
 	var snapshotRows int
-	cost.Reads++
-	err = tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
+	var accessLabelRaw []byte
+	var roleXmin, roleCTID string
+	var hasProtectedApply bool
+	for _, cap := range expected.Capabilities {
+		if cap.Kind == domain.GrantCapabilityApplyAccessLabel {
+			hasProtectedApply = true
+			break
+		}
+	}
+	rowsLeft := maxProjectionRows - cost.Rows
+	if hasProtectedApply {
+		if budget == nil {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
+		}
+		rowsLeft = min(rowsLeft, budget.RemainingRows()-cost.Rows)
+		if budget.RemainingReads() < cost.Reads+4 {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceReadLimit
+		}
+		if rowsLeft < 3 {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceReadLimit
+		}
+		// Основной оператор и три вложенных чтения. Этот путь нужен лишь
+		// когда правила объявляют apply. Обычные роли стоят прежние два чтения.
+		cost.Reads += 4
+		err = tx.QueryRow(ctx, roleProjectionWithAccessLabelsSQL, id, expected.Modules, rowsLeft+1, rowsLeft).
+			Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows, &accessLabelRaw)
+	} else {
+		cost.Reads++
+		err = tx.QueryRow(ctx, roleProjectionSnapshotSQL, id, expected.Modules, maxProjectionRows+1).
+			Scan(&authored, &catalogRaw, &selectorRaw, &verbRaw, &capsRaw, &pending, &snapshotRows)
+	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			err = kaname.ErrSourceUnconfirmed
+		}
+		var rejected *pgconn.PgError
+		if hasProtectedApply && errors.As(err, &rejected) && rejected.Code == "54000" {
+			// SQL уже мог прочитать строки до сигнала о пределе. Не выдаём
+			// предварительное чтение за полную стоимость такого отказа.
+			cost.Rows += rowsLeft + 1
+			err = kaname.ErrSourceReadLimit
 		}
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
 	// Учёт уже прочитанного снимка предшествует любому recoverable mismatch.
 	// Смена authored inputs не делает catalog/selectors/joins бесплатными.
 	cost.Rows += snapshotRows
+	if hasProtectedApply {
+		var check struct {
+			Matches *bool  `json:"matches"`
+			Rows    int    `json:"rows"`
+			Reads   int    `json:"reads"`
+			Limited bool   `json:"limited"`
+			RowXmin string `json:"row_xmin"`
+			RowCTID string `json:"row_ctid"`
+		}
+		if err = json.Unmarshal(accessLabelRaw, &check); err != nil {
+			return granteffect.ProjectionCheckpoint{}, cost, err
+		}
+		if check.Limited {
+			cost.Reads -= 3
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceReadLimit
+		}
+		if check.Matches == nil || check.Rows < 1 || check.Reads < 1 || check.Reads > 3 {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
+		}
+		cost.Reads -= 3 - check.Reads
+		cost.Rows += check.Rows
+		if snapshotRows+check.Rows > rowsLeft {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceReadLimit
+		}
+		if !*check.Matches {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
+		}
+		roleXmin, roleCTID = check.RowXmin, check.RowCTID
+		if source != nil && (roleXmin == "" || roleCTID == "") {
+			return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
+		}
+	}
 	if cost.Rows > maxProjectionRows {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceReadLimit
 	}
@@ -108,6 +191,15 @@ func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *grante
 	if err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
 	}
+	// Закрытая проекция сверена для того же OLD роли. Добавляем вычисленные
+	// apply capabilities в общий снимок только после подтверждения равенства.
+	if hasProtectedApply {
+		for _, cap := range now.Capabilities {
+			if cap.Kind == domain.GrantCapabilityApplyAccessLabel {
+				caps = append(caps, cap)
+			}
+		}
+	}
 	gotProjection, err := granteffect.ProjectionJSON(selectors, verbs, caps)
 	if err != nil {
 		return granteffect.ProjectionCheckpoint{}, cost, err
@@ -119,12 +211,17 @@ func readRoleProjectionCheckpoint(ctx context.Context, tx pgx.Tx, bundle *grante
 	if pending || string(gotCatalog) != string(wantCatalog) || string(gotProjection) != string(wantProjection) {
 		return granteffect.ProjectionCheckpoint{}, cost, kaname.ErrSourceUnconfirmed
 	}
+	// Поколения публикуются лишь после ВСЕХ прежних сравнений projection/catalog.
+	// Они наблюдались тем же SQL snapshot; новых чтений и row locks здесь нет.
+	if source != nil && hasProtectedApply {
+		*source = kaname.RoleProjectionSourceSnapshot{RoleID: id, Checkpoint: expected.Checkpoint, RowXmin: roleXmin, RowCTID: roleCTID}
+	}
 	return expected.Checkpoint, cost, nil
 }
 
 // Имена JSON полей совпадают с domain/catalog; константа Arm берётся из Go,
 // чтобы SQL не заводил независимый числовой словарь селекторов.
-var roleProjectionSnapshotSQL = strings.NewReplacer("$ARM_ANCHOR", armNumber(domain.ArmAnchor), "$ARM_NAMES", armNumber(domain.ArmNames), "$ARM_LABELS", armNumber(domain.ArmLabels)).Replace(`
+var roleProjectionColumnsSQL = strings.NewReplacer("$ARM_ANCHOR", armNumber(domain.ArmAnchor), "$ARM_NAMES", armNumber(domain.ArmNames), "$ARM_LABELS", armNumber(domain.ArmLabels), "$ARM_ACCESS_LABELS", armNumber(domain.ArmAccessLabels)).Replace(`
 WITH module_rows AS (SELECT module,live FROM kaname.catalog_module WHERE module=ANY($2::text[]) LIMIT $3),
  resource_rows AS (SELECT * FROM kaname.catalog_resource WHERE module=ANY($2::text[]) LIMIT $3),
  verb_rows AS (SELECT * FROM kaname.catalog_verb WHERE module=ANY($2::text[]) LIMIT $3),
@@ -149,8 +246,8 @@ jsonb_build_object(
  'Retired',jsonb_build_object('Modules',coalesce((SELECT jsonb_agg(module) FROM module_rows WHERE NOT live),'[]'),
  'Resources',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'ObjectType',object_type,'SupersededBy',coalesce(superseded_by,''),'ChildRegistration',child_registration)) FROM resource_rows WHERE NOT live),'[]'),
  'Verbs',coalesce((SELECT jsonb_agg(jsonb_build_object('Module',module,'Resource',resource,'Verb',verb,'PerObject',per_object,'ContainerParent',coalesce(container_parent,''),'ContainerRelation',coalesce(container_relation,''))) FROM verb_rows WHERE NOT live),'[]'))),
-coalesce((SELECT jsonb_agg(jsonb_build_object('RuleFP',rule_fp,'Arm',CASE arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS ELSE $ARM_ANCHOR END,'ObjectTypes',object_types,'ResourceNames',resource_names,'MatchLabels',match_labels,'Grants',verbs_by_type,'CreatedBySubject',created_by_subject,
- 'Container',CASE WHEN container_type IS NULL THEN NULL ELSE jsonb_build_object('Type',container_type,'Arm',CASE container_arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS ELSE $ARM_ANCHOR END,'ResourceNames',container_resource_names,'MatchLabels',container_match_labels) END)) FROM selector_rows),'[]'),
+coalesce((SELECT jsonb_agg(jsonb_build_object('RuleFP',rule_fp,'Arm',CASE arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS WHEN 'access_labels' THEN $ARM_ACCESS_LABELS WHEN 'anchor' THEN $ARM_ANCHOR ELSE -1 END,'ObjectTypes',object_types,'ResourceNames',resource_names,'MatchLabels',match_labels,'MatchAccessLabels',match_access_labels,'Grants',verbs_by_type,'CreatedBySubject',created_by_subject,
+ 'Container',CASE WHEN container_type IS NULL THEN NULL ELSE jsonb_build_object('Type',container_type,'Arm',CASE container_arm WHEN 'names' THEN $ARM_NAMES WHEN 'labels' THEN $ARM_LABELS WHEN 'access_labels' THEN $ARM_ACCESS_LABELS WHEN 'anchor' THEN $ARM_ANCHOR ELSE -1 END,'ResourceNames',container_resource_names,'MatchLabels',container_match_labels,'MatchAccessLabels',container_match_access_labels) END)) FROM selector_rows),'[]'),
 coalesce((SELECT jsonb_agg(jsonb_build_object('ObjectType',object_type,'Verb',verb)) FROM role_verbs),'[]'),
 coalesce((SELECT jsonb_agg(c) FROM (
  SELECT jsonb_build_object('RuleFP',rule_fp,'Kind','create_binding','BoundRoleID','') AS c FROM create_rows
@@ -162,7 +259,21 @@ coalesce((SELECT jsonb_agg(c) FROM (
  +(SELECT count(*) FROM verb_rows)+(SELECT count(*) FROM selector_rows)+(SELECT count(*) FROM role_verbs)
  +(SELECT count(*) FROM pending_rows)+(SELECT count(*) FROM container_checks)
  +(SELECT count(*) FROM create_rows)+(SELECT count(*) FROM bind_rows)
- +(SELECT coalesce(sum(1+joined_rows),0) FROM bind_checks))::int
-FROM kaname.roles r WHERE r.id=$1 AND r.live`)
+ +(SELECT coalesce(sum(1+joined_rows),0) FROM bind_checks))::int`)
+
+const roleProjectionSourceSQL = `
+FROM kaname.roles r WHERE r.id=$1 AND r.live`
+
+var roleProjectionSnapshotSQL = roleProjectionColumnsSQL + roleProjectionSourceSQL
+
+// Обычный запрос сохраняет прежнюю форму. В запросе для apply добавляются
+// физические координаты строки и вызов STABLE внутри того же снимка.
+var roleProjectionWithAccessLabelsSQL = `WITH snapshot(authored,catalog_data,selectors,verbs,caps,pending,logical_rows,row_xmin,row_ctid) AS MATERIALIZED (` + roleProjectionColumnsSQL + `,r.xmin::text,r.ctid::text` + roleProjectionSourceSQL + `)
+SELECT s.authored,s.catalog_data,s.selectors,s.verbs,s.caps,s.pending,s.logical_rows,
+ (CASE WHEN s.logical_rows > $4::integer-2 THEN jsonb_build_object('limited',true)
+ ELSE kaname.authority_access_label_role_checkpoint_read_v1(
+   $1::text,s.row_xmin,s.row_ctid,$4::integer-s.logical_rows) END)
+ || jsonb_build_object('row_xmin',s.row_xmin,'row_ctid',s.row_ctid)
+FROM snapshot s`
 
 func armNumber(a domain.Arm) string { b, _ := json.Marshal(a); return string(b) }

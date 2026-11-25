@@ -181,7 +181,7 @@ speaker(subject) AS (
     -- бы класс учётке, которой нет.
     SELECT 'system_class:' || sp.s_id FROM speaker_pair sp WHERE sp.via = 'class'
 ),
-candidate(object_id, labels) AS MATERIALIZED (
+candidate(object_id, labels, access_labels) AS MATERIALIZED (
     -- ЗДЕСЬ СХОДЯТСЯ ДВА СВОЙСТВА, И НИ ОДНО ИЗ НИХ НЕ ВЫВОДИТСЯ ИЗ ДРУГОГО.
     --
     -- (1) ОСЬ. Откуда берутся кандидаты — свойство ТИПА: у ресурса чужого
@@ -244,7 +244,7 @@ binding_seed AS MATERIALIZED (
      LIMIT ($4::bigint + 1)
 ),
 selector_seed AS MATERIALIZED (
-    SELECT rs.arm, rs.resource_names, rs.match_labels, rs.verbs_by_type,
+    SELECT rs.arm, rs.resource_names, rs.match_labels, rs.match_access_labels, rs.verbs_by_type,
            rs.container_type, rs.object_types, rv.verb
       FROM binding_seed bs
       JOIN kaname.access_bindings b ON b.id = bs.binding_id
@@ -253,7 +253,7 @@ selector_seed AS MATERIALIZED (
        AND rv.verb = ANY ($8::text[])
        AND ` + classVerbFilterSQL + `
       CROSS JOIN LATERAL (
-          SELECT s.arm, s.resource_names, s.match_labels, s.verbs_by_type,
+          SELECT s.arm, s.resource_names, s.match_labels, s.match_access_labels, s.verbs_by_type,
                  s.container_type, s.object_types
             FROM kaname.role_rule_selectors s
            WHERE s.role_id = b.role_id
@@ -268,7 +268,7 @@ eligible_grant AS MATERIALIZED (
     SELECT * FROM selector_seed rs WHERE $9::text = ANY (rs.object_types)
 ),
 needed_candidate AS MATERIALIZED (
-    SELECT c.object_id, c.labels FROM candidate c
+    SELECT c.object_id, c.labels, c.access_labels FROM candidate c
      WHERE (SELECT possible FROM fact_possible)
         OR (SELECT count(*) FROM binding_seed) > $4::bigint
         OR (SELECT count(*) FROM selector_seed) > $4::bigint
@@ -390,7 +390,7 @@ SELECT c.object_id,
         scope_distinct(s_type, s_id, depth) AS (
             SELECT s_type, s_id, min(depth) FROM scope GROUP BY s_type, s_id
         )
-        SELECT EXISTS (
+        SELECT (EXISTS (
         -- (1) прямой факт — на самом объекте ЛИБО на предке названного планом
         -- типа. Без второго администратор облака не увидел бы НИ ОДНОГО объекта:
         -- его строка лежит на кластере и под другим именем.
@@ -405,7 +405,26 @@ SELECT c.object_id,
                     THEN sc.depth = 0
                     ELSE fa.parent_type = sc.s_type
                END
-       )
+
+         WHERE ` + factFreshSQL + ` IS TRUE
+       ) OR CASE WHEN EXISTS (
+        -- (1) прямой факт — на самом объекте ЛИБО на предке названного планом
+        -- типа. Без второго администратор облака не увидел бы НИ ОДНОГО объекта:
+        -- его строка лежит на кластере и под другим именем.
+        SELECT 1
+          FROM kaname.relation_fact f
+          JOIN speaker sp ON sp.subject = f.subject
+          JOIN scope_distinct sc
+            ON sc.s_type = f.object_type AND sc.s_id = f.object_id
+          JOIN fact_atom fa
+            ON fa.relation = f.relation
+           AND CASE WHEN fa.parent_type = ''
+                    THEN sc.depth = 0
+                    ELSE fa.parent_type = sc.s_type
+               END
+
+         WHERE ` + factFreshSQL + ` IS NOT TRUE
+       ) THEN NULL::boolean ELSE false END)
     OR EXISTS (
         -- (2) выдача роли на область объекта или любого его предка. Глаголы —
         -- из плана: спрошенное имя не всегда равно глаголу, который обязана
@@ -444,11 +463,11 @@ SELECT c.object_id,
         -- Точный размер ТОГО ЖЕ материализованного набора: ни один корень не
         -- отсекается. Метки остаются исходными строками, без упаковки страницы
         -- в один массив/JSON и без нового ограничения размера значений.
-        SELECT object_id, labels FROM needed_candidate
+        SELECT object_id, labels, access_labels FROM needed_candidate
          LIMIT (SELECT count(*) FROM needed_candidate)
        ) c
 )
-SELECT c.object_id, COALESCE(a.allowed, false) AS allowed
+SELECT c.object_id, CASE WHEN a.object_id IS NULL THEN false ELSE a.allowed END AS allowed
   FROM candidate c
   LEFT JOIN adjudicated a ON a.object_id = c.object_id
  ORDER BY c.object_id`
@@ -457,12 +476,12 @@ SELECT c.object_id, COALESCE(a.allowed, false) AS allowed
 // (довод — у expandQuerySQL).
 func listQuerySQL(labelTable string, nesting bool) (string, error) {
 	sql, err := replaceOnce(listSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting))
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", "c.access_labels", nesting))
 	if err != nil {
 		return "", err
 	}
 	sql, err = replaceOnce(sql, "{{necessary_object_predicate}}",
-		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", nesting, true))
+		grantArmPredicate("$9::text", "$2::text", "c.object_id", "c.labels", "c.access_labels", nesting, true))
 	if err != nil {
 		return "", err
 	}
@@ -583,14 +602,17 @@ func listSweep(ctx context.Context, q pgx.Tx, sql string, in ListQuery, after st
 	for rows.Next() {
 		var (
 			id string
-			ok bool
+			ok *bool
 		)
 		if err := rows.Scan(&id, &ok); err != nil {
 			return nil, 0, "", fmt.Errorf("relverdict: чтение строки: %w", err)
 		}
+		if ok == nil {
+			return nil, 0, "", ErrAccessLabelProjectionPending
+		}
 		scanned++
 		last = id
-		if ok {
+		if *ok {
 			allowed = append(allowed, id)
 		}
 	}

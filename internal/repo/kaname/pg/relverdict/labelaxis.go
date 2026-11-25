@@ -41,6 +41,8 @@ package relverdict
 
 import (
 	"fmt"
+	"sort"
+	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 )
@@ -194,7 +196,7 @@ func labelsJoinPinned(table, catalogTypeParam, idParam string) string {
 // Брать кандидатов из зеркала, а метки из своей таблицы значило бы перечислять
 // пустоту и аккуратно спрашивать у неё метки.
 //
-// Фрагмент обязан отдавать ДВЕ колонки и нести СВОЙ предел:
+// Фрагмент обязан отдавать ТРИ колонки и нести СВОЙ предел:
 //
 //   - `labels` едет вместе с кандидатом. Второе чтение того же места было бы
 //     соединением по всему типу, и стоимость страницы снова стала бы стоимостью
@@ -216,10 +218,29 @@ func labelsJoinPinned(table, catalogTypeParam, idParam string) string {
 // меток: кандидаты зеркальной оси отбираются по `resource_mirror.object_type`.
 func candidateFrom(table, catalogTypeParam, afterParam, limitParam string) string {
 	if table == "" {
-		return "SELECT m.object_id, m.labels\n      FROM kaname.resource_mirror m\n     WHERE m.object_type = " +
+		return "SELECT m.object_id, m.labels, m.access_labels\n      FROM kaname.resource_mirror m\n     WHERE m.object_type = " +
 			catalogTypeParam + "::text\n       AND m.object_id > " + afterParam + "::text" +
 			"\n     ORDER BY m.object_id\n     LIMIT " + limitParam + "::int"
 	}
-	return "SELECT o.id AS object_id, o.labels\n      FROM " + table + " o\n     WHERE o.id > " +
+	return "SELECT o.id AS object_id, o.labels, o.access_labels\n      FROM " + table + " o\n     WHERE o.id > " +
 		afterParam + "::text\n     ORDER BY o.id\n     LIMIT " + limitParam + "::int"
+}
+
+// containerAccessLabels читает protected-метки контейнера из того же SQL-снимка.
+// Тип выбирает единственный источник: отсутствие IAM-строки не даёт отката
+// к зеркалу. CASE исполняет только выбранный подзапрос по первичному ключу.
+// В SQL подставляются лишь внутренние выражения и фиксированный реестр таблиц.
+func containerAccessLabels(modelTypeExpr, catalogTypeExpr, idExpr string) string {
+	keys := make([]string, 0, len(iamDirectLabelTable))
+	for typ := range iamDirectLabelTable {
+		keys = append(keys, typ)
+	}
+	sort.Strings(keys)
+	var sql strings.Builder
+	sql.WriteString("(CASE " + modelTypeExpr)
+	for _, typ := range keys {
+		sql.WriteString(" WHEN '" + typ + "' THEN (SELECT cm.access_labels FROM " + iamDirectLabelTable[typ] + " cm WHERE cm.id = " + idExpr + ")")
+	}
+	sql.WriteString(" ELSE (SELECT cm.access_labels FROM kaname.resource_mirror cm WHERE cm.object_type = " + catalogTypeExpr + " AND cm.object_id = " + idExpr + ") END)")
+	return sql.String()
 }

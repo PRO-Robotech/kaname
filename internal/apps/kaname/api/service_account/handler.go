@@ -47,6 +47,9 @@ func (h *Handler) WithListOperations(uc *shared.ListOperationsUseCase) *Handler 
 }
 
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateServiceAccountRequest) (*operationpb.Operation, error) {
+	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), nil); err != nil {
+		return nil, err
+	}
 	sa := domain.ServiceAccount{
 		AccountID:   domain.AccountID(req.GetAccountId()),
 		Name:        domain.SvcAccountName(req.GetName()),
@@ -61,8 +64,17 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateServiceAccountReq
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateServiceAccountRequest) (*operationpb.Operation, error) {
+	if h.update.accessLabelsWriter() == nil {
+		if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+			return nil, err
+		}
+	}
+
 	in := UpdateServiceAccountInput{
 		ID: domain.ServiceAccountID(req.GetServiceAccountId()),
+	}
+	if req.GetAccessLabels() != nil {
+		in.AccessLabels = labelsFromProto(req.GetAccessLabels())
 	}
 	if name := req.GetName(); name != "" {
 		n := domain.SvcAccountName(name)

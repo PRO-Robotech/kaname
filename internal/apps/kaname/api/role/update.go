@@ -217,7 +217,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		if verr := validateRuleCatalog(in.Rules, current.IsSystem, facts); verr != nil {
 			return nil, shared.MapValidationErr(verr)
 		}
-		projection, cerr := facts.ProjectGrantRules(in.Rules, domain.PolicyOfRole(current.IsSystem, current.OwnerModule))
+		projection, cerr := u.policy.projectAdmissionRules(facts, in.Rules, domain.PolicyOfRole(current.IsSystem, current.OwnerModule))
 		if cerr != nil {
 			return nil, shared.MapValidationErr(cerr)
 		}
@@ -322,13 +322,9 @@ func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []
 			var projection catalog.GrantProjection
 			if slices.Contains(changed, "rules") {
 				var err error
-				facts, ferr := writerRoleFacts(ctx, w, u.cat)
-				if ferr != nil {
-					return domain.Role{}, ferr
-				}
-				projection, err = facts.ProjectGrantRules(r.Rules, domain.PolicyOfRole(r.IsSystem, r.OwnerModule))
+				projection, err = projectWriterRoleRules(ctx, w, r, u.cat)
 				if err != nil {
-					return domain.Role{}, shared.MapValidationErr(err)
+					return domain.Role{}, err
 				}
 				if err = checkGrantReferences(ctx, w, r, projection.Capabilities, false, u.referencePlans); err != nil {
 					return domain.Role{}, err

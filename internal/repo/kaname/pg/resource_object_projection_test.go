@@ -40,6 +40,34 @@ func TestResourceObjectProjectionKeepsCreatorAndProjectAccountSemantics(t *testi
 	require.Equal(t, domain.MirrorObject{ObjectType: "iam.role", ObjectID: "role", ParentProjectID: "project", ParentAccountIDs: []string{"current-account"}}, object)
 }
 
+func TestResourceObjectProjectionKeepsAccessLabelsSeparate(t *testing.T) {
+	p := parentCaptureFixture(t)
+	ordinary := map[string]string{"team": "ordinary"}
+	protected := map[string]string{"team": "protected"}
+	parentCaptureRows(t, p, resourceSourceKey{kind: resourceSourceIAMObject, typ: "iam.account", id: "account"}, map[string]any{
+		"id": "account", "labels": ordinary, "access_labels": protected,
+	})
+	parentCaptureRows(t, p, resourceSourceKey{kind: resourceSourceMirror, typ: "vpc.network", id: "network"}, map[string]any{
+		"object_type": "vpc.network", "object_id": "network", "labels": ordinary, "access_labels": protected,
+	})
+	for _, object := range []struct{ typ, id string }{{"iam.account", "account"}, {"vpc.network", "network"}} {
+		projected, present, err := p.captureObjectProjection(context.Background(), object.typ, object.id)
+		require.NoError(t, err)
+		require.True(t, present)
+		require.Equal(t, ordinary, projected.Labels)
+		require.Equal(t, protected, projected.AccessLabels)
+	}
+
+	parentCaptureRows(t, p, resourceSourceKey{kind: resourceSourceIAMObject, typ: "iam.account", id: "ordinary"}, map[string]any{
+		"id": "ordinary", "labels": ordinary, "access_labels": map[string]string{},
+	})
+	projected, present, err := p.captureObjectProjection(context.Background(), "iam.account", "ordinary")
+	require.NoError(t, err)
+	require.True(t, present)
+	require.Equal(t, ordinary, projected.Labels)
+	require.Nil(t, projected.AccessLabels)
+}
+
 func TestResourceObjectProjectionMissingAndForeignCapturedRows(t *testing.T) {
 	p := parentCaptureFixture(t)
 	parentCaptureRows(t, p, resourceSourceKey{kind: resourceSourceMirror, typ: "vpc.network", id: "gone"})

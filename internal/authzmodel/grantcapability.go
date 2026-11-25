@@ -18,6 +18,8 @@ func (p *Plans) GrantCapabilityPlan(objectType, relation string) error {
 	case grantcapability.ScopeObjectType:
 	case grantcapability.RoleObjectType:
 		expected = grantcapability.BindRelation
+	case grantcapability.AccessLabelObjectType:
+		expected = grantcapability.ApplyAccessLabelRelation
 	default:
 		return fmt.Errorf("authzmodel: not a grant capability type")
 	}
@@ -63,6 +65,10 @@ func grantCapabilityReferenceFindings(m *authzplan.Model, newNames map[string]bo
 	var out []Finding
 	for _, typ := range m.Types {
 		if !newNames[typ.Name] {
+			continue
+		}
+		if reservedGrantType(typ.Name) {
+			out = append(out, Finding{Rule: RuleGrantCapability, Type: typ.Name, Text: "internal grant coordinate types are reserved"})
 			continue
 		}
 		for _, rel := range typ.Relations {

@@ -83,7 +83,7 @@ type abReader struct {
 const abCols = "id, subject_type, subject_id, COALESCE(role_id, '') AS role_id, resource_type, resource_id, " +
 	"status, expires_at, granted_by_user_id, revoked_at, revoked_by_user_id, created_at, scope, " +
 	"deletion_protection, labels, target, granted_relation, is_system, COALESCE(revocation_reason, '') AS revocation_reason, " +
-	"COALESCE(delegation_id, '') AS delegation_id"
+	"COALESCE(delegation_id, '') AS delegation_id, access_labels"
 
 func (r *abReader) Get(ctx context.Context, id domain.AccessBindingID) (domain.AccessBinding, error) {
 	row := r.tx.QueryRow(ctx,
@@ -377,6 +377,12 @@ func (r *abReader) List(ctx context.Context, f access_binding.ListFilter) ([]dom
 	}
 	if f.ScopeID != "" {
 		addEq("resource_id", f.ScopeID)
+	}
+	if f.Label != nil {
+		frag, fargs := labelFilterSQL(*f.Label, argIdx)
+		conditions = append(conditions, frag)
+		args = append(args, fargs...)
+		argIdx += len(fargs)
 	}
 	// Сужение до области ОДНОГО аккаунта (kacho#1737): сам аккаунт плюс каждый его
 	// проект. Тот же предикат, что у ListByAccount, — одно написание на оба
@@ -1186,15 +1192,15 @@ func scanAB(row scanner) (domain.AccessBinding, error) {
 // TestProjectionScanArityMatchesItsColumns (kacho#1951).
 func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding, error) {
 	var (
-		ab           domain.AccessBinding
-		expiresAt    sql.NullTime
-		revokedAt    sql.NullTime
-		revokedByUID sql.NullString
-		scopeI       int16
-		labelsJSON   []byte
-		targetJSON   []byte
+		ab                           domain.AccessBinding
+		expiresAt                    sql.NullTime
+		revokedAt                    sql.NullTime
+		revokedByUID                 sql.NullString
+		scopeI                       int16
+		labelsJSON, accessLabelsJSON []byte
+		targetJSON                   []byte
 	)
-	dest := make([]any, 0, 21)
+	dest := make([]any, 0, 22)
 	if len(versionOut) > 0 {
 		dest = append(dest, versionOut[0])
 	}
@@ -1219,12 +1225,17 @@ func scanABWithVersion(row scanner, versionOut ...*string) (domain.AccessBinding
 		&ab.System,
 		(*string)(&ab.RevocationReason),
 		(*string)(&ab.DelegationID),
+		&accessLabelsJSON,
 	)
 	err := row.Scan(dest...)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}
 	ab.Labels, err = unmarshalLabels(labelsJSON)
+	if err != nil {
+		return domain.AccessBinding{}, err
+	}
+	ab.AccessLabels, err = unmarshalLabels(accessLabelsJSON)
 	if err != nil {
 		return domain.AccessBinding{}, err
 	}

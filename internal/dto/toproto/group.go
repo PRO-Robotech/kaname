@@ -22,12 +22,13 @@ func (groupObj) toPb(g domain.Group) (*iamv1.Group, error) {
 		createdAt = timestamppb.New(g.CreatedAt.Truncate(tsTruncate))
 	}
 	return &iamv1.Group{
-		Id:          string(g.ID),
-		AccountId:   string(g.AccountID),
-		Name:        string(g.Name),
-		Description: string(g.Description),
-		Labels:      labelsToStringMap(g.Labels),
-		CreatedAt:   createdAt,
+		Id:           string(g.ID),
+		AccountId:    string(g.AccountID),
+		Name:         string(g.Name),
+		Description:  string(g.Description),
+		Labels:       labelsToStringMap(g.Labels),
+		AccessLabels: labelsToStringMap(g.AccessLabels),
+		CreatedAt:    createdAt,
 	}, nil
 }
 

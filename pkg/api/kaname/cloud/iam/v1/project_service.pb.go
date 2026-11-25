@@ -84,7 +84,10 @@ type ListProjectsRequest struct {
 	PageSize int64 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
 	// Page token.
 	PageToken string `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
-	// A filter expression. Currently supports filtering by [Project.name].
+	// Выражение фильтра с одним сравнением по `name` или по обычной метке.
+	//
+	// Обычные метки сравниваются на точное равенство. Пример `labels.env = "prod"`.
+	// Ключ должен существовать в карте `labels`, в том числе при поиске пустого значения.
 	Filter        string `protobuf:"bytes,4,opt,name=filter,proto3" json:"filter,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -211,7 +214,11 @@ type CreateProjectRequest struct {
 	// Description of the project.
 	Description string `protobuf:"bytes,3,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
-	Labels        map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Начальные защищённые метки для IAM match_access_labels.
+	// Обычное право создать ресурс не разрешает выдавать доступ:
+	// весь добавленный эффект требует Grant. Отсутствие означает пустую карту.
+	AccessLabels  map[string]string `protobuf:"bytes,5,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -274,6 +281,13 @@ func (x *CreateProjectRequest) GetLabels() map[string]string {
 	return nil
 }
 
+func (x *CreateProjectRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
+	}
+	return nil
+}
+
 type UpdateProjectRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Project resource to update.
@@ -296,7 +310,14 @@ type UpdateProjectRequest struct {
 	// Description of the project.
 	Description string `protobuf:"bytes,4,opt,name=description,proto3" json:"description,omitempty"`
 	// Resource labels as `key:value` pairs.
-	Labels        map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Labels map[string]string `protobuf:"bytes,5,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Защищённые метки для IAM match_access_labels. Обычное право update
+	// не разрешает выдавать доступ: добавленный эффект требует Grant.
+	// update_mask без access_labels сохраняет их; с access_labels заменяет
+	// всю карту, в том числе очищает при пустом/отсутствующем поле.
+	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
+	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
+	AccessLabels  map[string]string `protobuf:"bytes,6,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -362,6 +383,13 @@ func (x *UpdateProjectRequest) GetDescription() string {
 func (x *UpdateProjectRequest) GetLabels() map[string]string {
 	if x != nil {
 		return x.Labels
+	}
+	return nil
+}
+
+func (x *UpdateProjectRequest) GetAccessLabels() map[string]string {
+	if x != nil {
+		return x.AccessLabels
 	}
 	return nil
 }
@@ -547,16 +575,20 @@ const file_kaname_cloud_iam_v1_project_service_proto_rawDesc = "" +
 	"\x06filter\x18\x04 \x01(\tR\x06filter\"x\n" +
 	"\x14ListProjectsResponse\x128\n" +
 	"\bprojects\x18\x01 \x03(\v2\x1c.kaname.cloud.iam.v1.ProjectR\bprojects\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\xf5\x01\n" +
+	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x98\x03\n" +
 	"\x14CreateProjectRequest\x12\x1d\n" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x03 \x01(\tR\vdescription\x12M\n" +
-	"\x06labels\x18\x04 \x03(\v25.kaname.cloud.iam.v1.CreateProjectRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x04 \x03(\v25.kaname.cloud.iam.v1.CreateProjectRequest.LabelsEntryR\x06labels\x12`\n" +
+	"\raccess_labels\x18\x05 \x03(\v2;.kaname.cloud.iam.v1.CreateProjectRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb2\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xd5\x03\n" +
 	"\x14UpdateProjectRequest\x12\x1d\n" +
 	"\n" +
 	"project_id\x18\x01 \x01(\tR\tprojectId\x12;\n" +
@@ -564,8 +596,12 @@ const file_kaname_cloud_iam_v1_project_service_proto_rawDesc = "" +
 	"updateMask\x12\x12\n" +
 	"\x04name\x18\x03 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x04 \x01(\tR\vdescription\x12M\n" +
-	"\x06labels\x18\x05 \x03(\v25.kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntryR\x06labels\x1a9\n" +
+	"\x06labels\x18\x05 \x03(\v25.kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntryR\x06labels\x12`\n" +
+	"\raccess_labels\x18\x06 \x03(\v2;.kaname.cloud.iam.v1.UpdateProjectRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
+	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"5\n" +
 	"\x14DeleteProjectRequest\x12\x1d\n" +
@@ -615,7 +651,7 @@ func file_kaname_cloud_iam_v1_project_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_project_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_project_service_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_kaname_cloud_iam_v1_project_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_kaname_cloud_iam_v1_project_service_proto_goTypes = []any{
 	(*GetProjectRequest)(nil),             // 0: kaname.cloud.iam.v1.GetProjectRequest
 	(*ListProjectsRequest)(nil),           // 1: kaname.cloud.iam.v1.ListProjectsRequest
@@ -626,34 +662,38 @@ var file_kaname_cloud_iam_v1_project_service_proto_goTypes = []any{
 	(*ListProjectOperationsRequest)(nil),  // 6: kaname.cloud.iam.v1.ListProjectOperationsRequest
 	(*ListProjectOperationsResponse)(nil), // 7: kaname.cloud.iam.v1.ListProjectOperationsResponse
 	nil,                                   // 8: kaname.cloud.iam.v1.CreateProjectRequest.LabelsEntry
-	nil,                                   // 9: kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
-	(*Project)(nil),                       // 10: kaname.cloud.iam.v1.Project
-	(*fieldmaskpb.FieldMask)(nil),         // 11: google.protobuf.FieldMask
-	(*operation.Operation)(nil),           // 12: corelib.operation.Operation
+	nil,                                   // 9: kaname.cloud.iam.v1.CreateProjectRequest.AccessLabelsEntry
+	nil,                                   // 10: kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
+	nil,                                   // 11: kaname.cloud.iam.v1.UpdateProjectRequest.AccessLabelsEntry
+	(*Project)(nil),                       // 12: kaname.cloud.iam.v1.Project
+	(*fieldmaskpb.FieldMask)(nil),         // 13: google.protobuf.FieldMask
+	(*operation.Operation)(nil),           // 14: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_project_service_proto_depIdxs = []int32{
-	10, // 0: kaname.cloud.iam.v1.ListProjectsResponse.projects:type_name -> kaname.cloud.iam.v1.Project
+	12, // 0: kaname.cloud.iam.v1.ListProjectsResponse.projects:type_name -> kaname.cloud.iam.v1.Project
 	8,  // 1: kaname.cloud.iam.v1.CreateProjectRequest.labels:type_name -> kaname.cloud.iam.v1.CreateProjectRequest.LabelsEntry
-	11, // 2: kaname.cloud.iam.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
-	9,  // 3: kaname.cloud.iam.v1.UpdateProjectRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
-	12, // 4: kaname.cloud.iam.v1.ListProjectOperationsResponse.operations:type_name -> corelib.operation.Operation
-	0,  // 5: kaname.cloud.iam.v1.ProjectService.Get:input_type -> kaname.cloud.iam.v1.GetProjectRequest
-	1,  // 6: kaname.cloud.iam.v1.ProjectService.List:input_type -> kaname.cloud.iam.v1.ListProjectsRequest
-	3,  // 7: kaname.cloud.iam.v1.ProjectService.Create:input_type -> kaname.cloud.iam.v1.CreateProjectRequest
-	4,  // 8: kaname.cloud.iam.v1.ProjectService.Update:input_type -> kaname.cloud.iam.v1.UpdateProjectRequest
-	5,  // 9: kaname.cloud.iam.v1.ProjectService.Delete:input_type -> kaname.cloud.iam.v1.DeleteProjectRequest
-	6,  // 10: kaname.cloud.iam.v1.ProjectService.ListOperations:input_type -> kaname.cloud.iam.v1.ListProjectOperationsRequest
-	10, // 11: kaname.cloud.iam.v1.ProjectService.Get:output_type -> kaname.cloud.iam.v1.Project
-	2,  // 12: kaname.cloud.iam.v1.ProjectService.List:output_type -> kaname.cloud.iam.v1.ListProjectsResponse
-	12, // 13: kaname.cloud.iam.v1.ProjectService.Create:output_type -> corelib.operation.Operation
-	12, // 14: kaname.cloud.iam.v1.ProjectService.Update:output_type -> corelib.operation.Operation
-	12, // 15: kaname.cloud.iam.v1.ProjectService.Delete:output_type -> corelib.operation.Operation
-	7,  // 16: kaname.cloud.iam.v1.ProjectService.ListOperations:output_type -> kaname.cloud.iam.v1.ListProjectOperationsResponse
-	11, // [11:17] is the sub-list for method output_type
-	5,  // [5:11] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	9,  // 2: kaname.cloud.iam.v1.CreateProjectRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateProjectRequest.AccessLabelsEntry
+	13, // 3: kaname.cloud.iam.v1.UpdateProjectRequest.update_mask:type_name -> google.protobuf.FieldMask
+	10, // 4: kaname.cloud.iam.v1.UpdateProjectRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateProjectRequest.LabelsEntry
+	11, // 5: kaname.cloud.iam.v1.UpdateProjectRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateProjectRequest.AccessLabelsEntry
+	14, // 6: kaname.cloud.iam.v1.ListProjectOperationsResponse.operations:type_name -> corelib.operation.Operation
+	0,  // 7: kaname.cloud.iam.v1.ProjectService.Get:input_type -> kaname.cloud.iam.v1.GetProjectRequest
+	1,  // 8: kaname.cloud.iam.v1.ProjectService.List:input_type -> kaname.cloud.iam.v1.ListProjectsRequest
+	3,  // 9: kaname.cloud.iam.v1.ProjectService.Create:input_type -> kaname.cloud.iam.v1.CreateProjectRequest
+	4,  // 10: kaname.cloud.iam.v1.ProjectService.Update:input_type -> kaname.cloud.iam.v1.UpdateProjectRequest
+	5,  // 11: kaname.cloud.iam.v1.ProjectService.Delete:input_type -> kaname.cloud.iam.v1.DeleteProjectRequest
+	6,  // 12: kaname.cloud.iam.v1.ProjectService.ListOperations:input_type -> kaname.cloud.iam.v1.ListProjectOperationsRequest
+	12, // 13: kaname.cloud.iam.v1.ProjectService.Get:output_type -> kaname.cloud.iam.v1.Project
+	2,  // 14: kaname.cloud.iam.v1.ProjectService.List:output_type -> kaname.cloud.iam.v1.ListProjectsResponse
+	14, // 15: kaname.cloud.iam.v1.ProjectService.Create:output_type -> corelib.operation.Operation
+	14, // 16: kaname.cloud.iam.v1.ProjectService.Update:output_type -> corelib.operation.Operation
+	14, // 17: kaname.cloud.iam.v1.ProjectService.Delete:output_type -> corelib.operation.Operation
+	7,  // 18: kaname.cloud.iam.v1.ProjectService.ListOperations:output_type -> kaname.cloud.iam.v1.ListProjectOperationsResponse
+	13, // [13:19] is the sub-list for method output_type
+	7,  // [7:13] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_project_service_proto_init() }
@@ -668,7 +708,7 @@ func file_kaname_cloud_iam_v1_project_service_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_project_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_project_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   10,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

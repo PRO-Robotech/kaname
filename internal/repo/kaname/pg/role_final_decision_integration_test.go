@@ -99,7 +99,7 @@ FROM (SELECT pid,state,wait_event_type,wait_event,pg_blocking_pids(pid) AS block
 	t.Logf("role queue diagnostic: op=%s database_snapshot_limit=16 activity=%s", id, snapshot)
 }
 
-func roleFinalCreate(t *testing.T, w delegationUCWorld, writers *kanamepg.GrantPolicyWriters, name string) domain.Role {
+func roleFinalCreate(t *testing.T, w delegationUCWorld, writers kaname.RoleAuthorityWriterFactory, name string) domain.Role {
 	t.Helper()
 	uc := roleapp.NewCreateRoleUseCase(w.r.repo, w.ops, w.source)
 	if writers != nil {

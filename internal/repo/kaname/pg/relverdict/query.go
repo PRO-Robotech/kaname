@@ -539,7 +539,7 @@ const factArmSQL = `
     -- выдач, у которой дублирования нет — все её строки безусловны и
     -- неразличимы, поэтому читателю довольно первой.
     SELECT DISTINCT f.condition_name AS cond_name, f.condition_params AS cond_params,
-           ''::text AS arm
+           ` + factFreshnessArmSQL + `
       FROM kaname.relation_fact f
       JOIN speaker sp ON sp.subject = f.subject
       {{scope_join}}
@@ -575,7 +575,7 @@ const (
 // один из них.
 func armsFor(objectIDExpr, scopeJoinGrant, scopeJoinFact string, nesting bool) (grant, fact string, err error) {
 	grant, err = replaceOnce(grantArmSQL, armPredicateMark,
-		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", nesting))
+		grantArmPredicate("$9::text", "$2::text", objectIDExpr, "m.labels", "m.access_labels", nesting))
 	if err != nil {
 		return "", "", err
 	}
@@ -656,8 +656,9 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	defer rows.Close()
 
 	type source struct {
-		name   string
-		params map[string]any
+		name    string
+		params  map[string]any
+		pending bool
 	}
 	var (
 		sources  []source
@@ -681,7 +682,8 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		if arm == "labels" {
 			g.LabelArm = true
 		}
-		if s.name == "" {
+		s.pending = arm == pendingFactArm
+		if s.name == "" && !s.pending {
 			// Безусловное основание. Набор дочитывать НЕ НУЖНО и не нужно было
 			// никогда: остальные источники ответа не меняют.
 			rows.Close()
@@ -719,6 +721,10 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 	// источник спрашивается, пока один из них не разрешит.
 	var notUnderstood error
 	for _, s := range sources {
+		if s.pending {
+			notUnderstood = ErrAccessLabelProjectionPending
+			continue
+		}
 		if s.name == "" {
 			return Allow, g, nil
 		}
@@ -726,7 +732,9 @@ func Ask(ctx context.Context, q pgx.Tx, in Query) (Verdict, Grounds, error) {
 		if err != nil {
 			// Не понято — запоминаем, но продолжаем: другой источник может дать
 			// право безусловно, и тогда незнание про этот ничего не меняет.
-			notUnderstood = err
+			if !errors.Is(notUnderstood, ErrAccessLabelProjectionPending) {
+				notUnderstood = err
+			}
 			continue
 		}
 		if ok {
@@ -1007,8 +1015,9 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 	// Основания и источники накапливаются ПО ПОЗИЦИИ: строки объектов приходят
 	// одним потоком, и порядок между объектами запрос не обещает.
 	type source struct {
-		name   string
-		params map[string]any
+		name    string
+		params  map[string]any
+		pending bool
 	}
 	n := len(in.ObjectIDs)
 	grounds := make([]Grounds, n)
@@ -1051,7 +1060,8 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		if arm == "labels" {
 			grounds[slot].LabelArm = true
 		}
-		if s.name == "" {
+		s.pending = arm == pendingFactArm
+		if s.name == "" && !s.pending {
 			settled[slot] = true
 			grounds[slot].SetExhausted = false
 			continue
@@ -1080,11 +1090,17 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		var notUnderstood error
 		allowed := false
 		for _, s := range sources[i] {
+			if s.pending {
+				notUnderstood = ErrAccessLabelProjectionPending
+				continue
+			}
 			ok, cerr := evalCondition(s.name, s.params, in.Context)
 			if cerr != nil {
 				// Не понято — запоминаем, но продолжаем: другой источник может
 				// дать право, и тогда незнание про этот ничего не меняет.
-				notUnderstood = cerr
+				if !errors.Is(notUnderstood, ErrAccessLabelProjectionPending) {
+					notUnderstood = cerr
+				}
 				continue
 			}
 			if ok {
@@ -1096,6 +1112,9 @@ func AskMany(ctx context.Context, q pgx.Tx, in QueryMany) ([]Verdict, []Grounds,
 		case allowed:
 			verdicts[i] = Allow
 		case notUnderstood != nil:
+			if errors.Is(notUnderstood, ErrAccessLabelProjectionPending) {
+				return nil, nil, notUnderstood
+			}
 			return verdicts[:i], grounds[:i], notUnderstood
 		default:
 			verdicts[i] = Deny
