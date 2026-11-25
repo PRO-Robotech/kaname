@@ -862,6 +862,10 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 			return startupFailureAt(err)
 		}
 	}
+	var metadataWriters resourceMetadataUpdateInstaller
+	if stagedMetadataWriters != nil {
+		metadataWriters = stagedMetadataWriters
+	}
 	if fullStartup != nil {
 		var roleDependencies []*kanamepg.RolePolicyWriters
 		if roleWriters != nil {
@@ -876,6 +880,14 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 		admissionParticipant = participants.admission
 		resourceObjectParticipant = participants.objects
 		groupObjectParticipant, bindingStageParticipant = participants.groups, participants.bindings
+		if publication != nil {
+			metadataWriters = publication.writers
+		} else if participants.metadata != nil {
+			metadataWriters = participants.metadata
+		}
+	}
+	if err := svcs.wireResourceMetadataUpdate(ctx, permRegistry, metadataWriters, opsRepo); err != nil {
+		logger.Warn("обновление меток внешних ресурсов недоступно", slog.Any("error", err))
 	}
 
 	// Полоса входа паролем, регистрация и наша сессия (Ф3 kacho#1269, Ф4

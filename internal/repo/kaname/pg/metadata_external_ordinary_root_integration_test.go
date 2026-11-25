@@ -33,7 +33,7 @@ func TestExternalMetadataOrdinaryHoldsBeforeFinalClock(t *testing.T) {
 	for _, fn := range []string{identity, root} {
 		var allowed bool
 		require.NoError(t, r.runtime.QueryRow(r.ctx, `SELECT has_function_privilege(current_user,$1,'EXECUTE')`, fn).Scan(&allowed))
-		require.False(t, allowed)
+		require.Equal(t, fn == identity, allowed, fn)
 	}
 	// В БД фикстуры доступ к owner body получает только ограниченная обёртка.
 	role := pgx.Identifier{r.role}.Sanitize()
@@ -43,8 +43,7 @@ func TestExternalMetadataOrdinaryHoldsBeforeFinalClock(t *testing.T) {
  SELECT kaname._authority_metadata_mirror_ordinary_root_v1(p_dotted,p_id,p_rr,p_patch,p_rows,p_reads,p_work)
  $test$;
  REVOKE ALL ON FUNCTION kaname.test_external_ordinary_root(text,text,jsonb,jsonb,integer,integer,integer) FROM PUBLIC;
- GRANT EXECUTE ON FUNCTION kaname.test_external_ordinary_root(text,text,jsonb,jsonb,integer,integer,integer),
- kaname.authority_metadata_mirror_ordinary_identity_v1(text,text) TO `+role)
+ GRANT EXECUTE ON FUNCTION kaname.test_external_ordinary_root(text,text,jsonb,jsonb,integer,integer,integer) TO `+role)
 	require.NoError(t, err)
 	state := func() string {
 		t.Helper()
@@ -64,8 +63,6 @@ func TestExternalMetadataOrdinaryHoldsBeforeFinalClock(t *testing.T) {
 			domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(w.actor)}, false, "ordinary-root", patch)
 	}
 	const labels = `{"labels":{"team":"app"},"access_labels":{}}`
-	_, err = r.admin.Exec(r.ctx, "GRANT UPDATE (labels) ON kaname.resource_mirror TO "+role)
-	require.NoError(t, err)
 	for _, tc := range []struct{ patch, mode string }{
 		{`{}`, "noop"}, {`{"access_labels":{}}`, "noop"}, {labels, "ordinary"},
 	} {

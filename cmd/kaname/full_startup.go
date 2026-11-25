@@ -102,6 +102,7 @@ type fullStartupParticipants struct {
 	objects    *reconcile.Reconciler
 	groups     *reconcile.Reconciler
 	bindings   reconcile.StagedBindingReconciler
+	metadata   *kanamepg.MetadataMutationWriters
 }
 
 // Единственная production composition полного public контракта. Каждая фабрика
@@ -265,7 +266,7 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	// Закрытие родителя получает тот же FULL runner только на внутренней службе.
 	svcs.internalIAMHandler.WithChildParentClose(resourceDecisions)
 	return &fullStartupParticipants{membership: membership, admission: admission, invites: invites,
-		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages}, nil
+		cluster: cluster, resources: resources, objects: objects, groups: groups, bindings: stages, metadata: metadata}, nil
 }
 
 func wirePublishedFullStartupServices(ctx context.Context, publication *publishedStartupProfile, svcs *services) (*fullStartupParticipants, error) {

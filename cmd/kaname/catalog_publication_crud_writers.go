@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
@@ -81,6 +82,29 @@ func (r publishedServiceAccountAccessLabels) ServiceAccountAccessLabelsWriter(ct
 		return nil, kaname.ErrSemanticIdentityUnavailable
 	}
 	return writer.ServiceAccountAccessLabelsWriter(pinned, value, mask, actor)
+}
+
+func (r *publishedWriterGenerations) InstalledResourceMetadataUpdate(ctx context.Context) (kaname.ResourceMetadataUpdateWriter, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := generation.metadata.InstalledResourceMetadataUpdate(pinned); err != nil {
+		return nil, err
+	}
+	return r, nil
+}
+
+func (r *publishedWriterGenerations) UpdateResourceMetadata(ctx context.Context, root domain.ResourceRef, labels, access domain.Labels, mask []string, pending operations.Operation) (*operations.Operation, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	writer, err := generation.metadata.InstalledResourceMetadataUpdate(pinned)
+	if err != nil {
+		return nil, err
+	}
+	return writer.UpdateResourceMetadata(pinned, root, labels, access, mask, pending)
 }
 
 func (r *publishedWriterGenerations) ServiceAccountStateWriter(ctx context.Context, id domain.ServiceAccountID, enabled bool, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {

@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/grantcapability"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
@@ -57,6 +58,9 @@ func (s *metadataStage) readMirrorRoot(ctx context.Context, tx pgx.Tx) (mirrorMe
   AND (nullif(m.parent_project_id,'') IS NULL OR
    (p.id IS NOT NULL AND (nullif(m.parent_account_id,'') IS NULL OR m.parent_account_id=p.account_id)))`,
 		s.request.kind, s.request.id).Scan(&s.xmin, &s.old, &s.request.typ, &scope.account, &scope.project)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return mirrorMetadataScope{}, iamerr.ErrPermissionDenied
+	}
 	if err != nil {
 		return mirrorMetadataScope{}, err
 	}
@@ -93,18 +97,26 @@ func mirrorMetadataRequest(root domain.ResourceRef, labels, accessLabels domain.
 func (p *MetadataMutationWriters) updateMirrorAccessLabels(ctx context.Context, root domain.ResourceRef,
 	labels, accessLabels domain.Labels, mask []string, actor domain.Subject,
 ) (domain.ResourceMetadata, error) {
-	request := mirrorMetadataRequest(root, labels, accessLabels, mask)
+	return p.writeMirrorMetadata(ctx, mirrorMetadataRequest(root, labels, accessLabels, mask), actor)
+}
+
+func (p *MetadataMutationWriters) writeMirrorMetadata(ctx context.Context, request metadataMutation, actor domain.Subject) (domain.ResourceMetadata, error) {
+	root := request.catalogRef()
+	if request.table != "resource_mirror" || root.Type == "" {
+		return domain.ResourceMetadata{}, kaname.ErrInvalidAuthorityFencePlan
+	}
 	if slices.Contains(request.mask, "labels") {
 		if err := request.labels.Validate(); err != nil {
 			return domain.ResourceMetadata{}, err
 		}
 	}
 	var result domain.ResourceMetadata
+	mirrorWork := metadataProtectedWorkLimit
 	err := executePreparedAttempts(ctx, func(ctx context.Context) (*metadataWriteTx, error) {
-		return p.openMetadataTx(ctx, request, actor)
+		return p.openMetadataTx(ctx, request, actor, &mirrorWork)
 	}, func(ctx context.Context, tx *metadataWriteTx) error {
 		command := tx.protected
-		if command == nil || !command.changesLabel || command.root != root || len(command.mirrorOld) == 0 {
+		if command == nil || command.root != root || len(command.mirrorOld) == 0 {
 			return kaname.ErrSourceUnconfirmed
 		}
 		if _, err := command.ordinaryMask(request); err != nil {
@@ -115,18 +127,23 @@ func (p *MetadataMutationWriters) updateMirrorAccessLabels(ctx context.Context, 
 		// целиком с ожидаемым NEW, включая поля вне пользовательской маски.
 		var actual domain.ResourceMetadata
 		err := tx.tx.QueryRow(ctx, `WITH applied AS MATERIALIZED (
- SELECT kaname.authority_metadata_mirror_write_v1($1,$2) AS obj
+ SELECT kaname.authority_metadata_mirror_apply_v1($1,$2) AS obj
 )
 SELECT obj->>'object_type',obj->>'object_id',obj->'labels',obj->'access_labels'
  FROM applied WHERE obj=($3::jsonb || $4::jsonb)
- AND obj->>'object_type'=$1 AND obj->>'object_id'=$2`,
-			root.Type, root.ID, command.mirrorOld, command.patch).
+ AND obj->>'object_type'=$1 AND obj->>'object_id'=$2 AND (NOT $5::boolean OR obj=$3::jsonb)`,
+			root.Type, root.ID, command.mirrorOld, command.patch, len(tx.changed) == 0).
 			Scan(&actual.ResourceType, &actual.ResourceID, &actual.Labels, &actual.AccessLabels)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return kaname.ErrSourceUnconfirmed
 		}
 		if err != nil {
 			return mapProtectedMetadataErr(err)
+		}
+		if request.operation != nil {
+			if err := request.operation.finish(ctx, tx.tx, tx.mirrorAccount, actual); err != nil {
+				return err
+			}
 		}
 		result = actual
 		return nil

@@ -249,6 +249,7 @@ func resourceMetadataBindingsSQL(k resourceSourceKey, limit int) (string, []any,
 }
 
 type metadataGrantCapture struct {
+	root               domain.ResourceRef
 	mirrorPolicyGlobal bool
 	retained           *metadataRetainedRR
 	source             *resourceSourceCapture
@@ -347,6 +348,10 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		return nil, err
 	}
 	budget := &relverdict.AdministrativeReadBudget{}
+	if request.table == "resource_mirror" {
+		// Повтор может сменить классификацию после нового RR. Бюджет общий для обеих ветвей.
+		budget = preparedAdministrativeReadBudget(ctx)
+	}
 	if err = chargeNativePolicyBudget(budget, rootRows, 0); err != nil {
 		return nil, err
 	}
@@ -355,6 +360,7 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		return nil, err
 	}
 	result := &metadataGrantCapture{
+		root:    request.catalogRef(),
 		source:  source,
 		account: account,
 		before:  granteffect.MetadataObject{Type: request.typ, ID: request.id, Labels: before, AccessLabels: beforeAccess},
@@ -381,6 +387,16 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 	if err != nil {
 		return nil, err
 	}
+	if request.table == "resource_mirror" {
+		// Наличие receipt определяет режим входа даже для подтверждения no-op.
+		rows, err := source.read(ctx, tx, resourceSourceKey{
+			kind: resourceSourceMetadataPolicyReceipt, typ: dotted, id: request.id,
+		})
+		if err != nil {
+			return nil, err
+		}
+		result.mirrorPolicyGlobal = len(rows) != 0
+	}
 	if unchanged {
 		// Даже no-op требует существующего зеркала, владельца и снимка
 		// регистрации. Внешний Update проверяет v_update на этой версии.
@@ -403,16 +419,6 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		if err != nil {
 			return nil, err
 		}
-	}
-	if request.table == "resource_mirror" {
-		// Триггер authority_policy_keys срабатывает при изменении любой карты.
-		rows, err := source.read(ctx, tx, resourceSourceKey{
-			kind: resourceSourceMetadataPolicyReceipt, typ: dotted, id: request.id,
-		})
-		if err != nil {
-			return nil, err
-		}
-		result.mirrorPolicyGlobal = len(rows) != 0
 	}
 	changed, err := source.read(ctx, tx, resourceSourceKey{
 		kind: resourceSourceMetadataBindings, typ: dotted, id: request.id, projection: string(projection),
@@ -517,6 +523,19 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		return nil, err
 	}
 	return result, nil
+}
+
+// Разные dotted могут разрешаться в один модельный тип. Для внешнего
+// зеркала проверяем обе координаты и область до использования RR-снимка.
+func (s *metadataStage) checkMirrorGrantIdentity() error {
+	g := s.grant
+	if g == nil || g.source == nil || g.source.lifetime == nil || !g.source.sealed ||
+		s.plan == nil || s.plan.nativeBudget == nil || g.source.budget != s.plan.nativeBudget ||
+		s.request.catalogType() == "" || g.root != s.request.catalogRef() || s.mirrorAccount == "" || g.account != s.mirrorAccount ||
+		g.before.Type != s.request.typ || g.after.Type != s.request.typ || g.before.ID != s.request.id || g.after.ID != s.request.id {
+		return kaname.ErrSourceUnconfirmed
+	}
+	return nil
 }
 
 func readMetadataBindingEpoch(ctx context.Context, tx pgx.Tx, budget *relverdict.AdministrativeReadBudget, account string) (string, error) {

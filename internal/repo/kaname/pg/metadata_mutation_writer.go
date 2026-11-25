@@ -93,6 +93,7 @@ func (p *MetadataMutationWriters) ServiceAccountMetadataWriter(ctx context.Conte
 }
 
 type metadataMutation struct {
+	operation                               *mirrorMetadataOperation
 	kind, table, typ, id, name, description string
 	labels, accessLabels                    domain.Labels
 	mode                                    metadataMutationMode
@@ -115,14 +116,15 @@ func (r metadataMutation) nativeCatalogType() string {
 }
 
 type metadataStage struct {
-	request metadataMutation
-	xmin    string
-	auditID domain.AuditEventID
-	old     json.RawMessage
-	rename  bool
-	changed []string
-	plan    *policyPlan
-	grant   *metadataGrantCapture
+	mirrorAccount string
+	request       metadataMutation
+	xmin          string
+	auditID       domain.AuditEventID
+	old           json.RawMessage
+	rename        bool
+	changed       []string
+	plan          *policyPlan
+	grant         *metadataGrantCapture
 }
 
 func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request metadataMutation, actor domain.Subject, patch metadataMutationPatch) (*metadataStage, error) {
@@ -138,6 +140,7 @@ func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request 
 		if err != nil {
 			return nil, err
 		}
+		s.mirrorAccount = scope.account
 		request = s.request
 		rootRows = 3 // Зеркало, тип и объектное действие каталога.
 		if scope.project != "" {
@@ -250,15 +253,16 @@ func (p *MetadataMutationWriters) open(ctx context.Context, request metadataMuta
 	if request.table == "resource_mirror" {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
-	writer, err := p.openMetadataTx(ctx, request, actor)
+	writer, err := p.openMetadataTx(ctx, request, actor, nil)
 	if err != nil {
 		return nil, err
 	}
 	return writer, nil
 }
 
-func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request metadataMutation, actor domain.Subject) (*metadataWriteTx, error) {
-	if p == nil || p.policy == nil || p.policy.repo == nil || !nativeQuestionToken(request.id) || actor.Validate() != nil {
+func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request metadataMutation, actor domain.Subject, mirrorWork *int) (*metadataWriteTx, error) {
+	if p == nil || p.policy == nil || p.policy.repo == nil || !nativeQuestionToken(request.id) || actor.Validate() != nil ||
+		(request.table == "resource_mirror" && mirrorWork == nil) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	patch, err := prepareMetadataMutationPatch(request)
@@ -291,17 +295,16 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 			return nil, err
 		}
 		stage, err := p.stage(ctx, snapshot, request, actor, patch)
-		if cleanup := policyRollback(ctx, snapshot); cleanup != nil {
+		var ordinaryRR json.RawMessage
+		if err == nil && request.table == "resource_mirror" && !slices.Contains(stage.changed, "access_labels") {
+			ordinaryRR, err = stage.discoverOrdinaryMirror(ctx, snapshot)
+		}
+		cleanup := policyRollback(ctx, snapshot)
+		if err != nil || cleanup != nil {
+			if stage != nil && stage.grant != nil {
+				stage.grant.source.lifetime.close()
+			}
 			return nil, errors.Join(err, cleanup)
-		}
-		if err != nil {
-			return nil, err
-		}
-		// Классификация RR различает все маски. Текущий owner ABI допускает
-		// только действительную смену access_labels; закрываем попытку до RC.
-		if request.table == "resource_mirror" && !slices.Contains(stage.changed, "access_labels") {
-			stage.grant.source.lifetime.close()
-			return nil, kaname.ErrSemanticIdentityUnavailable
 		}
 		intent := stage.plan.intent(p.policy.bundle)
 		if err = validateAuthorityIntent(intent); err != nil {
@@ -321,18 +324,31 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 			firstRead = policyPlanBeforeMetadataFreeze
 			finalRead = policyPlanBeforeMetadataWrite
 		}
-		protectedWork := metadataProtectedWorkLimit
+		nativeWork := metadataProtectedWorkLimit
+		work := &nativeWork
+		if request.table == "resource_mirror" {
+			work = mirrorWork
+		}
 		w, err := repo.enterAuthority(ctx, tx, intent, owners, intent.Plan.Mode, intent.Plan.Accounts, false, purpose, stage.plan)
+		if err == nil && request.operation != nil {
+			err = chargeNativePolicyBudget(stage.plan.nativeBudget, 2, 3)
+			if err == nil {
+				err = request.operation.lock(ctx, tx, stage.request.catalogRef(), actor)
+			}
+		}
+		if err == nil && ordinaryRR != nil {
+			err = stage.reserveOrdinaryMirror(ctx, tx, ordinaryRR, encodedPatch, work)
+		}
 		if err == nil && protectedChange {
-			err = stage.prepareProtected(ctx, tx, patch.AccessLabels, &protectedWork)
+			err = stage.prepareProtected(ctx, tx, patch.AccessLabels, work)
 		}
 		if err == nil {
 			err = p.policy.protectPolicyPlanAt(ctx, w, stage.plan, firstRead)
 		}
 		if err == nil && protectedChange {
-			err = stage.freezeProtected(ctx, tx, p.policy.bundle, actor, encodedPatch, &protectedWork)
+			err = stage.freezeProtected(ctx, tx, p.policy.bundle, actor, encodedPatch, work)
 		}
-		if err == nil && !protectedChange {
+		if err == nil && !protectedChange && ordinaryRR == nil {
 			// При прежнем значении accessLabels проверяем обычную маску
 			// и не резервируем запись защищённого атрибута.
 			body := encodedPatch
@@ -349,34 +365,14 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 				}
 			}
 		}
-		if err == nil && stage.grant != nil {
-			// Metadata preflight удерживает корневую и локальную генерации привязок. Сверяем
-			// также пустые предикаты и весь набор до обновления decision_at.
-			err = stage.grant.recheck(ctx, w)
-			if err == nil {
-				err = stage.grant.verifyProjections(ctx, newSemanticAuthorityWriter(w, p.policy.bundle))
-			}
-		}
-		// До записи сверяем поколение после физических ожиданий, обновляем
-		// decision_at и спрашиваем право на OLD и на добавленный эффект.
 		if err == nil {
-			err = p.policy.protectPolicyPlanAt(ctx, w, stage.plan, finalRead)
-		}
-		if err == nil {
-			_, err = tx.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`)
-		}
-		if err == nil {
-			semantic := newSemanticAuthorityWriter(w, p.policy.bundle)
-			var allowed bool
-			allowed, err = semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", stage.request.typ+":"+stage.request.id)
-			if err == nil && !allowed {
-				err = iamerr.Wrapf(iamerr.ErrPermissionDenied, "Metadata update authority denied")
-			}
-			if err == nil && stage.grant != nil {
-				err = stage.grant.authorize(ctx, semantic, actor)
-			}
+			var semantic *semanticAuthorityWriteTx
+			semantic, err = p.finalizeMetadataAuthorization(ctx, w, stage, finalRead)
 			if err == nil && protectedChange {
-				err = stage.approveProtectedApply(ctx, semantic, actor, &protectedWork)
+				err = stage.approveProtectedApply(ctx, semantic, actor, work)
+			}
+			if err == nil && ordinaryRR != nil {
+				err = stage.acceptOrdinaryMirror(ctx, semantic)
 			}
 			if err == nil {
 				err = ctx.Err()
@@ -388,7 +384,10 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 				w.tx = &policyLeaseTx{Tx: tx, conn: conn}
 				transferred = true
 				out := &metadataWriteTx{semanticAuthorityWriteTx: semantic, auditID: stage.auditID, changed: stage.changed}
-				if request.mode == metadataMutationAccessLabels {
+				if request.operation != nil {
+					out.mirrorAccount = stage.mirrorAccount
+				}
+				if request.mode == metadataMutationAccessLabels || ordinaryRR != nil {
 					out.protected = &metadataProtectedWrite{
 						root: stage.request.catalogRef(), patch: encodedPatch,
 						changesLabel: protectedChange,
@@ -416,9 +415,61 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 	return nil, kaname.ErrAuthorityClassificationChanged
 }
 
+// Вызывается после резервирования владельцем. Все проверки относятся к одному
+// RR-плану и одному RC writer. Возвращаемый writer не удостоверяет решение в SQL.
+func (p *MetadataMutationWriters) finalizeMetadataAuthorization(ctx context.Context, w *authorityWriteTx, s *metadataStage, point policyPlanReadPoint) (*semanticAuthorityWriteTx, error) {
+	if s.request.table == "resource_mirror" {
+		if err := s.checkMirrorGrantIdentity(); err != nil {
+			return nil, err
+		}
+	}
+	if s.grant != nil {
+		if err := s.grant.recheck(ctx, w); err != nil {
+			return nil, err
+		}
+		if err := s.grant.verifyProjections(ctx, newSemanticAuthorityWriter(w, p.policy.bundle)); err != nil {
+			return nil, err
+		}
+	}
+	if err := p.policy.protectPolicyPlanAt(ctx, w, s.plan, point); err != nil {
+		return nil, err
+	}
+	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`); err != nil {
+		return nil, err
+	}
+	if s.request.table == "resource_mirror" {
+		lifetime := s.grant.source.lifetime
+		if err := lifetime.bind(w); err != nil {
+			return nil, err
+		}
+		if !lifetime.valid(w, p.policy.bundle) {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+	}
+	actor := s.plan.request.actor
+	semantic := newSemanticAuthorityWriter(w, p.policy.bundle)
+	allowed, err := semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", s.request.typ+":"+s.request.id)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, iamerr.Wrapf(iamerr.ErrPermissionDenied, "Metadata update authority denied")
+	}
+	if s.grant != nil {
+		if err := s.grant.authorize(ctx, semantic, actor); err != nil {
+			return nil, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return semantic, nil
+}
+
 // shared.DoWithWriteTx calls Rollback with its original possibly canceled
 // worker context. Cleanup must still release fences and the leased connection.
 type metadataWriteTx struct {
+	mirrorAccount string
 	*semanticAuthorityWriteTx
 	auditID   domain.AuditEventID
 	auditUsed bool
