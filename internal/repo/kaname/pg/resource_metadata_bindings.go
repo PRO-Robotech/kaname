@@ -27,17 +27,23 @@ type resourceMetadataProjection struct {
 }
 
 type metadataBindingRootSQL struct {
-	join, account, project, historicalProject, witness string
+	join, accountMatch, project, historicalProject, witness string
 }
 
 func metadataBindingRoot(dotted string) (metadataBindingRootSQL, bool) {
 	witness := "o.xmin::text,o.ctid::text,to_jsonb(o)"
 	switch dotted {
+	case "iam.group":
+		// Нативная группа принадлежит аккаунту, без родителя-проекта.
+		return metadataBindingRootSQL{
+			join: "JOIN ONLY kaname.groups o ON o.id=$2", accountMatch: "b.resource_id=o.account_id",
+			project: "false", historicalProject: "false", witness: witness,
+		}, true
 	case "iam.account", "iam.project", "iam.serviceAccount":
 		spec := iamDirectScanSpecs[dotted]
 		out := metadataBindingRootSQL{
-			join:    "JOIN " + spec.table + " o ON o.id=$2",
-			account: spec.parentAccountExpr, project: "b.resource_id=" + spec.parentProjectExpr,
+			join:         "JOIN " + spec.table + " o ON o.id=$2",
+			accountMatch: "b.resource_id=" + spec.parentAccountExpr, project: "b.resource_id=" + spec.parentProjectExpr,
 			historicalProject: "b.resource_id=o.id", witness: witness,
 		}
 		if dotted == "iam.account" {
@@ -59,8 +65,8 @@ func metadataBindingRoot(dotted string) (metadataBindingRootSQL, bool) {
 		return metadataBindingRootSQL{
 			join: `JOIN kaname.resource_mirror o ON o.object_type=$1 AND o.object_id=$2
  LEFT JOIN kaname.projects op ON op.id=o.parent_project_id`,
-			account: "COALESCE(NULLIF(o.parent_account_id,''),op.account_id)",
-			project: project, historicalProject: project,
+			accountMatch: "b.resource_id=COALESCE(NULLIF(o.parent_account_id,''),op.account_id)",
+			project:      project, historicalProject: project,
 			witness: witness + ",op.xmin::text,op.ctid::text,to_jsonb(op)",
 		}, true
 	}
@@ -131,6 +137,19 @@ func resourceMetadataBindingsSQL(k resourceSourceKey, limit int) (string, []any,
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
 	root, ok := metadataBindingRoot(k.typ)
+	if k.typ == "iam.user" {
+		// У пользователя может быть несколько областей. Старое поле
+		// users.account_id не подтверждает ни одной из них. Полный набор
+		// строк дополнительно удерживается как самостоятельный источник.
+		root = metadataBindingRootSQL{
+			join: "JOIN ONLY kaname.users o ON o.id=$2",
+			accountMatch: `EXISTS (SELECT 1 FROM ONLY kaname.memberships m
+ WHERE m.user_id=o.id AND m.account_id=b.resource_id)`,
+			project: "false", historicalProject: "false",
+			witness: "o.xmin::text,o.ctid::text,to_jsonb(o)",
+		}
+		ok = true
+	}
 	if !ok {
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
@@ -141,13 +160,35 @@ func resourceMetadataBindingsSQL(k resourceSourceKey, limit int) (string, []any,
 	}
 	scope := `b.status IN ('ACTIVE','PENDING') AND b.revoked_at IS NULL
    AND (b.resource_type NOT IN ('account','project')
-     OR (b.resource_type='account' AND b.resource_id=` + root.account + `)
+     OR (b.resource_type='account' AND ` + root.accountMatch + `)
      OR (b.resource_type='project' AND ` + root.project + `))`
 	args := []any{k.typ, k.id, limit, k.projection}
+	const candidates = ` FROM jsonb_array_elements(r.rules) AS rules(rule)
+       CROSS JOIN LATERAL jsonb_array_elements(jsonb_build_array(rule) ||
+         coalesce(nullif(rule->'children','null'::jsonb),'[]'::jsonb)) AS selectors(candidate)
+       WHERE rule->>'module' IN (split_part($1::text,'.',1),'*')
+         AND ((candidate->'resources' ? split_part($1::text,'.',2)) OR (candidate->'resources' ? '*'))`
+	const authoredChanges = `((o.labels @> (candidate->'match_labels')) IS DISTINCT FROM
+           (($4::jsonb->'labels') @> (candidate->'match_labels'))
+         OR (o.access_labels @> (candidate->'match_access_labels')) IS DISTINCT FROM
+           (($4::jsonb->'access_labels') @> (candidate->'match_access_labels')))`
 	if k.kind == resourceSourceMetadataHistoricalCarriers {
 		// История выдачи может пережить отзыв привязки и вывод роли из действия.
 		// Здесь читаем носителей старых выдач, включая отсутствующую область.
 		// Эти строки участвуют в сверке источников и не дают права на выдачу.
+		filter := ` FROM jsonb_array_elements(r.rules) AS rules(rule)
+     CROSS JOIN LATERAL jsonb_array_elements(jsonb_build_array(rule) ||
+       coalesce(nullif(rule->'children','null'::jsonb),'[]'::jsonb)) AS selectors(candidate)
+     WHERE rule->>'module'=split_part($1::text,'.',1)
+       AND candidate->'resources' ? split_part($1::text,'.',2)
+       AND candidate ? 'match_access_labels'
+       AND (o.access_labels @> (candidate->'match_access_labels')) IS DISTINCT FROM
+           (($4::jsonb->'access_labels') @> (candidate->'match_access_labels'))`
+		if k.typ == "iam.user" {
+			// В одной команде User могут поменяться обе карты. Даже выведенный
+			// из действия носитель обычного селектора способен оставить старый факт.
+			filter = candidates + " AND " + authoredChanges
+		}
 		query := `SELECT jsonb_build_array(b.xmin::text,b.ctid::text,to_jsonb(b),
   r.xmin::text,r.ctid::text,to_jsonb(r),p.xmin::text,p.ctid::text,to_jsonb(p),
   ` + root.witness + `)::text,
@@ -158,33 +199,16 @@ func resourceMetadataBindingsSQL(k resourceSourceKey, limit int) (string, []any,
  ` + root.join + `
  WHERE b.role_id IS NOT NULL
    AND (b.resource_type NOT IN ('account','project')
-     OR (b.resource_type='account' AND b.resource_id=` + root.account + `)
+     OR (b.resource_type='account' AND ` + root.accountMatch + `)
      OR (b.resource_type='project' AND (p.id IS NULL OR ` + root.historicalProject + `)))
    AND CASE WHEN r.id IS NULL OR kaname.access_label_rules_valid_v1(r.rules) IS DISTINCT FROM true THEN true
-   ELSE EXISTS (
-     SELECT 1 FROM jsonb_array_elements(r.rules) AS rules(rule)
-     CROSS JOIN LATERAL jsonb_array_elements(jsonb_build_array(rule) ||
-       coalesce(nullif(rule->'children','null'::jsonb),'[]'::jsonb)) AS selectors(candidate)
-     WHERE rule->>'module'=split_part($1::text,'.',1)
-       AND candidate->'resources' ? split_part($1::text,'.',2)
-       AND candidate ? 'match_access_labels'
-       AND (o.access_labels @> (candidate->'match_access_labels')) IS DISTINCT FROM
-           (($4::jsonb->'access_labels') @> (candidate->'match_access_labels'))) END
+   ELSE EXISTS (SELECT 1` + filter + `) END
  LIMIT $3`
 		return query, args, nil
 	}
 	if k.kind == resourceSourceMetadataAuthoredBindings {
 		// Authored rules also contribute unchanged OLD/NEW coverage when their
 		// projection is missing. The changes flag stays independent of coverage.
-		const candidates = ` FROM jsonb_array_elements(r.rules) AS rules(rule)
-       CROSS JOIN LATERAL jsonb_array_elements(jsonb_build_array(rule) ||
-         coalesce(nullif(rule->'children','null'::jsonb),'[]'::jsonb)) AS selectors(candidate)
-       WHERE rule->>'module' IN (split_part($1::text,'.',1),'*')
-         AND ((candidate->'resources' ? split_part($1::text,'.',2)) OR (candidate->'resources' ? '*'))`
-		const authoredChanges = `((o.labels @> (candidate->'match_labels')) IS DISTINCT FROM
-           (($4::jsonb->'labels') @> (candidate->'match_labels'))
-         OR (o.access_labels @> (candidate->'match_access_labels')) IS DISTINCT FROM
-           (($4::jsonb->'access_labels') @> (candidate->'match_access_labels')))`
 		authoredCoverage := `((candidate->'resource_names' ? $2::text)
          OR (o.labels @> (candidate->'match_labels'))
          OR (($4::jsonb->'labels') @> (candidate->'match_labels'))
@@ -253,7 +277,7 @@ type metadataGrantCapture struct {
 	mirrorPolicyGlobal bool
 	retained           *metadataRetainedRR
 	source             *resourceSourceCapture
-	account            string
+	accounts           []string
 	epoch              string
 	before             granteffect.MetadataObject
 	after              granteffect.MetadataObject
@@ -269,6 +293,13 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		return nil, nil
 	}
 	dotted := request.catalogType()
+	user := request.kind == "user" && request.table == "users" && request.typ == "iam_user" &&
+		request.mode == metadataMutationAccessLabels
+	if user {
+		// Открытие транзакции User проверяет собственный контракт. Обычный
+		// metadata writer пока не принимает эту таблицу в nativeCatalogType.
+		dotted = "iam.user"
+	}
 	if dotted == "" {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
@@ -337,7 +368,7 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 	if err != nil {
 		return nil, err
 	}
-	if !nativeQuestionToken(account) {
+	if !user && !nativeQuestionToken(account) {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
 	if err = ctx.Err(); err != nil {
@@ -348,7 +379,7 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		return nil, err
 	}
 	budget := &relverdict.AdministrativeReadBudget{}
-	if request.table == "resource_mirror" {
+	if request.table == "resource_mirror" || user {
 		// Повтор может сменить классификацию после нового RR. Бюджет общий для обеих ветвей.
 		budget = preparedAdministrativeReadBudget(ctx)
 	}
@@ -359,12 +390,30 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 	if err != nil {
 		return nil, err
 	}
+	parents, err := newResourceParentCapture(tx, source)
+	if err != nil {
+		return nil, err
+	}
+	accounts := []string{account}
+	if user {
+		accounts, err = parents.userMembershipAccounts(ctx, request.id)
+		if err != nil {
+			return nil, err
+		}
+		// Каждый текущий аккаунт входит в те же RR/RC источники и epoch.
+		for _, id := range accounts {
+			if err := parents.captureAccount(ctx, id); err != nil {
+				return nil, err
+			}
+		}
+	}
+	root := domain.ResourceRef{Type: dotted, ID: request.id}
 	result := &metadataGrantCapture{
-		root:    request.catalogRef(),
-		source:  source,
-		account: account,
-		before:  granteffect.MetadataObject{Type: request.typ, ID: request.id, Labels: before, AccessLabels: beforeAccess},
-		after:   granteffect.MetadataObject{Type: request.typ, ID: request.id, Labels: after, AccessLabels: afterAccess},
+		root:     root,
+		source:   source,
+		accounts: accounts,
+		before:   granteffect.MetadataObject{Type: request.typ, ID: request.id, Labels: before, AccessLabels: beforeAccess},
+		after:    granteffect.MetadataObject{Type: request.typ, ID: request.id, Labels: after, AccessLabels: afterAccess},
 	}
 
 	if request.kind == "service_account" {
@@ -383,7 +432,7 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		result.before.CreatorKnown, result.after.CreatorKnown = true, true
 		result.before.Creator, result.after.Creator = creator, creator
 	}
-	result.epoch, err = readMetadataBindingEpoch(ctx, tx, budget, account)
+	result.epoch, err = readMetadataBindingEpoch(ctx, tx, budget, accounts)
 	if err != nil {
 		return nil, err
 	}
@@ -408,14 +457,10 @@ func captureMetadataGrant(ctx context.Context, tx pgx.Tx, bundle *granteffect.Bu
 		}
 		return result, nil
 	}
-	parents, err := newResourceParentCapture(tx, source)
-	if err != nil {
-		return nil, err
-	}
 	if !maps.Equal(beforeAccess, afterAccess) {
 		// Перечитывается вместе с остальными RR-источниками после ожиданий.
 		// Даже пустой результат фиксирует проверенную область.
-		result.retained, err = captureMetadataRetainedRR(ctx, parents, request.catalogRef(), string(projection))
+		result.retained, err = captureMetadataRetainedRR(ctx, parents, root, string(projection))
 		if err != nil {
 			return nil, err
 		}
@@ -531,19 +576,24 @@ func (s *metadataStage) checkMirrorGrantIdentity() error {
 	g := s.grant
 	if g == nil || g.source == nil || g.source.lifetime == nil || !g.source.sealed ||
 		s.plan == nil || s.plan.nativeBudget == nil || g.source.budget != s.plan.nativeBudget ||
-		s.request.catalogType() == "" || g.root != s.request.catalogRef() || s.mirrorAccount == "" || g.account != s.mirrorAccount ||
+		s.request.catalogType() == "" || g.root != s.request.catalogRef() || s.mirrorAccount == "" || (len(g.accounts) != 1 || g.accounts[0] != s.mirrorAccount) ||
 		g.before.Type != s.request.typ || g.after.Type != s.request.typ || g.before.ID != s.request.id || g.after.ID != s.request.id {
 		return kaname.ErrSourceUnconfirmed
 	}
 	return nil
 }
 
-func readMetadataBindingEpoch(ctx context.Context, tx pgx.Tx, budget *relverdict.AdministrativeReadBudget, account string) (string, error) {
-	if err := chargeNativePolicyBudget(budget, 2, 1); err != nil {
+func readMetadataBindingEpoch(ctx context.Context, tx pgx.Tx, budget *relverdict.AdministrativeReadBudget, accounts []string) (string, error) {
+	if err := chargeNativePolicyBudget(budget, 1+len(accounts), 1); err != nil {
 		return "", err
 	}
+	if accounts == nil {
+		// SQL NULL читает сводку всех эпох, а пустой массив — только
+		// масштаб поколения и глобальную строку пустой области.
+		accounts = []string{}
+	}
 	var epoch string
-	err := tx.QueryRow(ctx, `SELECT kaname.authority_binding_epoch_read(ARRAY[$1::text])::text`, account).Scan(&epoch)
+	err := tx.QueryRow(ctx, `SELECT kaname.authority_binding_epoch_read($1::text[])::text`, accounts).Scan(&epoch)
 	return epoch, err
 }
 
@@ -551,7 +601,7 @@ func (c *metadataGrantCapture) recheck(ctx context.Context, w *authorityWriteTx)
 	if err := c.source.lifetime.prepare(w); err != nil {
 		return err
 	}
-	epoch, err := readMetadataBindingEpoch(ctx, w.tx, c.source.budget, c.account)
+	epoch, err := readMetadataBindingEpoch(ctx, w.tx, c.source.budget, c.accounts)
 	if err != nil {
 		return err
 	}

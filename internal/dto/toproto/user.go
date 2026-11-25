@@ -6,6 +6,8 @@ package toproto
 // user.go — Transfer domain.User → *iamv1.User.
 
 import (
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -36,6 +38,22 @@ func (userObj) toPb(u domain.User) (*iamv1.User, error) {
 		Labels:       labelsToStringMap(u.Labels),
 		AccessLabels: labelsToStringMap(u.AccessLabels),
 	}, nil
+}
+
+// MarshalUserOperationResponse кодирует публичное состояние User для ответа
+// операции. Тот же DTO используется при чтении, записи и восстановлении.
+func MarshalUserOperationResponse(u domain.User) (*anypb.Any, error) {
+	msg, err := (userObj{}).toPb(u)
+	if err != nil {
+		return nil, err
+	}
+	// Порядок элементов обеих карт фиксирован. Одна и та же строка
+	// пользователя даёт те же байты при фиксации и восстановлении операции.
+	var response anypb.Any
+	if err := anypb.MarshalFrom(&response, msg, proto.MarshalOptions{Deterministic: true}); err != nil {
+		return nil, err
+	}
+	return &response, nil
 }
 
 func inviteStatusToPb(s domain.InviteStatus) iamv1.User_InviteStatus {

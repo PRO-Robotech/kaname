@@ -5,11 +5,8 @@ package user
 
 // update.go — UpdateUserUseCase (новый публичный UpdateUser RPC, T3.3 D-1a).
 //
-// Единственное mutable поле User через этот Update — `labels` (tenant-facing
-// метки, делающие User label-selectable). Identity-поля hard-immutable:
-// `external_id` (IdP `sub`) и его camelCase-алиас — их наличие в update_mask →
-// sync INVALID_ARGUMENT "externalId is immutable after User.Create" (первым
-// стейтментом, до writer-tx). Мутация async → Operation (как все мутации).
+// Поля личности неизменяемы. Правку accessLabels принимает подготовленный
+// исполнитель, включая смешанную правку обеих карт в одной транзакции.
 //
 // Изменение labels co-commit'ит reconcile-event на own-resource label-change в той
 // же writer-tx (запрет #10) — reconciler ре-оценивает iam.user selector-биндинги
@@ -20,7 +17,11 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/PRO-Robotech/corelib/operations"
@@ -34,19 +35,18 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
-// UpdateUserInput — вход UpdateUser. `Labels` — единственное mutable-поле
-// (flat-форма request'а несет только его). identity-поля User (external_id и пр.)
-// в request не переносятся: их единственный путь — `update_mask`, где они
-// reject'атся как hard-immutable.
+// UpdateUserInput задаёт карты меток и выбор полей для изменения.
 type UpdateUserInput struct {
-	ID         domain.UserID
-	Labels     domain.Labels
-	UpdateMask []string
+	ID           domain.UserID
+	Labels       domain.Labels
+	AccessLabels domain.Labels
+	UpdateMask   []string
 }
 
 // userMutableFields — поля, допустимые в update_mask UpdateUser.
 var userMutableFields = map[string]struct{}{
-	"labels": {},
+	"labels":        {},
+	"access_labels": {},
 }
 
 // userImmutableFields — hard-immutable identity-поля: их наличие в update_mask →
@@ -98,9 +98,10 @@ type ObjectForwardReconciler interface {
 }
 
 type UpdateUserUseCase struct {
-	identityWriter identityWriterSelection
-	repo           Repo
-	opsRepo        operations.Repo
+	identityWriter     identityWriterSelection
+	accessLabelsWriter kaname.UserAccessLabelsWriter
+	repo               Repo
+	opsRepo            operations.Repo
 	// Optional post-commit per-object materializer. A LABEL change flips iam-direct
 	// selector membership, so the object must be re-materialized; nil-safe, the
 	// co-committed reconcile event + periodic sweep remain the backstop.
@@ -127,10 +128,25 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 	if err := shared.ValidateResourceID(string(in.ID), domain.PrefixUser, "user"); err != nil {
 		return nil, err
 	}
-	// update_mask discipline: immutable identity-поле → INVALID_ARGUMENT; unknown →
-	// INVALID_ARGUMENT; пустой mask = full-PATCH над mutable labels.
-	if err := shared.ValidateUpdateMask(in.UpdateMask, userMutableFields, userImmutableFields); err != nil {
+	access := in.AccessLabels
+	if len(access) == 0 {
+		access = nil
+	}
+	mask, access, protected := shared.ResolveAccessLabelsUpdate(in.UpdateMask, access)
+	if err := shared.ValidateUpdateMask(mask, userMutableFields, userImmutableFields); err != nil {
 		return nil, err
+	}
+	var principal operations.Principal
+	if protected {
+		if u.accessLabelsWriter == nil {
+			return nil, status.Error(codes.FailedPrecondition, "Protected accessLabels writer unavailable")
+		}
+		var err error
+		principal, err = authzguard.RequirePublicPrincipalACR(ctx, "1")
+		if err != nil {
+			return nil, err
+		}
+		ctx = operations.WithPrincipal(ctx, principal)
 	}
 
 	rd, err := u.repo.Reader(ctx)
@@ -159,9 +175,13 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 	// применяются ни при каком mask.
 	target := current
 	var changed []string
-	if newLabels, apply := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels); apply && !shared.LabelsEqual(newLabels, current.Labels) {
+	newLabels, applyLabels := shared.ResolveLabelsUpdate(mask, in.Labels)
+	if applyLabels && !shared.LabelsEqual(newLabels, current.Labels) {
 		target.Labels = newLabels
 		changed = append(changed, "labels")
+	}
+	if protected {
+		target.AccessLabels = access
 	}
 	if err := target.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
@@ -173,10 +193,45 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 		domain.PrefixOperationIAM,
 		fmt.Sprintf("Update user %s", in.ID),
 		// account_id from the loaded user → account-scoped operation listing.
-		&iamv1.UpdateUserMetadata{UserId: string(in.ID), AccountId: string(current.AccountID)},
+		&iamv1.UpdateUserMetadata{UserId: string(in.ID), AccountId: string(current.AccountID), ProtectedLabels: protected},
 	)
 	if err != nil {
 		return nil, err
+	}
+	if protected {
+		// В подготовку идут только выбранные поля. OLD и фактическую дельту
+		// исполнитель определяет заново после ожиданий, в том числе для no-op.
+		writer := u.accessLabelsWriter
+		labels, accessLabels := maps.Clone(newLabels), maps.Clone(access)
+		op.ResourceID = string(in.ID)
+		if err := writer.CreateUserAccessLabelsOperation(ctx, op); err != nil {
+			return nil, shared.MapRepoErrAt(ctx, err)
+		}
+		subject := domain.Subject{Type: domain.SubjectType(principal.Type), ID: domain.SubjectID(principal.ID)}
+		workerOps := &userAccessLabelsOperationRepo{Repo: u.opsRepo}
+		operations.Run(ctx, workerOps, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+			caller, verified := authzguard.VerifiedPublicPrincipal(ctx)
+			if !verified || caller.Type != principal.Type || caller.ID != principal.ID {
+				return nil, authzguard.PermissionDenied()
+			}
+			committed, changed, err := writer.UpdateUserAccessLabels(ctx, in.ID, labels, accessLabels, subject, op)
+			if err != nil {
+				return nil, shared.MapRepoErrAt(ctx, err)
+			}
+			var updated iamv1.User
+			if committed.ID != op.ID || !committed.Done || committed.Error != nil ||
+				committed.Principal.Type != op.Principal.Type || committed.Principal.ID != op.Principal.ID ||
+				committed.ResourceID != op.ResourceID || !proto.Equal(committed.Metadata, op.Metadata) ||
+				committed.Response == nil || committed.Response.UnmarshalTo(&updated) != nil || updated.GetId() != string(in.ID) {
+				return nil, status.Error(codes.Internal, "cannot confirm committed user metadata")
+			}
+			workerOps.committed = committed
+			if changed {
+				u.reconcileUpdatedLabels(ctx, in.ID)
+			}
+			return committed.Response, nil
+		})
+		return &op, nil
 	}
 	if err := u.opsRepo.Create(ctx, op); err != nil {
 		return nil, err
@@ -187,6 +242,29 @@ func (u *UpdateUserUseCase) Execute(ctx context.Context, in UpdateUserInput) (*o
 		return u.doUpdate(ctx, in.ID, labelsCopy, actor, changedCopy)
 	})
 	return &op, nil
+}
+
+// Адаптер для одного worker передаёт стандартные claim и запись ошибок.
+// Успех уже закоммичен вместе с метками, поэтому повторный CAS ему не нужен.
+type userAccessLabelsOperationRepo struct {
+	operations.Repo
+	committed operations.Operation
+}
+
+func (r *userAccessLabelsOperationRepo) ClaimForExecution(ctx context.Context, id string) (bool, error) {
+	if claimer, ok := r.Repo.(interface {
+		ClaimForExecution(context.Context, string) (bool, error)
+	}); ok {
+		return claimer.ClaimForExecution(ctx, id)
+	}
+	return true, nil
+}
+
+func (r *userAccessLabelsOperationRepo) MarkDone(_ context.Context, id string, response *anypb.Any) error {
+	if r.committed.Done && r.committed.ID == id && proto.Equal(r.committed.Response, response) {
+		return nil
+	}
+	return kaname.ErrSourceUnconfirmed
 }
 
 // doUpdate applies the mutation in one writer-tx and, when the change can flip
@@ -252,16 +330,22 @@ func (u *UpdateUserUseCase) doUpdate(ctx context.Context, id domain.UserID, labe
 	// ReconcileObjectForward is the same entry point the cross-service register path
 	// uses: its delete-stale guard finds the existing members and delegates to the FULL
 	// ReconcileObject, which is what actually revokes a now-unmatched grant.
-	if labelsChanged(changed) && u.reconciler != nil {
-		uid := string(updated.ID)
-		shared.GoPostCommit(ctx, u.logger, "user label re-materialization", func(ctx context.Context) {
-			if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.user", uid); rerr != nil && u.logger != nil {
-				u.logger.Error("user update: label re-materialization failed (reconcile event + sweep will retry)",
-					"user_id", uid, "err", rerr)
-			}
-		})
+	if labelsChanged(changed) {
+		u.reconcileUpdatedLabels(ctx, updated.ID)
 	}
 	return marshalUser(updated)
+}
+
+func (u *UpdateUserUseCase) reconcileUpdatedLabels(ctx context.Context, id domain.UserID) {
+	if u.reconciler == nil {
+		return
+	}
+	shared.GoPostCommit(ctx, u.logger, "user label re-materialization", func(ctx context.Context) {
+		if err := u.reconciler.ReconcileObjectForward(ctx, "iam.user", string(id)); err != nil && u.logger != nil {
+			u.logger.Error("user update: label re-materialization failed (reconcile event + sweep will retry)",
+				"user_id", id, "err", err)
+		}
+	})
 }
 
 // labelsChanged reports whether "labels" is among the changed fields of a User.Update.

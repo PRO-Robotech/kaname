@@ -4,17 +4,12 @@
 package user
 
 import (
-	"fmt"
-
 	"google.golang.org/protobuf/types/known/anypb"
 
-	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
-
 	"github.com/PRO-Robotech/kaname/internal/domain"
-	"github.com/PRO-Robotech/kaname/internal/dto"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 
-	_ "github.com/PRO-Robotech/kaname/internal/dto/toproto"
+	"github.com/PRO-Robotech/kaname/internal/dto/toproto"
 )
 
 // pendingRefusal — отказ на строке приглашения, которое ещё никто не подтвердил.
@@ -34,11 +29,7 @@ func pendingRefusal(id domain.UserID) error {
 }
 
 func marshalUser(u domain.User) (*anypb.Any, error) {
-	var dst *iamv1.User
-	if err := dto.Transfer(dto.FromTo(u, &dst)); err != nil {
-		return nil, fmt.Errorf("dto.Transfer User: %w", err)
-	}
-	return anypb.New(dst)
+	return toproto.MarshalUserOperationResponse(u)
 }
 
 // labelsFromProto converts a protobuf label map into domain.Labels (parity with

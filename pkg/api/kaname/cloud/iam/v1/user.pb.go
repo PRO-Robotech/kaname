@@ -352,9 +352,11 @@ type UpdateUserMetadata struct {
 	UserId string `protobuf:"bytes,1,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	// Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
 	// `DeleteUserMetadata`.
-	AccountId     string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AccountId string `protobuf:"bytes,2,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	// Успех фиксируется в той же транзакции, что и правка защищённых меток.
+	ProtectedLabels bool `protobuf:"varint,3,opt,name=protected_labels,json=protectedLabels,proto3" json:"protected_labels,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *UpdateUserMetadata) Reset() {
@@ -399,6 +401,13 @@ func (x *UpdateUserMetadata) GetAccountId() string {
 		return x.AccountId
 	}
 	return ""
+}
+
+func (x *UpdateUserMetadata) GetProtectedLabels() bool {
+	if x != nil {
+		return x.ProtectedLabels
+	}
+	return false
 }
 
 type BlockUserMetadata struct {
@@ -825,11 +834,12 @@ const file_kaname_cloud_iam_v1_user_proto_rawDesc = "" +
 	"\x12DeleteUserMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId\"L\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\"w\n" +
 	"\x12UpdateUserMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +
-	"account_id\x18\x02 \x01(\tR\taccountId\"K\n" +
+	"account_id\x18\x02 \x01(\tR\taccountId\x12)\n" +
+	"\x10protected_labels\x18\x03 \x01(\bR\x0fprotectedLabels\"K\n" +
 	"\x11BlockUserMetadata\x12\x17\n" +
 	"\auser_id\x18\x01 \x01(\tR\x06userId\x12\x1d\n" +
 	"\n" +

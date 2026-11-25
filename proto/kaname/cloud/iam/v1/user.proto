@@ -198,6 +198,9 @@ message UpdateUserMetadata {
   // Аккаунт из легаси-колонки `users.account_id` — см. общую шапку над
   // `DeleteUserMetadata`.
   string account_id = 2;
+
+  // Успех фиксируется в той же транзакции, что и правка защищённых меток.
+  bool protected_labels = 3;
 }
 
 message BlockUserMetadata {

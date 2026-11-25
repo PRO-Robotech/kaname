@@ -17,6 +17,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	repouser "github.com/PRO-Robotech/kaname/internal/repo/kaname/user"
 )
 
@@ -142,16 +143,24 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListUsersRequest) (*iamv1
 	return &iamv1.ListUsersResponse{Users: out, NextPageToken: next}, nil
 }
 
-// Update — публичный UpdateUser RPC. Тонкий transport: parse → use-case →
-// format. Request — flat-форма: единственное mutable-поле `labels` лежит на
-// верхнем уровне (паритет с UpdateRole/ServiceAccount/AccessBinding). labels-
-// валидация и update_mask discipline — в use-case. Async → Operation.
+// WithUserAccessLabelsWriter подключает установленный контракт защищённой записи.
+func (h *Handler) WithUserAccessLabelsWriter(w kaname.UserAccessLabelsWriter) *Handler {
+	h.update.accessLabelsWriter = w
+	return h
+}
+
+// Update передаёт обе карты и маску в сценарий изменения пользователя.
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateUserRequest) (*operationpb.Operation, error) {
-	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
-		return nil, err
+	if h.update == nil || h.update.accessLabelsWriter == nil {
+		if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+			return nil, err
+		}
 	}
 	in := UpdateUserInput{
 		ID: domain.UserID(req.GetUserId()),
+	}
+	if len(req.GetAccessLabels()) > 0 {
+		in.AccessLabels = labelsFromProto(req.GetAccessLabels())
 	}
 	if labels := req.GetLabels(); labels != nil {
 		in.Labels = labelsFromProto(labels)
