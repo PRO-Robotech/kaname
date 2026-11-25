@@ -18,16 +18,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
-	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
+	"github.com/PRO-Robotech/kaname/internal/service"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/installruntime"
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 )
 
-// Два процесса Kaname используют одну подготовленную модель полномочий gen1.
+// Два процесса Kaname используют одну опубликованную модель полномочий FULL.
 // Владелец миграций задаёт тестовые определения меток и исходный допуск apply.
 // Записи меток и все решения проверяются через штатный TLS API.
 func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
@@ -35,7 +34,7 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 		t.Skip("NOT_EXECUTED: requires an explicitly leased native access-label acceptance job and KANAME_RID_* frozen artifacts")
 	}
 	f := newInstallationNativeWorldConfigured(t, 7200, "", false, false, nativeWorldOptions{boundedPostgres: true})
-	ctx := f.given.ctx
+	ctx, pool := f.given.ctx, f.given.pool
 	reader := &ceremonyWorld{t: t, id: "ACCESS-LABEL-NATIVE-READER", ctx: ctx, pool: f.given.pool, logs: &lockedBuffer{}, clientAudiences: []string{"https://kaname.local"}}
 	reader.seedPerson()
 	reader.markPerson()
@@ -49,23 +48,25 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 	stop, cancel := context.WithTimeout(ctx, 20*time.Second)
 	require.NoError(t, f.session.Stop(stop))
 	cancel()
-	// Первый процесс работает до подготовки модели gen1. Останавливаем его до
-	// исходной настройки полномочий, чтобы он не увидел промежуточную схему.
-	seedNativeAccessLabelApplySource(t, f)
+	// Исходный процесс уже выпустил удостоверение читателя. Готовим FULL
+	// и публикуем модель до старта обеих реплик.
 	before, headBefore := nativeAccessLabelMigrationRows(t, f)
-	connectionA := provisionNativeRuntime(t, f, filepath.Join(f.session.Root, "writer-a-runtime-grants.log"))
-	nativeAccessLabelBootstrap(t, f, connectionA.User)
-	// Подключаем второй LOGIN к той же подготовленной модели.
-	connectionB := provisionNativeRuntime(t, f, filepath.Join(f.session.Root, "reader-b-runtime-grants.log"))
-	require.NotEqual(t, connectionA.User, connectionB.User)
+	nativeAccessLabelBootstrap(t, f)
+	primary := provisionNativeRuntime(t, f, filepath.Join(f.session.Root, "account-runtime-grants.log"))
+	executor := primary.Copy()
+	executor.User, executor.Password = fullStartupRestrictedLogin(t, ctx, pool)
+	f.secrets = append(f.secrets, executor.Password)
+	_, err = pool.Exec(ctx, `SELECT kaname.authority_role_actor_login_configure_v1($1::regrole,$2::regrole)`, primary.User, executor.User)
+	require.NoError(t, err)
 	replicas := []*nativeAccessLabelReplica{
-		startNativeAccessLabelReplica(t, f, "writer-a", installruntime.DefaultNativePorts(), connectionA, nil),
-		startNativeAccessLabelReplica(t, f, "reader-b", installruntime.SecondNativePorts(), connectionB, nil),
+		startNativeAccessLabelReplica(t, f, "writer-a", installruntime.DefaultNativePorts(), primary, executor),
+		startNativeAccessLabelReplica(t, f, "reader-b", installruntime.SecondNativePorts(), primary, executor),
 	}
 	require.NotEqual(t, replicas[0].pid, replicas[1].pid)
 	// Начальная запись меток начинается после штатного пересчёта проекций.
 	ridAwaitRoleProjectionsAt(t, ctx, replicas[0].process, "account-labels-replica-a")
 	ridAwaitRoleProjectionsAt(t, ctx, replicas[1].process, "account-labels-replica-b")
+	f.renewOperator(t, ctx)
 	continuing := func() {
 		for _, r := range replicas {
 			r.assertContinuing(t)
@@ -74,13 +75,26 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 	continuing()
 	a, b := replicas[0].wire, replicas[1].wire
 	root := f.tenantID
-	mutation := func(stage, method, path string, body any) installruntime.Operation {
+	mutation := func(writer, observer *installruntime.Wire, stage, method, path string, body any) installruntime.Operation {
 		t.Helper()
+		bearer := f.operator.Bearer()
+		var raw json.RawMessage
+		code, e := writer.JSON(ctx, method, path, bearer, body, &raw)
+		if code != 0 && code != http.StatusOK {
+			var failure struct {
+				Code *int `json:"code"`
+			}
+			if json.Unmarshal(raw, &failure) == nil && failure.Code != nil {
+				t.Fatalf("этап %s: HTTP %d, код gRPC %d", stage, code, *failure.Code)
+			}
+			t.Fatalf("этап %s: HTTP %d", stage, code)
+		}
+		require.NoError(t, e, "этап %s", stage)
+		require.Equal(t, http.StatusOK, code, "этап %s", stage)
 		var op installruntime.Operation
-		code, e := a.JSON(ctx, method, path, f.operator.Bearer(), body, &op)
-		require.NoError(t, e)
-		require.Equal(t, http.StatusOK, code)
-		op, e = a.AwaitOperation(ctx, f.operator.Bearer(), op)
+		require.NoError(t, json.Unmarshal(raw, &op), "этап %s", stage)
+		require.NotEmpty(t, op.ID, "этап %s", stage)
+		op, e = observer.AwaitOperation(ctx, bearer, installruntime.Operation{ID: op.ID})
 		if e != nil && op.Error != nil {
 			recordNativeAccessLabelMutationFailure(t, f, stage, op.ID)
 		}
@@ -90,12 +104,12 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 		continuing()
 		return op
 	}
-	mutation("initial-labels", http.MethodPatch, "/iam/v1/accounts/"+url.PathEscape(root), map[string]any{
+	mutation(a, b, "initial-labels", http.MethodPatch, "/iam/v1/accounts/"+url.PathEscape(root), map[string]any{
 		"accountId": root, "accessLabels": map[string]string{"team": "before", "keep": "yes"}, "updateMask": "accessLabels",
 	})
-	makeBinding := func(name, key, value string) string {
+	makeBinding := func(writer, observer *installruntime.Wire, name, key, value string) string {
 		t.Helper()
-		op := mutation("create-selector-role", http.MethodPost, "/iam/v1/roles", map[string]any{
+		op := mutation(writer, observer, "create-selector-role", http.MethodPost, "/iam/v1/roles", map[string]any{
 			"name": name, "definitionTier": map[string]string{"tierType": "iam.account", "tierId": root},
 			"rules": []any{map[string]any{"module": "iam", "resources": []string{"account"}, "verbs": []string{"get"}, "matchAccessLabels": map[string]string{key: value}}},
 		})
@@ -104,7 +118,7 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 		}
 		require.NoError(t, json.Unmarshal(op.Metadata, &role))
 		require.NotEmpty(t, role.ID)
-		op = mutation("create-selector-binding", http.MethodPost, "/iam/v1/accessBindings", map[string]any{
+		op = mutation(writer, observer, "create-selector-binding", http.MethodPost, "/iam/v1/accessBindings", map[string]any{
 			"subjects": []any{map[string]string{"type": "SUBJECT_TYPE_USER", "id": string(reader.user)}},
 			"roleId":   role.ID, "scopeType": "iam.account", "scopeId": root,
 			"target": map[string]any{"resources": map[string]any{"resources": []any{map[string]string{"type": "iam.account", "id": root}}}},
@@ -116,8 +130,8 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 		require.NotEmpty(t, binding.ID)
 		return binding.ID
 	}
-	losing := makeBinding("replica_old_reader", "team", "before")
-	keeping := makeBinding("replica_keep_reader", "keep", "yes")
+	losing := makeBinding(a, b, "replica_old_reader", "team", "before")
+	keeping := makeBinding(b, a, "replica_keep_reader", "keep", "yes")
 	require.NotEqual(t, losing, keeping)
 	// До первого чтения на втором экземпляре проверяем обе материализованные
 	// привязки и обоих держателей выдачи.
@@ -336,98 +350,49 @@ func nativeAccessLabelMigrationRows(t *testing.T, f *installationNativeWorld) ([
 	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT COALESCE(jsonb_agg(to_jsonb(v) ORDER BY id),'[]'::jsonb),COALESCE(max(version_id) FILTER (WHERE is_applied),0) FROM goose_db_version v`).Scan(&rows, &head))
 	return rows, head
 }
-func nativeAccessLabelBootstrap(t *testing.T, f *installationNativeWorld, runtimeRole string) {
+func nativeAccessLabelBootstrap(t *testing.T, f *installationNativeWorld) {
 	t.Helper()
-	path := filepath.Join(f.session.Root, "metadata-owner.yaml")
-	require.NoError(t, os.WriteFile(path, []byte("{}\n"), 0600))
-	env := nativeAccessLabelEnvironment(f.session.Environment, map[string]string{"KANAME_CONFIG_PATH": path})
-	binary := os.Getenv("KANAME_RID_MIGRATOR")
-	_ = nativeAccessLabelDigest(t, binary)
-	log, err := os.OpenFile(filepath.Join(f.session.Root, "metadata-bootstrap.log"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+	ctx, pool := f.given.ctx, f.given.pool
+	owner := kanamepg.New(pool, nil)
+	// Исходный аккаунт вставлен фикстурой. Проводим его связи через
+	// штатный журнал, как при создании аккаунта.
+	account := domain.Account{ID: domain.AccountID(f.tenantID), OwnerUserID: f.given.user}
+	writer, err := owner.Writer(ctx)
 	require.NoError(t, err)
-	ctx, cancel := context.WithTimeout(f.given.ctx, 45*time.Second)
-	defer cancel()
-	// #nosec G204 -- Зафиксированный тестовый бинарник и постоянная подкоманда, без shell.
-	cmd := exec.CommandContext(ctx, binary, "authority-bundle", "bootstrap", "--image-only", "--runtime-role", runtimeRole)
-	cmd.Dir, cmd.Env, cmd.Stdout, cmd.Stderr = f.session.Root, env, log, log
-	err = cmd.Run()
-	closeErr := log.Close()
-	require.NoError(t, closeErr)
-	require.NoError(t, err, "actual metadata bootstrap; see private metadata-bootstrap.log")
-	var prepared bool
-	require.NoError(t, f.given.pool.QueryRow(f.given.ctx, `SELECT a.phase='prepared' AND p.enforcement='compatibility'
- AND c.required_contract=1 AND c.staged_contract=1
- FROM kaname.authority_semantic_identity a CROSS JOIN kaname.authority_writer_protocol p CROSS JOIN kaname.authority_writer_contract c
- WHERE a.singleton AND p.singleton AND c.singleton`).Scan(&prepared))
-	require.True(t, prepared)
-}
+	defer func() { _ = writer.Rollback(context.WithoutCancel(ctx)) }()
+	var tuples []service.RelationTuple
+	for _, fact := range account.StructuralFacts() {
+		tuples = append(tuples, service.RelationTuple{User: fact.User, Relation: fact.Relation, Object: fact.Object})
+	}
+	require.NoError(t, writer.EmitFGARelationWrite(ctx, tuples))
+	require.NoError(t, writer.Commit(ctx))
 
-// Тестовые определения и полномочие apply создаются до handoff тем же
-// способом, что в seedMetadataActualApplySource.
-func seedNativeAccessLabelApplySource(t *testing.T, f *installationNativeWorld) {
-	t.Helper()
-	ctx := f.given.ctx
-	var uninitialized bool
-	require.NoError(t, f.given.pool.QueryRow(ctx, `SELECT a.phase='uninitialized' AND NOT EXISTS(SELECT 1 FROM kaname.authority_bundle_handoff)
- FROM kaname.authority_semantic_identity a WHERE singleton`).Scan(&uninitialized))
-	require.True(t, uninitialized, "Given must precede the authority handoff")
-	var definitions []string
+	var definitions []kanamepg.AccessLabelDeclarationResult
 	for _, d := range []struct {
 		key    string
 		values []string
 	}{{"team", []string{"before", "after"}}, {"keep", []string{"yes", "no"}}} {
-		var id string
-		require.NoError(t, f.given.pool.QueryRow(ctx, `INSERT INTO kaname.authority_access_label_definition(scope_kind,scope_id,module,resource,label_key)
-   VALUES('account',$1,'iam','account',$2) RETURNING id::text`, f.tenantID, d.key).Scan(&id))
-		for _, value := range d.values {
-			_, err := f.given.pool.Exec(ctx, `INSERT INTO kaname.authority_access_label_value(definition_id,label_value) VALUES($1::uuid,$2)`, id, value)
-			require.NoError(t, err)
-		}
-		definitions = append(definitions, id)
+		definition, err := owner.AddAccessLabelValues(ctx, kanamepg.AccessLabelDeclaration{
+			Account: f.tenantID, Module: "iam", Resource: "account", Key: d.key, Values: d.values,
+		})
+		require.NoError(t, err)
+		definitions = append(definitions, definition)
 	}
-	_, bundle := fullStartupTestBundle(t, ctx, f.given.pool)
-	source := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(f.tenantID), Name: "native_metadata_apply",
-		Rules: domain.Rules{{Module: "iam", Resources: []string{"accessLabel"}, Verbs: []string{"apply"}, ResourceNames: definitions}}}
-	ordinary, caps, err := domain.SplitGrantCapabilityRules(source.Rules)
-	require.NoError(t, err)
-	require.Len(t, caps, 2)
-	source.Permissions, err = domain.CompileRules(ordinary)
-	require.NoError(t, err)
-	projection, err := bundle.Projection(source)
-	require.NoError(t, err)
-	seed, err := kanamepg.New(f.given.pool, nil).Writer(ctx)
-	require.NoError(t, err)
-	defer func() { _ = seed.Rollback(context.WithoutCancel(ctx)) }()
-	_, err = seed.RolesW().Insert(ctx, source)
-	require.NoError(t, err)
-	require.NoError(t, seed.RolesW().ReplaceRuleSelectors(ctx, source.ID, projection.Selectors))
-	require.NoError(t, seed.RolesW().ReplaceRoleVerbs(ctx, source.ID, projection.Verbs))
-	subject := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(f.given.user)}
-	binding, err := bindingset.Insert(ctx, seed.AccessBindingsW(), domain.AccessBinding{
-		ID: domain.AccessBindingID(ids.NewID("acb")), SubjectType: subject.Type, SubjectID: subject.ID, Subjects: []domain.Subject{subject},
-		RoleID: source.ID, ResourceType: "account", ResourceID: f.tenantID, Scope: domain.DeriveFromResourceType("account"), Status: domain.AccessBindingStatusActive, Target: domain.AccessTarget{AllInScope: true},
-	})
-	require.NoError(t, err)
-	require.NoError(t, seed.Commit(ctx))
-	private, err := f.given.pool.Begin(ctx)
-	require.NoError(t, err)
-	defer func() { _ = private.Rollback(context.WithoutCancel(ctx)) }()
-	_, err = private.Exec(ctx, `UPDATE kaname.access_bindings SET grant_capability_version=1 WHERE id=$1`, binding.ID)
-	require.NoError(t, err)
-	_, err = private.Exec(ctx, `ALTER TABLE kaname.authority_role_access_label_rule DISABLE TRIGGER authority_role_access_label_rule_closed`)
-	require.NoError(t, err)
-	for _, cap := range caps {
-		_, err = private.Exec(ctx, `INSERT INTO kaname.authority_role_access_label_rule(role_id,rule_fp,definition_id) VALUES($1,$2,$3::uuid)`, source.ID, cap.RuleFP, string(cap.DefinitionID))
+	_, bundle := fullStartupTestBundle(t, ctx, pool)
+	require.NoError(t, owner.StageFullAuthorityBundle(ctx, bundle))
+	require.NoError(t, owner.ActivateFullAuthorityBundle(ctx, bundle))
+	for _, definition := range definitions {
+		_, err := owner.IssueInitialAccessLabelApply(ctx, kanamepg.InitialAccessLabelApply{
+			Account: f.tenantID, DefinitionID: domain.AccessLabelDefinitionID(definition.ID), ExpectedRevision: definition.Revision,
+		}, bundle)
 		require.NoError(t, err)
 	}
-	_, err = private.Exec(ctx, `ALTER TABLE kaname.authority_role_access_label_rule ENABLE TRIGGER authority_role_access_label_rule_closed`)
-	require.NoError(t, err)
-	require.NoError(t, private.Commit(ctx))
-	var exact bool
-	require.NoError(t, f.given.pool.QueryRow(ctx, `SELECT
-  (SELECT count(*) FROM kaname.authority_role_access_label_rule WHERE role_id=$1)=2
-  AND (SELECT grant_capability_version=1 FROM kaname.access_bindings WHERE id=$2)
-  AND EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='kaname.authority_role_access_label_rule'::regclass
-   AND tgname='authority_role_access_label_rule_closed' AND tgenabled='O')`, source.ID, binding.ID).Scan(&exact))
-	require.True(t, exact)
+
+	ownerFile := filepath.Join(f.session.Root, "account-publication-owner.yaml")
+	require.NoError(t, os.WriteFile(ownerFile, []byte("{}\n"), 0600))
+	migrator := os.Getenv("KANAME_RID_MIGRATOR")
+	_ = publicationNativeDigest(t, migrator)
+	bootstrap := startPublicationOwnerCommand(t, ctx, f.session.Root, "account-publication", publicationNativeEnvironment(f.session.Environment,
+		map[string]string{"KANAME_CONFIG_PATH": ownerFile}), migrator, "authority-bundle", "bootstrap-publication", "--image-only")
+	bootstrap.await(t, 90*time.Second)
 }
