@@ -126,15 +126,29 @@ func TestInitialRegistrationSpecializesHeldBinding(t *testing.T) {
 		delta := completeMetadata(t, bundle.CompileInitialRegistrationBinding(b, image))
 		require.Empty(t, delta.Before.Effects())
 		require.NotEmpty(t, delta.After.Effects())
+		var own, descendant bool
 		for _, effect := range delta.After.Effects() {
-			require.Equal(t, "strange_item", effect.Type)
-			require.Len(t, effect.Constraints, 2)
-			child, parent := effect.Constraints[0], effect.Constraints[1]
-			require.Equal(t, grantcoverage.AllObjects, child.Region.Objects.Kind)
-			require.Equal(t, []authzmodel.EffectHop{{From: "strange_item", Pointer: "parent", To: "strange_box"}}, parent.Path)
-			require.Equal(t, []string{image.Root.ID}, parent.Region.Objects.IDs)
-			require.Equal(t, protected.MatchAccessLabels, parent.Region.AccessLabels)
+			switch effect.Type {
+			case "strange_box":
+				own = true
+				require.Len(t, effect.Constraints, 1)
+				require.Empty(t, effect.Constraints[0].Path)
+				require.Equal(t, []string{image.Root.ID}, effect.Constraints[0].Region.Objects.IDs)
+				require.Equal(t, protected.MatchAccessLabels, effect.Constraints[0].Region.AccessLabels)
+			case "strange_item":
+				descendant = true
+				require.Len(t, effect.Constraints, 2)
+				child, parent := effect.Constraints[0], effect.Constraints[1]
+				require.Equal(t, grantcoverage.AllObjects, child.Region.Objects.Kind)
+				require.Equal(t, []authzmodel.EffectHop{{From: "strange_item", Pointer: "parent", To: "strange_box"}}, parent.Path)
+				require.Equal(t, []string{image.Root.ID}, parent.Region.Objects.IDs)
+				require.Equal(t, protected.MatchAccessLabels, parent.Region.AccessLabels)
+			default:
+				t.Fatalf("неожиданный тип эффекта %q", effect.Type)
+			}
 		}
+		require.True(t, own, "собственный глагол контейнера")
+		require.True(t, descendant, "вложенный глагол потомка")
 	})
 
 	t.Run("other-key-map-target-and-scope-do-not-match", func(t *testing.T) {
