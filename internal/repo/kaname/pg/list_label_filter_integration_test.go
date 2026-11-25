@@ -28,21 +28,22 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 	repo := kanamepg.New(pool, nil)
 
 	owner := mustSeedUser(t, ctx, pool, "l1043")
+	otherOwner := mustSeedUser(t, ctx, pool, "l1043-other")
 	missing := seedAccount(t, ctx, repo, "acc-l1043-missing", owner)
 	wr, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	defer func() { _ = wr.Rollback(ctx) }()
-	insert := func(name, value string) domain.AccountID {
+	insert := func(owner domain.UserID, name, value string) domain.AccountID {
 		account := newAccount(name, owner)
 		account.Labels = domain.Labels{"team/platform@v2": domain.LabelVal(value), "env": "dev"}
 		out, err := wr.AccountsW().Insert(ctx, account)
 		require.NoError(t, err)
 		return out.ID
 	}
-	first := insert("acc-l1043-first", "")
-	second := insert("acc-l1043-second", "")
-	nonempty := insert("acc-l1043-nonempty", "dev")
-	insert("acc-l1043-outside", "")
+	first := insert(owner, "acc-l1043-first", "")
+	second := insert(owner, "acc-l1043-second", "")
+	nonempty := insert(otherOwner, "acc-l1043-nonempty", "dev")
+	insert(otherOwner, "acc-l1043-outside", "")
 	require.NoError(t, wr.Commit(ctx))
 
 	rd, err := repo.Reader(ctx)
