@@ -31,16 +31,23 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	r, owner := writerProtocolRigBeforePreparation(t)
 	actorID := bindingPublicOwner(t, r)
 	actor := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(actorID)}
-	var definition string
-	require.NoError(t, r.admin.QueryRow(r.ctx, `INSERT INTO kaname.authority_access_label_definition
- (scope_kind,scope_id,module,resource,label_key) VALUES('account',$1,'vpc','network','team') RETURNING id::text`, r.a).Scan(&definition))
-	_, err := r.admin.Exec(r.ctx, `INSERT INTO kaname.authority_access_label_value(definition_id,label_value)
- VALUES($1::uuid,'after')`, definition)
-	require.NoError(t, err)
+	declare := func(key, value string) string {
+		t.Helper()
+		var definition string
+		require.NoError(t, r.admin.QueryRow(r.ctx, `INSERT INTO kaname.authority_access_label_definition
+ (scope_kind,scope_id,module,resource,label_key) VALUES('account',$1,'vpc','network',$2) RETURNING id::text`, r.a, key).Scan(&definition))
+		_, err := r.admin.Exec(r.ctx, `INSERT INTO kaname.authority_access_label_value(definition_id,label_value)
+ VALUES($1::uuid,$2)`, definition, value)
+		require.NoError(t, err)
+		return definition
+	}
+	definition := declare("team", "after")
+	// Второй ключ объявлен с допустимым значением, но без apply у актора.
+	declare("restricted", "on")
 	seedMetadataActualApplySource(t, r, actorID, definition)
 	require.NoError(t, owner.PrepareAuthorityBundle(r.ctx, r.bundle))
 	w := metadataFixtureModeWithRig(t, false, "prepared", r)
-	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror
+	_, err := r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror
  (object_type,object_id,parent_account_id,parent_project_id,source_version)
  VALUES ($1,$2,$3,$4,'2026-11-14T10:00:00Z'),('compute.instance',$2,$3,$4,DEFAULT)`, dotted, id, r.a, string(w.project.ID))
 	require.NoError(t, err)
@@ -181,11 +188,12 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	var storedAccount string
 	require.NoError(t, r.runtime.QueryRow(ctx, `SELECT account_id FROM ONLY kaname.operations WHERE id=$1`, done.ID).Scan(&storedAccount))
 	require.Equal(t, r.a, storedAccount)
-	var initial, final struct {
+	type mirrorState struct {
 		Mirror           [][]json.RawMessage
 		Binding          json.RawMessage
 		Audit, Reconcile int
 	}
+	var initial, final mirrorState
 	require.NoError(t, json.Unmarshal(before, &initial))
 	require.NoError(t, json.Unmarshal(readState(), &final))
 	require.Equal(t, initial.Audit+1, final.Audit)
@@ -193,15 +201,73 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	require.JSONEq(t, string(initial.Binding), string(final.Binding))
 	require.Len(t, final.Mirror, 2)
 	require.Equal(t, initial.Mirror[0], final.Mirror[0], "физическая строка compute.instance с тем же id")
-	var stored struct {
+	type mirrorLabels struct {
 		Labels       map[string]string `json:"labels"`
 		AccessLabels map[string]string `json:"access_labels"`
 	}
+	var stored mirrorLabels
 	require.NoError(t, json.Unmarshal(final.Mirror[1][2], &stored))
 	require.Equal(t, actual.Labels, stored.Labels)
 	require.Equal(t, actual.AccessLabels, stored.AccessLabels)
 	t.Run("ordinary-and-noop-after-protected", func(t *testing.T) {
 		exerciseOrdinaryMirrorOperation(t, r, w.factory, root, ctx, principal)
+	})
+	t.Run("update-and-apply-to-another-key-do-not-authorize-write", func(t *testing.T) {
+		before := readState()
+		deniedWriter := &metadataOperationProbe{writer: adapter, ops: ops}
+		update, err := resourceapi.NewUpdateUseCase(deniedWriter, ops)
+		require.NoError(t, err)
+		denied := resourceapi.UpdateInput{
+			ResourceType: dotted, ResourceID: id,
+			AccessLabels: domain.Labels{"team": "after", "restricted": "on"}, UpdateMask: []string{"access_labels"},
+		}
+		op, err := update.Execute(ctx, denied)
+		require.Equal(t, codes.PermissionDenied, status.Code(err))
+		require.Nil(t, op)
+		require.Equal(t, 1, deniedWriter.calls)
+		failed, err := ops.GetOwned(ctx, deniedWriter.id, operations.OwnerFromPrincipal(principal))
+		require.NoError(t, err)
+		require.True(t, failed.Done)
+		require.Nil(t, failed.Response)
+		require.NotNil(t, failed.Error)
+		require.Equal(t, int32(codes.PermissionDenied), failed.Error.Code)
+		require.JSONEq(t, string(before), string(readState()))
+	})
+	t.Run("clear-with-update-and-exact-apply", func(t *testing.T) {
+		var before, after mirrorState
+		require.NoError(t, json.Unmarshal(readState(), &before))
+		update, err := resourceapi.NewUpdateUseCase(adapter, ops)
+		require.NoError(t, err)
+		op, err := update.Execute(ctx, resourceapi.UpdateInput{
+			ResourceType: dotted, ResourceID: id, UpdateMask: []string{"access_labels"},
+		})
+		require.NoError(t, err)
+		require.NotNil(t, op)
+		require.True(t, op.Done)
+		require.Nil(t, op.Error)
+		saved, err := ops.GetOwned(ctx, op.ID, operations.OwnerFromPrincipal(principal))
+		require.NoError(t, err)
+		require.True(t, proto.Equal(operationspb.ToProto(op), operationspb.ToProto(saved)))
+		var response iamv1.ResourceMetadata
+		require.NoError(t, saved.Response.UnmarshalTo(&response))
+		require.Equal(t, dotted, response.GetResourceType())
+		require.Equal(t, id, response.GetResourceId())
+		require.Empty(t, response.GetAccessLabels())
+
+		require.NoError(t, json.Unmarshal(readState(), &after))
+		require.Len(t, before.Mirror, 2)
+		require.Len(t, after.Mirror, 2)
+		require.Equal(t, before.Mirror[0], after.Mirror[0])
+		require.JSONEq(t, string(before.Binding), string(after.Binding))
+		require.Equal(t, before.Audit+1, after.Audit)
+		require.Equal(t, before.Reconcile+1, after.Reconcile)
+		var oldMetadata, newMetadata mirrorLabels
+		require.NoError(t, json.Unmarshal(before.Mirror[1][2], &oldMetadata))
+		require.NoError(t, json.Unmarshal(after.Mirror[1][2], &newMetadata))
+		require.Equal(t, map[string]string{"team": "after"}, oldMetadata.AccessLabels)
+		require.Equal(t, map[string]string{}, newMetadata.AccessLabels)
+		require.Equal(t, oldMetadata.Labels, newMetadata.Labels)
+		require.Equal(t, oldMetadata.Labels, response.GetLabels())
 	})
 }
 

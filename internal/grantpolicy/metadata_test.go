@@ -132,6 +132,21 @@ func TestMetadataGrantOldCoverageIsPerRecipientAndTime(t *testing.T) {
 			{Binding: wanted, Changes: true, Pending: true},
 		}))
 	})
+	t.Run("protected-clear-does-not-need-new-grant", func(t *testing.T) {
+		before := granteffect.MetadataObject{Type: "account", ID: "acc_a", AccessLabels: domain.Labels{"env": "old"}}
+		after := before
+		after.AccessLabels = domain.Labels{}
+		binding := metadataPolicyBinding("cleared", target, nil)
+		binding.Role.Rules[0].MatchAccessLabels = map[string]string{"env": "old"}
+		delta := bundle.CompileMetadataDelta(binding, before, after)
+		require.True(t, delta.Before.Complete(), "%+v", delta.Before.Obligations())
+		require.True(t, delta.After.Complete(), "%+v", delta.After.Obligations())
+		require.NotEmpty(t, delta.Before.Effects())
+		require.Empty(t, delta.After.Effects())
+		require.NoError(t, RequireMetadataGrant(ctx, w, actor, before, after, []MetadataBinding{
+			{Binding: binding, Changes: true},
+		}))
+	})
 }
 
 func TestMetadataGrantExpansionNeedsCurrentGrantCapability(t *testing.T) {
