@@ -48,8 +48,8 @@ func initialRegistrationFixture(t *testing.T) (*Bundle, InitialRegistrationImage
 	require.NotEqual(t, modelFixture, model)
 	c, err := New(model, h)
 	require.NoError(t, err)
-	// This probe exercises compiler projections with the narrow model
-	// fixture. Production certifies a complete model via NewBundle.
+	// Фикстура использует небольшую модель. Штатный NewBundle удостоверяет
+	// полный каталог и модель.
 	bundle := &Bundle{compiler: c, modelSource: model, canonicalCatalog: []byte("{}")}
 	projectID, accountID := "prj-a", "acc-a"
 	root := domain.ResourceRef{Type: "registry.registries", ID: "registry-a"}
@@ -186,6 +186,36 @@ func TestInitialRegistrationSpecializesDirectAndInheritedSources(t *testing.T) {
 	}
 }
 
+func TestInitialRegistrationNestedRootRequiresHeldParent(t *testing.T) {
+	bundle, registry := initialRegistrationFixture(t)
+	child := registry.New
+	child.ObjectType, child.ObjectID = "registry.repositories", "repository-a"
+	toRegistry := authzmodel.EffectHop{From: "strange_item", Pointer: "parent", To: "strange_box"}
+	image := InitialRegistrationImage{
+		Root:      domain.ResourceRef{Type: child.ObjectType, ID: child.ObjectID},
+		New:       child,
+		Ancestors: []RegistrationAncestor{{Path: []authzmodel.EffectHop{toRegistry}, Object: registry.New}},
+	}
+	for _, ancestor := range registry.Ancestors {
+		ancestor.Path = append([]authzmodel.EffectHop{toRegistry}, ancestor.Path...)
+		image.Ancestors = append(image.Ancestors, ancestor)
+	}
+	b := binding(domain.Rule{Module: "registry", Resources: []string{"repositories"}, Verbs: []string{"get"}})
+	b.Subjects = []domain.Subject{b.Recipient}
+	delta := completeMetadata(t, bundle.CompileInitialRegistrationBinding(b, image))
+	require.Empty(t, delta.Before.Effects())
+	require.NotEmpty(t, delta.After.Effects())
+	for _, effect := range delta.After.Effects() {
+		require.Equal(t, "strange_item", effect.Type)
+		require.Len(t, effect.Constraints, 1)
+		require.Equal(t, []string{child.ObjectID}, effect.Constraints[0].Region.Objects.IDs)
+	}
+	image.Ancestors = image.Ancestors[1:]
+	missingParent := bundle.CompileInitialRegistrationBinding(b, image)
+	require.False(t, missingParent.After.Complete())
+	require.NotEmpty(t, missingParent.After.Obligations())
+}
+
 func TestInitialRegistrationRefusesUnconfirmedCoordinatesAndRecipients(t *testing.T) {
 	bundle, image := initialRegistrationFixture(t)
 	b := binding(domain.Rule{Module: "registry", Resources: []string{"registries"}, Verbs: []string{"get"}})
@@ -216,8 +246,7 @@ func TestInitialRegistrationRefusesUnconfirmedCoordinatesAndRecipients(t *testin
 		wantIncomplete(bundle.CompileInitialRegistrationBinding(b, broken))
 	}
 
-	// The complete project/account images alone do not attest cluster facts.
-	// This source has a path through the new object to the missing cluster.
+	// Образы проекта и аккаунта не удостоверяют путь до кластера.
 	cluster := Direct{SourceID: "cluster-admin", ObjectType: "cluster", ObjectID: domain.ClusterSingletonID,
 		Relation: "system_admin", Recipient: b.Recipient}
 	wantIncomplete(bundle.CompileInitialRegistrationDirect(cluster, image))

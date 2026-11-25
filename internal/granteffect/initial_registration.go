@@ -19,27 +19,25 @@ import (
 
 const maxInitialRegistrationAncestorPaths = 64
 
-// RegistrationAncestor is the held NEW ancestor at the end of a model path
-// from the registered object. Each nonempty prefix also needs its own image.
+// RegistrationAncestor хранит удержанный образ предка на пути от нового
+// объекта. Для каждого непустого префикса пути нужен свой образ.
 type RegistrationAncestor struct {
 	Path   []authzmodel.EffectHop
 	Object domain.MirrorObject
 }
 
-// InitialRegistrationImage describes a project-scoped external object and its
-// canonical NEW ancestors. The writer must establish that OLD is absent and
-// hold the registered scope, paths and source census at the decision time.
-// This value checks coordinates and specializes effects. It is not a witness
-// of source completeness or authority by itself.
+// InitialRegistrationImage описывает внешний ресурс в проекте и его
+// канонических предков. Писатель подтверждает отсутствие OLD и удерживает
+// область, пути и полный набор источников на момент решения.
 type InitialRegistrationImage struct {
 	Root      domain.ResourceRef
 	New       domain.MirrorObject
 	Ancestors []RegistrationAncestor
 }
 
-// CompileInitialRegistrationBinding specializes the effects of one held
-// binding for one recipient. The writer must supply all binding subjects,
-// examine every recipient and check source validity and Grant independently.
+// CompileInitialRegistrationBinding вычисляет эффекты удержанной привязки
+// для одного получателя. Писатель проверяет полноту получателей, действительность
+// источника и полномочие на выдачу.
 func (b *Bundle) CompileInitialRegistrationBinding(binding Binding, image InitialRegistrationImage) MetadataDelta {
 	if b.Validate() != nil {
 		return MetadataDelta{}
@@ -50,8 +48,8 @@ func (b *Bundle) CompileInitialRegistrationBinding(binding Binding, image Initia
 	return b.compiler.compileInitialRegistration(b.compiler.Compile(binding), image, nil)
 }
 
-// CompileInitialRegistrationDirect applies the same specialization to a
-// direct source, including a new owner tuple or a held inherited source.
+// CompileInitialRegistrationDirect вычисляет эффекты прямого источника,
+// включая новую связь владельца и удержанный наследуемый источник.
 func (b *Bundle) CompileInitialRegistrationDirect(source Direct, image InitialRegistrationImage) MetadataDelta {
 	if b.Validate() != nil {
 		return MetadataDelta{}
@@ -157,8 +155,8 @@ func (c *Compiler) initialRegistrationNodes(image InitialRegistrationImage) (str
 			return "", nil, fmt.Errorf("inconsistent registration ancestor images")
 		}
 		nodes[key], coordinates[ref] = obj, obj
-		projectPath = projectPath || (len(path) == 1 && typ == "project")
-		accountThroughProject = accountThroughProject || (len(path) == 2 && path[0].To == "project" && typ == "account")
+		projectPath = projectPath || typ == "project"
+		accountThroughProject = accountThroughProject || (len(path) > 1 && path[len(path)-1].From == "project" && typ == "account")
 	}
 	for _, ancestor := range image.Ancestors {
 		for n := 1; n < len(ancestor.Path); n++ {
@@ -208,8 +206,8 @@ func initialRegistrationLabelsValid(obj domain.MirrorObject) bool {
 	return true
 }
 
-// initialRegistrationRootPath finds the single occurrence of the new object
-// on each affected model derivation, including a descendant's constraint path.
+// initialRegistrationRootPath находит единственное место нового объекта
+// в выводе модели, включая путь ограничения на ресурсе-потомке.
 func initialRegistrationRootPath(e Effect, typ string) ([]authzmodel.EffectHop, bool, error) {
 	relevant := e.Type == typ
 	var root []authzmodel.EffectHop
@@ -234,7 +232,7 @@ func specializeInitialRegistrationEffect(e Effect, root []authzmodel.EffectHop, 
 	for i := range e.Constraints {
 		constraint := &e.Constraints[i]
 		if len(constraint.Path) < len(root) || !slices.Equal(constraint.Path[:len(root)], root) {
-			// A separate branch or a descendant-side condition stays symbolic.
+			// Условие на отдельной ветви или потомке остаётся символическим.
 			continue
 		}
 		obj, ok := nodes[authzmodel.EffectPathKey(constraint.Path[len(root):])]
