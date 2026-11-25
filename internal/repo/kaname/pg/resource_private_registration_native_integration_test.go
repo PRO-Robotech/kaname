@@ -78,10 +78,20 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 'outbox',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY id),'[]') FROM kaname.fga_outbox x WHERE payload->>'object'='vpc_network:'||$1))`, id).Scan(&raw))
 		return raw
 	}
+	t.Run("first registration evidence requires owner and signed RC", func(t *testing.T) {
+		const query = `SELECT kaname._authority_resource_first_registration_absence_v1(NULL,NULL,NULL,100,100)`
+		var sqlErr *pgconn.PgError
+		require.ErrorAs(t, r.runtime.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+		require.Equal(t, "42501", sqlErr.Code)
+		require.Contains(t, sqlErr.Message, "permission denied for function")
+		require.ErrorAs(t, r.admin.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+		require.Equal(t, "42501", sqlErr.Code)
+		require.Contains(t, sqlErr.Message, "signed resource frame")
+	})
 	t.Run("genuine private Register commits all effects", func(t *testing.T) {
 		input := makeIntent(0, "private-registration-positive")
 		before := snapshot(ctx, input.Mirror.ObjectID)
-		result, trace, callErr := kanamepg.ProbePrivateRegistration(ctx, kanamepg.New(r.admin, nil), r.bundle, gate, input)
+		result, trace, callErr := kanamepg.ProbePrivateFirstRegistrationAbsence(ctx, kanamepg.New(r.admin, nil), r.bundle, gate, input)
 		t.Logf("private trace: %+v", trace)
 		{
 			var sqlCause *pgconn.PgError
@@ -96,6 +106,7 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		require.NotZero(t, trace.BackendPID)
 		require.True(t, trace.RRClosed)
 		require.True(t, trace.TypedRCEntered)
+		require.Equal(t, 16, trace.FirstRegistrationAbsenceReads)
 		require.True(t, trace.Finalized)
 		require.True(t, trace.Authorized)
 		require.True(t, trace.BodyExecuted)

@@ -17,24 +17,33 @@ import (
 )
 
 type PrivateRegistrationProbeTrace struct {
-	Stage                   string
-	BackendPID              uint32
-	RRClosed                bool
-	TypedRCEntered          bool
-	Finalized               bool
-	RefusalIdentityVerified bool
-	Authorized              bool
-	BodyExecuted            bool
-	Committed               bool
-	DirectCaptureKinds      []int
-	RootParentEdgeRows      int
+	Stage                         string
+	BackendPID                    uint32
+	RRClosed                      bool
+	TypedRCEntered                bool
+	Finalized                     bool
+	RefusalIdentityVerified       bool
+	Authorized                    bool
+	BodyExecuted                  bool
+	Committed                     bool
+	DirectCaptureKinds            []int
+	RootParentEdgeRows            int
+	FirstRegistrationAbsenceReads int
 }
 
 // Только test build и только private compiler component. Этот вход не вызывает
 // public constructor, не меняет readiness и не предоставляет runtime EXECUTE
 // на private SQL. Repo обязан принадлежать настоящему migration owner; DB ACL
 // проверяет это при вызове direct_prepare. Gate/authority/manifest настоящие.
-func ProbePrivateRegistration(ctx context.Context, repo *Repository, bundle *granteffect.Bundle, gate *authzguard.RelationWriteGate, in kaname.ResourceDecisionIntent) (result kaname.ResourceDecisionResult, trace PrivateRegistrationProbeTrace, err error) {
+func ProbePrivateRegistration(ctx context.Context, repo *Repository, bundle *granteffect.Bundle, gate *authzguard.RelationWriteGate, in kaname.ResourceDecisionIntent) (kaname.ResourceDecisionResult, PrivateRegistrationProbeTrace, error) {
+	return probePrivateRegistration(ctx, repo, bundle, gate, in, false)
+}
+
+func ProbePrivateFirstRegistrationAbsence(ctx context.Context, repo *Repository, bundle *granteffect.Bundle, gate *authzguard.RelationWriteGate, in kaname.ResourceDecisionIntent) (kaname.ResourceDecisionResult, PrivateRegistrationProbeTrace, error) {
+	return probePrivateRegistration(ctx, repo, bundle, gate, in, true)
+}
+
+func probePrivateRegistration(ctx context.Context, repo *Repository, bundle *granteffect.Bundle, gate *authzguard.RelationWriteGate, in kaname.ResourceDecisionIntent, checkFirstAbsence bool) (result kaname.ResourceDecisionResult, trace PrivateRegistrationProbeTrace, err error) {
 	trace.Stage = "validate"
 	trace.RootParentEdgeRows = -1
 	if repo == nil || repo.master == nil || gate == nil || (in.Action != kaname.ResourceDecisionRegister && in.Action != kaname.ResourceDecisionUnregister && in.Action != kaname.ResourceDecisionRecordRefusal) {
@@ -95,6 +104,7 @@ func ProbePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 	var source *resourceSourceCapture
 	var footprint resourceFenceFootprint
 	var proposal *resourceDecisionProposal
+	var receipt *resourceProposalSource
 	if in.Action == kaname.ResourceDecisionRecordRefusal {
 		source, err = newResourceSourceCapture(rr, budget, lifetime)
 		if err != nil {
@@ -137,6 +147,20 @@ func ProbePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 					trace.RootParentEdgeRows = len(captured)
 				}
 			}
+		}
+		if checkFirstAbsence {
+			if in.Action != kaname.ResourceDecisionRegister {
+				return result, trace, kaname.ErrSourceUnconfirmed
+			}
+			if err = registration.registration.captureAbsentInitialRegistration(ctx); err != nil {
+				return result, trace, err
+			}
+			// Kind 42 follows its separate owner-private ABI. The ordinary
+			// prepare envelope still accepts only its original kinds.
+			key := resourceSourceKey{kind: resourceSourceMetadataPolicyReceipt,
+				typ: registration.registration.catalog.identity.Dotted, id: registration.registration.row.ObjectID}
+			receipt = &resourceProposalSource{Kind: key.kind, Type: key.typ, ID: key.id, States: []string{}}
+			delete(source.entries, key)
 		}
 		proposal, err = makeResourceRegistrationProposal(in.Snapshot(), parents, footprint, registration)
 	}
@@ -192,6 +216,27 @@ func ProbePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 	}
 	if err = proposal.recheckCatalogs(ctx, writer, parents); err != nil {
 		return result, trace, err
+	}
+	if receipt != nil {
+		trace.Stage = "held first registration absence"
+		var proof struct {
+			Rows     int    `json:"logical_rows"`
+			Reads    int    `json:"logical_reads"`
+			ObjectID string `json:"object_id"`
+		}
+		if err = rc.QueryRow(ctx, `SELECT kaname._authority_resource_first_registration_absence_v1(
+          m.registration_certificate, kaname._authority_resource_capture_index_v2($1::jsonb->'sources',100000),$2::jsonb,$3,$4)
+          FROM pg_temp.kaname_authority_resource_manifest m`,
+			proposal.payload, receipt, budget.RemainingRows(), budget.RemainingReads()).Scan(&proof); err != nil {
+			return result, trace, err
+		}
+		if proof.Reads < 1 || proof.ObjectID != in.Mirror.ObjectID {
+			return result, trace, kaname.ErrSourceUnconfirmed
+		}
+		if err = chargeNativePolicyBudget(budget, proof.Rows, proof.Reads); err != nil {
+			return result, trace, err
+		}
+		trace.FirstRegistrationAbsenceReads = proof.Reads
 	}
 	trace.Stage = "actual finalize"
 	if err = proposal.finalize(ctx, writer, lifetime, budget); err != nil {
