@@ -71,7 +71,6 @@ import (
 // adapter'а через txAsPgx), чтобы этот use-case-пакет оставался свободен от
 // pgx-драйвера.
 type UserClientRepo interface {
-	Insert(ctx context.Context, tx service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error)
 	// ExistsOwnedByID — есть ли у человека удостоверение с этим
 	// идентификатором. Предикат тот же, что у DeleteOwnedByID: чужая строка
 	// неотличима от отсутствующей by construction. Ошибка — неполученный ответ,
@@ -95,6 +94,12 @@ type UserClientRepo interface {
 	AccountForUser(ctx context.Context, id domain.UserID) (domain.AccountID, bool, error)
 }
 
+// IssueClientRepo удерживает строку владельца до завершения транзакции выдачи.
+type IssueClientRepo interface {
+	AccountForUser(context.Context, domain.UserID) (domain.AccountID, bool, error)
+	InsertForActiveOwner(context.Context, service.Tx, operations.Principal, domain.UserOAuthClient) (domain.UserOAuthClient, error)
+}
+
 // OpsResponseRedactor затирает именованное поле в proto-marshalled success-response
 // строки `operations`. Идемпотентно: повторный прогон на уже-затёртом поле — no-op.
 type OpsResponseRedactor interface {
@@ -105,7 +110,7 @@ type OpsResponseRedactor interface {
 
 // IssueUserTokenUseCase чеканит удостоверение и персистит его строку.
 type IssueUserTokenUseCase struct {
-	repo    UserClientRepo
+	repo    IssueClientRepo
 	tx      service.TxBeginner
 	opsRepo operations.Repo
 	// redactor для post-MarkDone private_key_pem-редакции. nil → редакция
@@ -180,7 +185,7 @@ func (u *IssueUserTokenUseCase) WithRedactGrace(d time.Duration) *IssueUserToken
 }
 
 // NewIssueUserTokenUseCase конструирует.
-func NewIssueUserTokenUseCase(r UserClientRepo, tx service.TxBeginner, ops operations.Repo) *IssueUserTokenUseCase {
+func NewIssueUserTokenUseCase(r IssueClientRepo, tx service.TxBeginner, ops operations.Repo) *IssueUserTokenUseCase {
 	return &IssueUserTokenUseCase{
 		repo:    r,
 		tx:      tx,
@@ -347,7 +352,7 @@ func (u *IssueUserTokenUseCase) Execute(ctx context.Context, in IssueInput) (*op
 	// Захватываем верифицированный принципал СИНХРОННО (до spawn'а worker-goroutine)
 	// — audit-actor обязан быть аутентифицированным принципалом (anti-spoofing),
 	// никогда полем тела запроса.
-	actor := authzguard.PrincipalUserID(ctx)
+	actor, _ := operations.PrincipalFromContextOK(ctx)
 
 	// Вид SECRET завершается НА ПУТИ ЗАПРОСА, и это не отступление от ban #9:
 	// предмет мутации закоммичен, а `done` означает ровно это. Асинхронный путь
@@ -388,7 +393,7 @@ func (u *IssueUserTokenUseCase) issueSecretSync(
 	op *operations.Operation,
 	tokenID domain.UserOAuthClientID,
 	in IssueInput,
-	actor string,
+	actor operations.Principal,
 	ttl time.Duration,
 ) error {
 	// Тело для вызывающего живёт в ЗАМЫКАНИИ, а не в поле use-case: use-case
@@ -548,7 +553,7 @@ func (u *IssueUserTokenUseCase) redactSecretFields(ctx context.Context, opID str
 // строки. Отсюда же следует, что у выдачи больше нет полусделанного состояния,
 // компенсировать которое было бы нечем: единственный след — своя строка, и она
 // либо закоммичена, либо откачена.
-func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.UserOAuthClientID, in IssueInput, actor string) (*anypb.Any, error) {
+func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.UserOAuthClientID, in IssueInput, actor operations.Principal) (*anypb.Any, error) {
 	// 1. Mint ECDSA P-256 keypair локально. Утверждение вызывающий подписывает
 	//    ИМЕНЕМ клиента — идентификатором строки реестра (`uoc…`).
 	key, err := generateES256Key()
@@ -608,7 +613,7 @@ func (u *IssueUserTokenUseCase) doIssue(ctx context.Context, tokenID domain.User
 // commitMapping персистит строку удостоверения в свежей tx. Durable
 // iam.user_token.issued audit_outbox-строка эмитится в ТОЙ ЖЕ tx, что Insert
 // (атомарно, запрет #10): audit-строка коммитится iff строка коммитится.
-func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, actor, keyAlgorithm string) (domain.UserOAuthClient, error) {
+func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.UserOAuthClient, actor operations.Principal, keyAlgorithm string) (domain.UserOAuthClient, error) {
 	// Пустое имя до записи не доживает: оно означало «назови сам», и здесь, где
 	// идентификатор уже назначен, его заменяет имя, производное от него (kacho#1279).
 	// Подстановка стоит в ОДНОЙ точке — той, через которую проходит КАЖДЫЙ вид
@@ -634,7 +639,7 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 			_ = tx.Rollback(ctx)
 		}
 	}()
-	persisted, err := u.repo.Insert(ctx, tx, row)
+	persisted, err := u.repo.InsertForActiveOwner(ctx, tx, actor, row)
 	if err != nil {
 		return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.insert", err)
 	}
@@ -645,7 +650,7 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 			EventType:       auditEventUserTokenIssued,
 			TenantAccountID: "",
 			Payload: userTokenAuditPayload(
-				actor, string(row.UserID), string(persisted.ID), keyAlgorithm),
+				actor.ID, string(row.UserID), string(persisted.ID), keyAlgorithm),
 		}); aerr != nil {
 			return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.emitAudit", aerr)
 		}

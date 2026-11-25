@@ -27,11 +27,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/corelib/ids"
+	"github.com/PRO-Robotech/corelib/operations"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
@@ -66,6 +68,65 @@ func insertUOC(t *testing.T, ctx context.Context, txb service.TxBeginner, repo *
 	require.NoError(t, err)
 	require.NoError(t, tx.Commit(ctx))
 	return out
+}
+
+func TestUserOAuthClient_IssueHoldsActiveOwnerThroughCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	uid := mustSeedUser(t, ctx, pool, "issuance-owner")
+	actor := operations.Principal{Type: "user", ID: string(uid)}
+	call := operations.WithPrincipal(ctx, actor)
+	repo := kanamepg.NewUserOAuthClientRepo(pool)
+	tx, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback(ctx) }()
+	row := newUOC(uid, "held")
+	_, err = repo.InsertForActiveOwner(call, tx, actor, row)
+	require.NoError(t, err)
+
+	// Блокировка внешнего ключа (KEY SHARE) пропустила бы смену состояния.
+	// Наблюдаем конфликт именно с блокировкой обновления неключевого столбца.
+	_, err = pool.Exec(ctx, `SELECT id FROM kaname.users WHERE id=$1 FOR NO KEY UPDATE NOWAIT`, string(uid))
+	var busy *pgconn.PgError
+	require.ErrorAs(t, err, &busy)
+	require.Equal(t, "55P03", busy.Code)
+	require.NoError(t, tx.Commit(ctx))
+
+	_, err = pool.Exec(ctx, `UPDATE kaname.users SET invite_status='BLOCKED' WHERE id=$1`, string(uid))
+	require.NoError(t, err)
+	refused, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = refused.Rollback(ctx) }()
+	next := newUOC(uid, "blocked")
+	_, err = repo.InsertForActiveOwner(call, refused, actor, next)
+	require.ErrorIs(t, err, iamerr.ErrFailedPrecondition)
+	require.NoError(t, refused.Commit(ctx))
+	var count int
+	require.NoError(t, pool.QueryRow(ctx, `SELECT count(*) FROM kaname.user_oauth_clients WHERE id=$1`, string(next.ID)).Scan(&count))
+	require.Zero(t, count)
+}
+
+func TestUserOAuthClient_IssueRejectsDetachedActorOrCreator(t *testing.T) {
+	// Обе проверки происходят до обращения к базе.
+	repo := kanamepg.NewUserOAuthClientRepo(nil)
+	id := domain.UserID(ids.NewID(domain.PrefixUser))
+	other := ids.NewID(domain.PrefixUser)
+	actor := operations.Principal{Type: "user", ID: string(id)}
+	call := operations.WithPrincipal(context.Background(), actor)
+	row := newUOC(id, "identity")
+	_, err := repo.InsertForActiveOwner(context.Background(), nil, actor, row)
+	require.ErrorIs(t, err, iamerr.ErrPermissionDenied)
+	_, err = repo.InsertForActiveOwner(call, nil, operations.Principal{Type: "user", ID: other}, row)
+	require.ErrorIs(t, err, iamerr.ErrPermissionDenied)
+	row.CreatedByUserID = domain.UserID(other)
+	_, err = repo.InsertForActiveOwner(call, nil, actor, row)
+	require.ErrorIs(t, err, iamerr.ErrPermissionDenied)
 }
 
 func TestUserOAuthClient_01_InsertGetList_RoundTrip(t *testing.T) {

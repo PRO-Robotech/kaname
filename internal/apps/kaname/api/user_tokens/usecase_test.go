@@ -90,7 +90,7 @@ func (s *stubUserClientRepo) AccountForUser(ctx context.Context, id domain.UserI
 	return "acc00000000000000001", may, nil
 }
 
-func (s *stubUserClientRepo) Insert(ctx context.Context, tx service.Tx, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
+func (s *stubUserClientRepo) InsertForActiveOwner(ctx context.Context, tx service.Tx, _ operations.Principal, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
 	if s.insertErr != nil {
 		return domain.UserOAuthClient{}, s.insertErr
 	}

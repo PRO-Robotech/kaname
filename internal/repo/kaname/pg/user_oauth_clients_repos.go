@@ -20,8 +20,11 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/safeconv"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/service"
@@ -61,6 +64,36 @@ func (r *UserOAuthClientRepo) Get(ctx context.Context, id domain.UserOAuthClient
 // ErrIssuanceMomentRequired — строка удостоверения без момента выдачи. Отказ
 // записи, а не подстановка часов базы (kaname#589).
 var ErrIssuanceMomentRequired = errors.New("user oauth client: issuance moment is required")
+
+// InsertForActiveOwner сверяет автора записи и удерживает строку владельца
+// при выдаче обоих видов удостоверения. Право выпускать за другого человека
+// по-прежнему проверяет публичная дверь.
+func (r *UserOAuthClientRepo) InsertForActiveOwner(ctx context.Context, txh service.Tx, actor operations.Principal, c domain.UserOAuthClient) (domain.UserOAuthClient, error) {
+	subject, named := authzguard.PrincipalSubject(ctx)
+	issuer, valid := authzguard.SubjectFromPrincipal(actor)
+	if !named || !valid || issuer != subject || c.CreatedByUserID == "" {
+		return domain.UserOAuthClient{}, iamerr.ErrPermissionDenied
+	}
+	lane := shared.CreatedByLaneForUserToken(actor.ID, actor.Type == "service_account", string(c.UserID))
+	if err := lane.ValidateRequested(string(c.CreatedByUserID)); err != nil {
+		return domain.UserOAuthClient{}, iamerr.ErrPermissionDenied
+	}
+
+	// FOR SHARE совместим с параллельной выдачей. Изменение invite_status
+	// или удаление владельца ждёт завершения вставки и аудита.
+	var state domain.InviteStatus
+	err := txAsPgx(txh).QueryRow(ctx, `SELECT invite_status FROM kaname.users WHERE id=$1 FOR SHARE`, string(c.UserID)).Scan(&state)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", c.UserID)
+	}
+	if err != nil {
+		return domain.UserOAuthClient{}, mapErr(err, "UserOAuthClient.LockOwner", string(c.UserID))
+	}
+	if !state.MayAuthenticate() {
+		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s is not active and cannot be issued a token", c.UserID)
+	}
+	return r.Insert(ctx, txh, c)
+}
 
 // Insert персистит новую строку токена в writer-tx вызывающего. Принимает
 // непрозрачный service.Tx (порт use-case), восстанавливает конкретный pgx.Tx
