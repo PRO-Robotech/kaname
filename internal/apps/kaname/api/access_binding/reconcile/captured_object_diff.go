@@ -22,6 +22,9 @@ type CapturedObjectDiff struct {
 	Ledger   []LedgerRow
 	Live     map[MemberCoord]bool
 	Additive bool
+	// Converge требует сверить сохранённый журнал и для неизменившегося
+	// ACTIVE-члена с одним субъектом.
+	Converge bool
 }
 
 var ErrIncompleteObjectDiff = errors.New("incomplete captured object diff")
@@ -109,7 +112,7 @@ func CompileCapturedObjectDiff(ctx context.Context, inputs []CapturedObjectDiff)
 				return nil, err
 			}
 		} else {
-			view := bindingEmitted(store, input.Binding.BindingID, false)
+			view := bindingEmitted(store, input.Binding.BindingID, input.Converge)
 			if err = reconciler.applyDiff(ctx, store, input.Binding, input.Desired, input.Current, view, collector); err != nil {
 				return nil, err
 			}

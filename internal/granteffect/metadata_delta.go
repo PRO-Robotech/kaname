@@ -19,6 +19,7 @@ import (
 // обязательно для внешней координаты и берётся из удержанного каталога.
 // Писатель подтверждает OLD, точную правку, область и полноту источников.
 type MetadataObject struct {
+	registration bool
 	Type, ID     string
 	CatalogType  string `json:",omitempty"`
 	Labels       domain.Labels
@@ -50,12 +51,20 @@ func (b *Bundle) CompileMetadataDelta(binding Binding, old, next MetadataObject)
 	return b.compiler.compileMetadataDelta(binding, old, next)
 }
 
-var metadataServiceAccountID = regexp.MustCompile(`^sva[a-zA-Z0-9_-]{1,61}$`)
+var (
+	metadataUserID           = regexp.MustCompile(`^usr[a-zA-Z0-9_-]{1,61}$`)
+	metadataGroupID          = regexp.MustCompile(`^grp[a-zA-Z0-9_-]{1,61}$`)
+	metadataServiceAccountID = regexp.MustCompile(`^sva[a-zA-Z0-9_-]{1,61}$`)
+)
 
 func (c *Compiler) compileMetadataDelta(binding Binding, old, next MetadataObject) MetadataDelta {
+	return c.compileMetadataImages(binding, binding, old, next)
+}
+
+func (c *Compiler) compileMetadataImages(beforeBinding, afterBinding Binding, old, next MetadataObject) MetadataDelta {
 	fail := func(detail string) MetadataDelta {
 		s := Set{identity: c.identity, obligations: []Obligation{{Code: "metadata_input", Detail: detail,
-			Provenance: Provenance{SourceID: binding.SourceID, RoleID: binding.Role.ID}}}}
+			Provenance: Provenance{SourceID: beforeBinding.SourceID, RoleID: beforeBinding.Role.ID}}}}
 		return MetadataDelta{Before: s, After: s}
 	}
 
@@ -73,6 +82,19 @@ func (c *Compiler) compileMetadataDelta(binding Binding, old, next MetadataObjec
 			return fail("invalid metadata coordinate")
 		}
 		dotted = "iam." + old.Type
+	case "iam_user":
+		if !metadataUserID.MatchString(old.ID) || old.CreatorKnown || old.Creator != (domain.Subject{}) {
+			return fail("invalid user metadata coordinate")
+		}
+		// Позицию User подтверждает удержанное множество membership в writer.
+		// Здесь проверяется только точная координата уже выбранного объекта.
+		dotted = "iam.user"
+	case "iam_group":
+		if !metadataGroupID.MatchString(old.ID) || old.CreatorKnown || old.Creator != (domain.Subject{}) {
+			return fail("invalid group metadata coordinate")
+		}
+		// Объект IAM и userset участников группы — разные типы модели.
+		dotted = "iam.group"
 	case "iam_service_account":
 		if !metadataServiceAccountID.MatchString(old.ID) || !old.CreatorKnown {
 			return fail("service account identity or creator is not established")
@@ -103,7 +125,7 @@ func (c *Compiler) compileMetadataDelta(binding Binding, old, next MetadataObjec
 	if err != nil || len(raw) > MaxInputBytes {
 		return fail("metadata input limit")
 	}
-	before, after := c.compileBinding(binding, &old), c.compileBinding(binding, &next)
+	before, after := c.compileBinding(beforeBinding, &old), c.compileBinding(afterBinding, &next)
 	return MetadataDelta{Before: before, After: after}
 }
 
