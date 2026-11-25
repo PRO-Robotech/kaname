@@ -130,7 +130,10 @@ func (c *callerContainerObjectReuse) writeObjects(g *callerGraph, src valueSrc, 
 	}
 	key := callerResolveKeyFor(src, true)
 	if c.graph != g || c.key != key {
-		*c = callerContainerObjectReuse{graph: g, key: key}
+		if c.ready {
+			*c = callerContainerObjectReuse{}
+		}
+		c.graph, c.key = g, key
 		if sampleOwner {
 			return g.callerContainerObjects(src, key, callerWriteOwner)
 		}
@@ -148,7 +151,9 @@ func (c *callerContainerObjectReuse) writeObjects(g *callerGraph, src valueSrc, 
 		// Счётчики работы не добавляем: подтверждённый дочерний обход не выполнялся.
 		return c.answer.objects, c.answer.unknown
 	}
-	*c = callerContainerObjectReuse{graph: g, key: key}
+	if c.ready {
+		*c = callerContainerObjectReuse{graph: g, key: key}
+	}
 	cuts, skips, completed, cycles := g.resolveCuts, g.initialSkips, g.completedInitialSkips, g.objectCuts
 	objects, unknown := g.callerObjects(src, map[callerObjectSourceID]bool{})
 	if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
