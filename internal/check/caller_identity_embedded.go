@@ -338,8 +338,17 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 				unknown = true
 				continue
 			}
-			for _, value := range results[i] {
-				if g.initialNilFieldReturn(value, fields) {
+			values := results[i]
+			prefix := g.initialNilFieldPrefix(values, fields)
+			for j, value := range values {
+				if j < prefix {
+					if g.fieldQueryHeads[callerResolveKeyFor(value, true)] == 0 && g.consumeInitialNilFieldReturn() {
+						g.work.InitialNilPrefixReturns++
+						continue
+					}
+					// Полный обход может изменить привязки и активные кадры.
+					prefix = 0
+				} else if g.initialNilFieldReturn(value, fields) {
 					continue
 				}
 				through(value)
@@ -366,19 +375,42 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 	return refs, unknown
 }
 
-// После обычного resolve и bind отдельный nil-возврат может дать пустой
-// источник с одной начальной границей. Существующие снимки, мутации и
-// контейнеры сохраняют полный проход: каждый может изменить этот ответ.
-func (g *callerGraph) initialNilFieldReturn(src valueSrc, fields []*types.Var) bool {
-	if !g.lifetimeScanning || src.pkg == nil || src.pkg.info == nil || src.expr == nil ||
-		src.tuple != -1 || src.elem || src.rangeKey || src.rangeVal || src.opAssign ||
-		!callerNil(src.pkg, src.expr) || len(fields) == 0 || fields[0] == nil {
-		return false
+// Сохраняем только форму источников после завершения flow.collect. Ключ —
+// первый элемент конкретного среза результата. Другой tuple или граф
+// со своим индексом не может получить префикс по похожему AST.
+const minCallerNilReturnPrefix = 4
+
+func callerNilReturnPrefixes(index *resolveIndex) map[*valueSrc]int {
+	var prefixes map[*valueSrc]int
+	for _, results := range index.returns {
+		for _, values := range results {
+			if len(values) < minCallerNilReturnPrefix {
+				continue
+			}
+			n := 0
+			for _, src := range values {
+				if !callerPlainNilReturn(src) || !callerNonContainerReturn(src) {
+					break
+				}
+				n++
+			}
+			if n >= minCallerNilReturnPrefix {
+				if prefixes == nil {
+					prefixes = make(map[*valueSrc]int)
+				}
+				prefixes[&values[0]] = n
+			}
+		}
 	}
-	if g.fieldQueryIndexOwner != g || len(g.fieldQueries) == 0 || g.fieldQueryIndexedDepth != len(g.fieldQueries) ||
-		g.fieldQueryHeads[callerResolveKeyFor(src, true)] != 0 || len(g.mutations[fields[0].Origin()]) != 0 {
-		return false
-	}
+	return prefixes
+}
+
+func callerPlainNilReturn(src valueSrc) bool {
+	return src.pkg != nil && src.pkg.info != nil && src.expr != nil && src.tuple == -1 &&
+		!src.elem && !src.rangeKey && !src.rangeVal && !src.opAssign && callerNil(src.pkg, src.expr)
+}
+
+func callerNonContainerReturn(src valueSrc) bool {
 	typ := callerContainerType(src.pkg.info.TypeOf(src.expr))
 	if typ == nil {
 		return false
@@ -387,7 +419,38 @@ func (g *callerGraph) initialNilFieldReturn(src valueSrc, fields []*types.Var) b
 	case *types.Map, *types.Slice, *types.Array:
 		return false
 	}
-	if !callerFreshReplayContext(g.ctx) || g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
+	return true
+}
+
+func (g *callerGraph) initialNilFieldScope(fields []*types.Var) bool {
+	return g.lifetimeScanning && len(fields) > 0 && fields[0] != nil &&
+		g.fieldQueryIndexOwner == g && len(g.fieldQueries) > 0 && g.fieldQueryIndexedDepth == len(g.fieldQueries) &&
+		len(g.mutations[fields[0].Origin()]) == 0
+}
+
+func (g *callerGraph) initialNilFieldPrefix(values []valueSrc, fields []*types.Var) int {
+	if len(values) < minCallerNilReturnPrefix {
+		return 0
+	}
+	n := g.nilReturnPrefixes[&values[0]]
+	if n == 0 || n > len(values) || !g.initialNilFieldScope(fields) || !callerFreshReplayContext(g.ctx) {
+		return 0
+	}
+	return n
+}
+
+// Без префикса проверяем форму каждого возврата. И в серии, и по одному
+// каждый nil проверяет свой активный source и свою границу отмены и overflow.
+func (g *callerGraph) initialNilFieldReturn(src valueSrc, fields []*types.Var) bool {
+	if !g.lifetimeScanning || !callerPlainNilReturn(src) || !g.initialNilFieldScope(fields) ||
+		g.fieldQueryHeads[callerResolveKeyFor(src, true)] != 0 || !callerNonContainerReturn(src) || !callerFreshReplayContext(g.ctx) {
+		return false
+	}
+	return g.consumeInitialNilFieldReturn()
+}
+
+func (g *callerGraph) consumeInitialNilFieldReturn() bool {
+	if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 		return false
 	}
 	g.work.InitialNilFieldReturns++

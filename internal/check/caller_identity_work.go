@@ -18,6 +18,7 @@ type CallerIdentityWork struct {
 	OriginTransferRepeatReplays                                                           int // Полные повторные переводы, уже обеспеченные тем же live frame.
 	UnpublishedMapWriteSkips                                                              int // Исключённые записи в отдельное выделение до публикации карты.
 	InitialNilFieldReturns                                                                int // Свернутые nil-возвраты в начальном обходе поля.
+	InitialNilPrefixReturns                                                               int // Установленная заранее форма возврата, с выполненной индивидуальной границей.
 	FieldQueryCandidates                                                                  int // Число реально посещённых активных кадров запроса поля.
 	EmbeddedLiteralHits                                                                   int // Раскрытия через неизменяемый индекс полей литерала.
 	Load, Collect, MayEdges, MayPropagation, Solve                                        time.Duration

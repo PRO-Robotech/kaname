@@ -129,6 +129,7 @@ type callerGraph struct {
 	fieldQueryHeads        map[callerResolveKey]int   // Индексы с единицы; только активные кадры.
 	fieldQueryIndexOwner   *callerGraph               // Только граф текущего закрытого collect.
 	fieldQueryIndexedDepth int                        // -1 сохраняет линейный поиск до полного снятия синтетического стека.
+	nilReturnPrefixes      map[*valueSrc]int          // Префиксы в неизменяемых срезах index.returns.
 	embeddedLiterals       callerEmbeddedLiteralIndex // Неизменяемый синтаксис; общий для копий графа.
 }
 
@@ -176,6 +177,7 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 	flow := newSurfaceFlow(p)
 	flow.collect()
 	g.index = flow.idx
+	g.nilReturnPrefixes = callerNilReturnPrefixes(g.index)
 	g.zeroVars = flow.zeroVars
 	g.assignments = map[*types.Var][]valueSrc{}
 	g.parameters = map[*types.Var]paramOf{}
