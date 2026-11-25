@@ -17,6 +17,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	"github.com/PRO-Robotech/kaname/internal/manifest"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -287,9 +288,20 @@ func wirePublishedFullStartupServices(ctx context.Context, publication *publishe
 	svcs.userHandler.WithIdentityLifecycleWriter(writers)
 	svcs.userInvite.WithInviteDecisions(writers)
 	svcs.groupHandler.WithMembershipWriter(writers).WithLifecycleWriter(writers).WithGroupAdditionAuthorityWriter(writers)
-	svcs.accountMetadataUpdate.WithAccountMetadataWriter(writers)
-	svcs.projectMetadataUpdate.WithProjectMetadataWriter(writers)
-	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(writers)
+	_, generation, err := writers.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var metadata publishedMetadataPorts = writers
+	if _, ok := generation.metadataPorts.(kaname.AccountAccessLabelsWriterFactory); ok {
+		metadata = publishedAccessLabels{writers}
+	}
+	if _, ok := generation.metadataPorts.(kaname.ServiceAccountAccessLabelsWriterFactory); ok {
+		metadata = publishedServiceAccountAccessLabels{publishedAccessLabels{writers}}
+	}
+	svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadata)
+	svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadata)
+	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(metadata)
 	svcs.serviceAccountEnable.WithServiceAccountStateWriter(writers)
 	svcs.serviceAccountDisable.WithServiceAccountStateWriter(writers)
 	svcs.accountCreate.WithAccountCreateWriter(writers)

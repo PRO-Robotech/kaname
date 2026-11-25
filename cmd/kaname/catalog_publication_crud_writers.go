@@ -10,6 +10,17 @@ import (
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
+type publishedMetadataPorts interface {
+	kaname.AccountMetadataWriterFactory
+	kaname.ProjectMetadataWriterFactory
+	kaname.ServiceAccountMetadataWriterFactory
+}
+
+// Обёртки объявляют лишь порты, установленные при старте. При каждой записи
+// проверяем тот же порт уже в поколении закреплённой публикации.
+type publishedAccessLabels struct{ *publishedWriterGenerations }
+type publishedServiceAccountAccessLabels struct{ publishedAccessLabels }
+
 // Закрытые фабрики получают одно опубликованное поколение и его закреплённый
 // контекст. Общий ExecutePreparedWrite сохраняет этот контекст до конца UC.
 func (r *publishedWriterGenerations) AccountMetadataWriter(ctx context.Context, account domain.Account, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
@@ -34,6 +45,42 @@ func (r *publishedWriterGenerations) ServiceAccountMetadataWriter(ctx context.Co
 		return nil, err
 	}
 	return generation.metadata.ServiceAccountMetadataWriter(pinned, account, mask, actor)
+}
+
+func (r publishedAccessLabels) AccountAccessLabelsWriter(ctx context.Context, value domain.Account, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	writer, ok := generation.metadataPorts.(kaname.AccountAccessLabelsWriterFactory)
+	if !ok {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	return writer.AccountAccessLabelsWriter(pinned, value, mask, actor)
+}
+
+func (r publishedAccessLabels) ProjectAccessLabelsWriter(ctx context.Context, value domain.Project, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	writer, ok := generation.metadataPorts.(kaname.ProjectAccessLabelsWriterFactory)
+	if !ok {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	return writer.ProjectAccessLabelsWriter(pinned, value, mask, actor)
+}
+
+func (r publishedServiceAccountAccessLabels) ServiceAccountAccessLabelsWriter(ctx context.Context, value domain.ServiceAccount, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	writer, ok := generation.metadataPorts.(kaname.ServiceAccountAccessLabelsWriterFactory)
+	if !ok {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	return writer.ServiceAccountAccessLabelsWriter(pinned, value, mask, actor)
 }
 
 func (r *publishedWriterGenerations) ServiceAccountStateWriter(ctx context.Context, id domain.ServiceAccountID, enabled bool, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {

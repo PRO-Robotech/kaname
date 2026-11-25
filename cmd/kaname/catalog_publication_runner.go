@@ -36,20 +36,21 @@ type publishedWriterGenerations struct {
 }
 
 type publishedWriterGeneration struct {
-	snapshot  *authzsnapshot.Snapshot
-	contract  *kanamepg.FullWriterContract
-	repo      *kanamepg.Repository
-	bundle    *granteffect.Bundle
-	catalog   *kanamepg.CatalogWriteRepo
-	cluster   *kanamepg.ClusterAdminParticipant
-	invites   *kanamepg.InviteDecisions
-	policy    *publishedPolicyParticipants
-	metadata  *kanamepg.MetadataMutationWriters
-	state     *kanamepg.ServiceAccountStateWriters
-	crud      *kanamepg.CRUDWriters
-	admission *kanamepg.HumanAdmissionParticipant
-	groups    *reconcile.Reconciler
-	resource  *kanamepg.ResourceDecisionRunner
+	snapshot      *authzsnapshot.Snapshot
+	contract      *kanamepg.FullWriterContract
+	repo          *kanamepg.Repository
+	bundle        *granteffect.Bundle
+	catalog       *kanamepg.CatalogWriteRepo
+	cluster       *kanamepg.ClusterAdminParticipant
+	invites       *kanamepg.InviteDecisions
+	policy        *publishedPolicyParticipants
+	metadata      *kanamepg.MetadataMutationWriters
+	metadataPorts publishedMetadataPorts
+	state         *kanamepg.ServiceAccountStateWriters
+	crud          *kanamepg.CRUDWriters
+	admission     *kanamepg.HumanAdmissionParticipant
+	groups        *reconcile.Reconciler
+	resource      *kanamepg.ResourceDecisionRunner
 }
 
 func newPublishedWriterGenerations(pool *pgxpool.Pool, repo *kanamepg.Repository, store *authzsnapshot.Store) *publishedWriterGenerations {
@@ -149,6 +150,10 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	if err != nil {
 		return nil, err
 	}
+	metadataPorts, err := metadata.WithInstalledAccessLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
 	state, err := kanamepg.NewServiceAccountStateWriters(ctx, repo, publication.Bundle)
 	if err != nil {
 		return nil, err
@@ -178,7 +183,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	generation := &publishedWriterGeneration{
 		snapshot: snapshot, contract: contract, repo: repo, bundle: publication.Bundle,
 		catalog: catalog, cluster: cluster, invites: invites, policy: policy,
-		metadata: metadata, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
+		metadata: metadata, metadataPorts: metadataPorts, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
 	}
 	r.current = generation
 	return generation, nil
