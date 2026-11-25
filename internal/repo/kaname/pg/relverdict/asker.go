@@ -241,12 +241,12 @@ func (a *Asker) Allowed(ctx context.Context, subject, objectType, objectID, rela
 	}
 	tx := a.transaction
 	if tx == nil {
-		var err error
-		tx, err = a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+		ownedTx, err := a.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 		if err != nil {
 			return false, fmt.Errorf("relverdict: транзакция чтения: %w", err)
 		}
-		defer func() { _ = rollback(ctx, tx) }()
+		tx = ownedTx
+		defer func() { _ = rollback(ctx, ownedTx) }()
 	}
 
 	v, grounds, err := Ask(ctx, tx, Query{
