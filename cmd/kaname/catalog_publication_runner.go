@@ -167,6 +167,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 		if err != nil {
 			return nil, err
 		}
+		roles = roleWriters
 	}
 	metadataPorts, err := metadata.WithInstalledAccessLabels(ctx)
 	if err != nil {

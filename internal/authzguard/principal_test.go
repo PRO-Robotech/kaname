@@ -8,7 +8,12 @@ import (
 	"context"
 	"testing"
 
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/callerorigin"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestPrincipalUserID_User(t *testing.T) {
@@ -100,5 +105,41 @@ func TestPrincipalSubject_Ctx(t *testing.T) {
 	}
 	if subj, ok := PrincipalSubject(context.Background()); subj != "" || ok {
 		t.Errorf("empty ctx: got (%q,%v), want ('',false)", subj, ok)
+	}
+}
+
+func TestPublicPrincipalAssuranceSelectsVerifiedOrigin(t *testing.T) {
+	user := operations.Principal{Type: "user", ID: "usr_alice"}
+	bot := operations.Principal{Type: "service_account", ID: "sva_worker"}
+	base := operations.WithPrincipal(t.Context(), user)
+	trusted := grpcsrv.WithTrustedPrincipal(base, user, true)
+	forwarded := grpcsrv.WithTrustedACR(trusted, "1", true)
+	presented := callerorigin.With(base, callerorigin.PresentedCredential)
+	presentedBot := callerorigin.With(operations.WithPrincipal(t.Context(), bot), callerorigin.PresentedCredential)
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		want operations.Principal
+	}{
+		{name: "forwarded", ctx: forwarded, want: user},
+		{name: "presented", ctx: callerorigin.WithAssurance(presented, "1"), want: user},
+		{name: "verified service account", ctx: presentedBot, want: bot},
+		{name: "principal alone", ctx: base},
+		{name: "unbound forwarded identity", ctx: grpcsrv.WithTrustedPrincipal(t.Context(), user, true)},
+		{name: "mismatched forwarded identity", ctx: operations.WithPrincipal(forwarded, bot)},
+		{name: "forwarded level unavailable", ctx: trusted},
+		{name: "presented level unavailable", ctx: presented},
+		{name: "presented level without verification", ctx: callerorigin.WithAssurance(base, "1")},
+		{name: "presented level cannot borrow forwarded assurance", ctx: callerorigin.With(forwarded, callerorigin.PresentedCredential)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := RequirePublicPrincipalACR(tc.ctx, "1")
+			if tc.want.ID == "" {
+				require.Equal(t, codes.PermissionDenied, status.Code(err))
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tc.want, actual)
+		})
 	}
 }

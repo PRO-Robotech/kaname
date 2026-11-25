@@ -14,7 +14,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/PRO-Robotech/corelib/grpcsrv"
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/callerorigin"
 )
 
 // fgaReservedChars — characters that carry meaning inside an FGA subject string
@@ -113,4 +115,43 @@ func PrincipalSubject(ctx context.Context) (string, bool) {
 		return "", false
 	}
 	return SubjectFromPrincipal(operations.PrincipalFromContext(ctx))
+}
+
+// VerifiedPublicPrincipal принимает вызывающего с публичного слушателя,
+// чью личность проверил читатель удостоверения либо доверенный пересыльщик.
+func VerifiedPublicPrincipal(ctx context.Context) (operations.Principal, bool) {
+	caller, present := operations.PrincipalFromContextOK(ctx)
+	if _, valid := SubjectFromPrincipal(caller); !present || !valid {
+		return operations.Principal{}, false
+	}
+	if callerorigin.IsPresentedCredential(ctx) {
+		return caller, true
+	}
+	forwarded, trusted := grpcsrv.TrustedPrincipalFromContext(ctx)
+	if !trusted || caller.Type != forwarded.Type || caller.ID != forwarded.ID {
+		return operations.Principal{}, false
+	}
+	return forwarded, true
+}
+
+// RequirePublicPrincipalACR берёт уровень из того же источника, что и
+// личность, и применяет общий порог доверия для публичных операций.
+func RequirePublicPrincipalACR(ctx context.Context, minimum string) (operations.Principal, error) {
+	principal, valid := VerifiedPublicPrincipal(ctx)
+	if !valid {
+		return operations.Principal{}, PermissionDenied()
+	}
+	if !callerorigin.IsPresentedCredential(ctx) {
+		if err := RequireTrustedACR(ctx, minimum); err != nil {
+			return operations.Principal{}, err
+		}
+		return principal, nil
+	}
+	acr, _ := callerorigin.AssuranceFrom(ctx)
+	if grpcsrv.EvaluateStepUp(grpcsrv.StepUpInput{
+		PrincipalType: principal.Type, PresentedACR: acr, RequiredACR: minimum,
+	}) != grpcsrv.StepUpAllow {
+		return operations.Principal{}, acrStepUpDenied(minimum)
+	}
+	return principal, nil
 }

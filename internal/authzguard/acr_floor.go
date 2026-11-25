@@ -177,6 +177,11 @@ func (f *ACRFloor) allow(ctx context.Context, fullMethod string) error {
 	// rule never exempts. Forging `x-kacho-principal-type: service_account`
 	// therefore buys nothing (internalCallerPolicy already denied a non-gateway
 	// SAN before this floor — this is the second lock on the same door).
+	return RequireTrustedACR(ctx, required)
+}
+
+// RequireTrustedACR применяет общее правило step-up к доверенным данным границы.
+func RequireTrustedACR(ctx context.Context, required string) error {
 	acr, _ := grpcsrv.TrustedACRFromContext(ctx)
 	principalType := ""
 	if p, trusted := grpcsrv.TrustedPrincipalFromContext(ctx); trusted {
