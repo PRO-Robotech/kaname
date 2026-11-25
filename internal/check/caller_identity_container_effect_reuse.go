@@ -120,6 +120,10 @@ func (g *callerGraph) callerObjectMemoHasCapacity(weight int) bool {
 // сохранённые локально. Владение вызывающему не передаётся. При отказе сертификата
 // выполняется полный прежний обход; новый UNKNOWN не добавляется.
 func (c *callerContainerObjectReuse) objects(g *callerGraph, src valueSrc) (map[callerObjectKey]bool, bool) {
+	return c.writeObjects(g, src, false)
+}
+
+func (c *callerContainerObjectReuse) writeObjects(g *callerGraph, src valueSrc, sampleOwner bool) (map[callerObjectKey]bool, bool) {
 	if !g.lifetimeScanning || g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 		*c = callerContainerObjectReuse{}
 		return g.callerObjects(src, map[callerObjectSourceID]bool{})
@@ -127,6 +131,9 @@ func (c *callerContainerObjectReuse) objects(g *callerGraph, src valueSrc) (map[
 	key := callerResolveKeyFor(src, true)
 	if c.graph != g || c.key != key {
 		*c = callerContainerObjectReuse{graph: g, key: key}
+		if sampleOwner {
+			return g.callerContainerOwnerObjects(src, key)
+		}
 		return g.callerObjects(src, map[callerObjectSourceID]bool{})
 	}
 	state := g.callerContainerObjectState()
@@ -166,5 +173,64 @@ func (c *callerContainerObjectReuse) objects(g *callerGraph, src valueSrc) (map[
 	}
 	c.ready, c.answer, c.state = true, callerObjectAnswer{objects, unknown}, state
 	c.scope, c.effects, c.weight = scope, effects, weight
+	return objects, unknown
+}
+
+// Три дешёвых промаха одного владельца разрешают восемь обычных обходов без
+// внешнего execution-снимка. В таблице нет ответов и семантических отметок.
+// Коллизия, смена эпохи или новый namespace начинают измерение заново.
+type callerContainerOwnerAdmission struct {
+	source            callerObjectSourceID
+	epoch             int
+	misses, remaining uint8
+}
+
+func (g *callerGraph) callerContainerOwnerObjects(src valueSrc, key callerResolveKey) (map[callerObjectKey]bool, bool) {
+	seen := map[callerObjectSourceID]bool{}
+	c := g.objectExecutions
+	id := g.objectSourceIDs[key]
+	if c == nil || c.graph != g || id == 0 || !callerFreshReplayContext(g.ctx) || g.objectMemoEpoch != g.bindingEpoch || g.initialObjectMemo == nil {
+		return g.callerObjects(src, seen)
+	}
+	if _, complete := g.initialObjectMemo[id]; complete {
+		return g.callerObjects(src, seen)
+	}
+	slot := &c.containerOwners[uint64(id)%uint64(len(c.containerOwners))]
+	if slot.source != id || slot.epoch != g.bindingEpoch {
+		*slot = callerContainerOwnerAdmission{source: id, epoch: g.bindingEpoch}
+	}
+	raw := g.work.ObjectRawEvaluations
+	if slot.remaining > 0 {
+		slot.remaining--
+		g.work.ContainerOwnerAdmissionBypasses++
+		g.work.ObjectExecutionFallbacks++
+		// Как у внешнего входа, закрываем suspended traces и списываем прошлые
+		// поколения. Внутренний обход сохраняет собственные tickets, обычный
+		// memo, полный seen, начальные границы, UNKNOWN и связывание вызовов.
+		g.taintCallerTraces()
+		c.advance(g)
+		objects, unknown, _ := g.callerObjectsOwned(src, seen)
+		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
+			return nil, true
+		}
+		if g.work.ObjectRawEvaluations-raw > 3 && slot.source == id && slot.epoch == g.bindingEpoch {
+			slot.remaining = 0
+		}
+		return objects, unknown
+	}
+	before := *slot
+	queries, hits := g.work.ObjectExecutionQueries, g.work.ObjectExecutionHits
+	objects, unknown := g.callerObjects(src, seen)
+	if *slot != before || c != g.objectExecutions || c.graph != g || g.bindingEpoch != before.epoch {
+		return objects, unknown
+	}
+	if g.work.ObjectExecutionQueries-queries == 1 && g.work.ObjectExecutionHits == hits && g.work.ObjectRawEvaluations-raw <= 3 {
+		slot.misses++
+		if slot.misses == 3 {
+			slot.misses, slot.remaining = 0, 8
+		}
+	} else {
+		slot.misses = 0
+	}
 	return objects, unknown
 }

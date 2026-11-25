@@ -63,6 +63,7 @@ type callerObjectExecutions struct {
 	originRecords   *callerOriginRecord
 	originAccount   bool
 	originIndex     *callerOriginIndex
+	containerOwners [32]callerContainerOwnerAdmission
 }
 
 // В execution-снимке heads не удерживается: при полном tracked-доказательстве

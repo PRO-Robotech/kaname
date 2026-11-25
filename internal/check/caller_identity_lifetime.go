@@ -966,7 +966,7 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 			g.observeContainerPair(ownerType, typ)
 		}
 		g.work.ContainerTypeCompatibleWrites++
-		owners, u := ownerReuse.objects(g, write.owner)
+		owners, u := ownerReuse.writeObjects(g, write.owner, true)
 		unknown = unknown || u
 		matched := false
 		for object := range owners {

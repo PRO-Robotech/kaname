@@ -461,3 +461,77 @@ func TestCallerIdentityContainerEffectReuseCannotCrossGraphs(t *testing.T) {
 		t.Fatal("independent graph reused or changed another solve's answer")
 	}
 }
+
+func TestCallerIdentityContainerOwnerAdmissionChangingFields(t *testing.T) {
+	g, field, base, literals := callerExecutionSnapshotFixture(t)
+	g.ctx = context.Background()
+	callerPrimeObjectExecution(t, g, field)
+	g.containerScanning = map[callerResolveKey]bool{}
+	// Меняем одновременно присоединённые объекты и UNKNOWN. Каждый scope
+	// уникален даже при повторении поля; все зависимые literal memo уже прогреты.
+	for i := range 12 {
+		name := []string{"Benign", "Concrete"}[i%2]
+		g.fieldQueries[0].refs[0] = literals[name]
+		g.fieldQueries[0].unknown = i%2 == 1
+		guard := base
+		guard.tuple = 100 + i
+		k := callerResolveKeyFor(guard, true)
+		g.containerScanning[k] = true
+		before, marks := g.work, callerReuseMarks(g)
+		var owner callerContainerObjectReuse
+		got, unknown := owner.writeObjects(g, field, true)
+		delta := callerReuseDelta(g, marks)
+		bypasses := g.work.ContainerOwnerAdmissionBypasses - before.ContainerOwnerAdmissionBypasses
+		queries := g.work.ObjectExecutionQueries - before.ObjectExecutionQueries
+		if i >= 3 && i < 11 {
+			if bypasses != 1 || queries != 0 || g.work.ObjectRawEvaluations == before.ObjectRawEvaluations {
+				t.Fatalf("step %d: bypasses=%d execution queries=%d", i, bypasses, queries)
+			}
+		} else if bypasses != 0 || queries != 1 {
+			t.Fatalf("step %d: bypasses=%d execution queries=%d", i, bypasses, queries)
+		}
+		marks = callerReuseMarks(g)
+		want, otherUnknown := g.callerObjects(field, map[callerObjectSourceID]bool{})
+		if !maps.Equal(got, callerEffectCertificateObjects(t, field, base, literals, name)) || !maps.Equal(got, want) || unknown != otherUnknown || unknown != g.fieldQueries[0].unknown || delta != callerReuseDelta(g, marks) || delta[0] <= delta[1] {
+			t.Fatalf("step %d lost a field object, UNKNOWN or recursion boundary", i)
+		}
+		delete(g.containerScanning, k)
+	}
+}
+
+func TestCallerIdentityContainerOwnerAdmissionRebindAndFallback(t *testing.T) {
+	g, field, _, _ := callerExecutionSnapshotFixture(t)
+	callerPrimeObjectExecution(t, g, field)
+	id := g.internObjectSource(field)
+	c := g.objectExecutions
+	slot := &c.containerOwners[uint64(id)%uint64(len(c.containerOwners))]
+	*slot = callerContainerOwnerAdmission{source: id, epoch: g.bindingEpoch, remaining: 8}
+	checkpoints := 0
+	g.ctx = &callerExecutionResetContext{Context: context.Background(), checkpoint: func() { checkpoints++ }}
+	var owner callerContainerObjectReuse
+	got, unknown := owner.writeObjects(g, field, true)
+	if unknown || len(got) == 0 || checkpoints == 0 || slot.remaining != 8 || g.work.ContainerOwnerAdmissionBypasses != 0 {
+		t.Fatal("opaque context left the original object path")
+	}
+	g.ctx = context.Background()
+	g.bindingEpoch++
+	g.callerObjects(field, map[callerObjectSourceID]bool{})
+	owner = callerContainerObjectReuse{}
+	owner.writeObjects(g, field, true)
+	if slot.epoch != g.bindingEpoch || slot.source != id || slot.remaining != 0 || g.work.ContainerOwnerAdmissionBypasses != 0 {
+		t.Fatal("new bindings inherited an admission decision")
+	}
+	g.resetCallerObjectExecutions()
+	replacement := g.objectExecutions
+	if replacement == c || replacement.containerOwners[uint64(id)%uint64(len(replacement.containerOwners))] != (callerContainerOwnerAdmission{}) {
+		t.Fatal("new root inherited owner admission history")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g.ctx = ctx
+	owner = callerContainerObjectReuse{}
+	got, unknown = owner.writeObjects(g, field, true)
+	if len(got) != 0 || !unknown || owner.ready || g.work.ContainerOwnerAdmissionBypasses != 0 {
+		t.Fatal("canceled owner did not take the ordinary conservative path")
+	}
+}
