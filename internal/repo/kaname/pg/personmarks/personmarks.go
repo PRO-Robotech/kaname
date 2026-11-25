@@ -42,15 +42,39 @@ type Querier interface {
 // Read — ответ оператора: идентификатор строки человека → подтверждён ли её
 // текущий адрес. Ошибка — «спросить не смогли»: третий исход, а не «подтверждён».
 func Read(ctx context.Context, q Querier, ids []string) (map[string]bool, error) {
-	out := make(map[string]bool, len(ids))
 	if len(ids) == 0 {
-		return out, nil
+		return make(map[string]bool), nil
 	}
 	rows, err := q.Query(ctx, marksSQL, ids)
+	return readRows(rows, err, len(ids))
+}
+
+// ReadPool читает тем же оператором на соединении пула.
+func ReadPool(ctx context.Context, pool *pgxpool.Pool, ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return make(map[string]bool), nil
+	}
+	rows, err := pool.Query(ctx, marksSQL, ids)
+	return readRows(rows, err, len(ids))
+}
+
+// ReadPoolTx читает в уже принадлежащей вызывающему транзакции пула.
+// Контекст, закрепление и откат остаются у вызывающего; новое соединение не берётся.
+func ReadPoolTx(ctx context.Context, tx *pgxpool.Tx, ids []string) (map[string]bool, error) {
+	if len(ids) == 0 {
+		return make(map[string]bool), nil
+	}
+	rows, err := tx.Query(ctx, marksSQL, ids)
+	return readRows(rows, err, len(ids))
+}
+
+// readRows — общий декодер и владелец закрытия результата всех способов чтения.
+func readRows(rows pgx.Rows, err error, count int) (map[string]bool, error) {
 	if err != nil {
-		return nil, fmt.Errorf("personmarks: address marks of %d ids: %w", len(ids), err)
+		return nil, fmt.Errorf("personmarks: address marks of %d ids: %w", count, err)
 	}
 	defer rows.Close()
+	out := make(map[string]bool, count)
 	for rows.Next() {
 		var (
 			id       string

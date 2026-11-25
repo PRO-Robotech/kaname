@@ -25,13 +25,6 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 )
 
-// ceremonyQuerier — соединение, на котором читает путь церемонии: транзакция
-// единицы работы, иначе транзакция запроса обмена, иначе пул.
-type ceremonyQuerier interface {
-	rowQuerier
-	personmarks.Querier
-}
-
 // CeremonyIssuanceRule — читатель правила выдачи для порта выпуска церемонии;
 // реализует `revocationpolicy.Lookup`.
 type CeremonyIssuanceRule struct{ pool *pgxpool.Pool }
@@ -41,24 +34,29 @@ func NewCeremonyIssuanceRule(pool *pgxpool.Pool) *CeremonyIssuanceRule {
 	return &CeremonyIssuanceRule{pool: pool}
 }
 
-func (r *CeremonyIssuanceRule) querier(ctx context.Context) ceremonyQuerier {
+// ceremonyIssuanceTransaction сохраняет приоритет единицы работы над открытым
+// запросом. Конкретный тип не теряет принадлежность транзакции пулу.
+func ceremonyIssuanceTransaction(ctx context.Context) (*pgxpool.Tx, bool) {
 	if u, ok := unitFrom(ctx); ok && u.tx != nil {
-		return u.tx
+		return u.tx, true
 	}
-	if tx, ok := requestTx(ctx); ok {
-		return tx
-	}
-	return r.pool
+	return requestTx(ctx)
 }
 
 // UserRevokedBefore — отсечка человека (тот же оператор, что у остальных её
 // читателей).
 func (r *CeremonyIssuanceRule) UserRevokedBefore(ctx context.Context, userID string) (time.Time, bool, error) {
-	return revokedBeforeQ(ctx, r.querier(ctx), userID)
+	if tx, ok := ceremonyIssuanceTransaction(ctx); ok {
+		return revokedBeforePoolTx(ctx, tx, userID)
+	}
+	return revokedBeforePool(ctx, r.pool, userID)
 }
 
 // PersonMarks — отметки адреса (`admission.Marks`) единственным оператором
 // чтения отметки.
 func (r *CeremonyIssuanceRule) PersonMarks(ctx context.Context, ids []string) (map[string]bool, error) {
-	return personmarks.Read(ctx, r.querier(ctx), ids)
+	if tx, ok := ceremonyIssuanceTransaction(ctx); ok {
+		return personmarks.ReadPoolTx(ctx, tx, ids)
+	}
+	return personmarks.ReadPool(ctx, r.pool, ids)
 }

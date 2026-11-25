@@ -25,7 +25,7 @@
 //
 // ПЕРЕВОДЧИК ответа операции над ролью — не-тестовая функция, у которой (а)
 // результаты ровно `(*anypb.Any, error)`, (б) есть параметр типа `domain.Role`
-// и (в) в теле стоит вызов перевода `dto.Transfer`. Каждый такой переводчик
+// и (в) в теле стоит вызов перевода `dto.Transfer` или `dto.Convert`. Каждый такой переводчик
 // обязан звать проекцию (`domain.Role.WithoutComputedState`). Не зовёт —
 // находка с координатой.
 //
@@ -55,12 +55,13 @@ import (
 
 // RoleOperationResponseStateOptions — вход анализатора.
 type RoleOperationResponseStateOptions struct {
-	Root             string
-	ServiceRoot      string
-	DomainPkg        string
-	RoleType         string
-	TransferFunc     string
-	ProjectionMethod string
+	Root              string
+	ServiceRoot       string
+	DomainPkg         string
+	RoleType          string
+	TransferFunc      string
+	ValueTransferFunc string
+	ProjectionMethod  string
 }
 
 // RoleOperationResponseStateCensus — объём осмотренного.
@@ -132,7 +133,8 @@ func AuditRoleOperationResponseState(
 			if !roleOpStateTakesRole(fn.Type, opts) {
 				continue
 			}
-			if !roleOpStateCalls(fn.Body, opts.TransferFunc) {
+			if !roleOpStateCalls(fn.Body, opts.TransferFunc) &&
+				!roleOpStateCalls(fn.Body, opts.ValueTransferFunc) {
 				continue
 			}
 			census.RoleTranslators++
@@ -169,11 +171,15 @@ func AuditRoleOperationResponseState(
 		return findings, census, fmt.Errorf(
 			"разобрано ноль функций в %s: разбор перестал видеть объявления", root)
 	case census.RoleTranslators == 0:
+		transfers := opts.TransferFunc
+		if opts.ValueTransferFunc != "" {
+			transfers += " или " + opts.ValueTransferFunc
+		}
 		return findings, census, fmt.Errorf(
 			"переводчиков роли в ответ операции найдено ноль: признак разошёлся с деревом, "+
 				"и «находок ноль» здесь означает «прочитано ноль» (искали функцию с "+
 				"результатами (*anypb.Any, error), параметром %s.%s и вызовом %s)",
-			opts.DomainPkg, opts.RoleType, opts.TransferFunc)
+			opts.DomainPkg, opts.RoleType, transfers)
 	}
 	return findings, census, nil
 }
@@ -207,6 +213,9 @@ func roleOpStateTakesRole(ft *ast.FuncType, opts RoleOperationResponseStateOptio
 }
 
 func roleOpStateCalls(body *ast.BlockStmt, name string) bool {
+	if name == "" {
+		return false
+	}
 	found := false
 	ast.Inspect(body, func(n ast.Node) bool {
 		if found {
@@ -216,7 +225,15 @@ func roleOpStateCalls(body *ast.BlockStmt, name string) bool {
 		if !ok {
 			return true
 		}
-		switch f := call.Fun.(type) {
+		// Явные аргументы типов не меняют имя вызываемого переводчика.
+		fun := call.Fun
+		switch f := fun.(type) {
+		case *ast.IndexExpr:
+			fun = f.X
+		case *ast.IndexListExpr:
+			fun = f.X
+		}
+		switch f := fun.(type) {
 		case *ast.Ident:
 			if f.Name == name {
 				found = true

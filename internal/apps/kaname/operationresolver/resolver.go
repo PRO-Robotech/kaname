@@ -355,8 +355,8 @@ func resolveAccessKey(
 	if !present {
 		return interrupted(), nil
 	}
-	var pb *iamv1.AccessKey
-	if err := dto.Transfer(dto.FromTo(key, &pb)); err != nil {
+	pb, err := dto.Convert[*iamv1.AccessKey, domain.AccessKey, *dto.DTO[domain.AccessKey, *iamv1.AccessKey]](key)
+	if err != nil {
 		return operations.ResolverResult{}, fmt.Errorf("operationresolver: project access key %q: %w", keyID, err)
 	}
 	resp, err := anypb.New(&iamv1.RegisterAccessKeyResponse{AccessKey: pb})
@@ -422,48 +422,48 @@ func interrupted() operations.ResolverResult {
 // ---- domain → Any маршалеры (через DTO-реестр) ----
 
 func marshalMembership(m domain.Membership) (*anypb.Any, error) {
-	var dst *iamv1.Membership
-	if err := dto.Transfer(dto.FromTo(m, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.Membership, domain.Membership, *dto.DTO[domain.Membership, *iamv1.Membership]](m)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalAccount(a domain.Account) (*anypb.Any, error) {
-	var dst *iamv1.Account
-	if err := dto.Transfer(dto.FromTo(a, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.Account, domain.Account, *dto.DTO[domain.Account, *iamv1.Account]](a)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalProject(p domain.Project) (*anypb.Any, error) {
-	var dst *iamv1.Project
-	if err := dto.Transfer(dto.FromTo(p, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.Project, domain.Project, *dto.DTO[domain.Project, *iamv1.Project]](p)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalUser(u domain.User) (*anypb.Any, error) {
-	var dst *iamv1.User
-	if err := dto.Transfer(dto.FromTo(u, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.User, domain.User, *dto.DTO[domain.User, *iamv1.User]](u)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalServiceAccount(s domain.ServiceAccount) (*anypb.Any, error) {
-	var dst *iamv1.ServiceAccount
-	if err := dto.Transfer(dto.FromTo(s, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.ServiceAccount, domain.ServiceAccount, *dto.DTO[domain.ServiceAccount, *iamv1.ServiceAccount]](s)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalGroup(g domain.Group) (*anypb.Any, error) {
-	var dst *iamv1.Group
-	if err := dto.Transfer(dto.FromTo(g, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.Group, domain.Group, *dto.DTO[domain.Group, *iamv1.Group]](g)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
@@ -485,24 +485,24 @@ func (r *Resolver) marshalRole(role domain.Role) (*anypb.Any, error) {
 	}
 	role = role.WithoutComputedState()
 	role.TypeVerbs = r.cat.Facts().RolePreviewLookup()
-	var dst *iamv1.Role
-	if err := dto.Transfer(dto.FromTo(role, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.Role, domain.Role, *dto.DTO[domain.Role, *iamv1.Role]](role)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalAccessBinding(ab domain.AccessBinding) (*anypb.Any, error) {
-	var dst *iamv1.AccessBinding
-	if err := dto.Transfer(dto.FromTo(ab, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.AccessBinding, domain.AccessBinding, *dto.DTO[domain.AccessBinding, *iamv1.AccessBinding]](ab)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)
 }
 
 func marshalGrantDelegation(d domain.GrantDelegation) (*anypb.Any, error) {
-	var dst *iamv1.GrantDelegation
-	if err := dto.Transfer(dto.FromTo(d, &dst)); err != nil {
+	dst, err := dto.Convert[*iamv1.GrantDelegation, domain.GrantDelegation, *dto.DTO[domain.GrantDelegation, *iamv1.GrantDelegation]](d)
+	if err != nil {
 		return nil, err
 	}
 	return anypb.New(dst)

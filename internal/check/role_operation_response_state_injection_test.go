@@ -37,11 +37,12 @@ func roleOpStateInjOptions(t *testing.T, src string) check.RoleOperationResponse
 		t.Fatalf("файл пробы: %v", err)
 	}
 	return check.RoleOperationResponseStateOptions{
-		Root:             root,
-		DomainPkg:        "domain",
-		RoleType:         "Role",
-		TransferFunc:     "Transfer",
-		ProjectionMethod: "WithoutComputedState",
+		Root:              root,
+		DomainPkg:         "domain",
+		RoleType:          "Role",
+		TransferFunc:      "Transfer",
+		ValueTransferFunc: "Convert",
+		ProjectionMethod:  "WithoutComputedState",
 	}
 }
 
@@ -220,5 +221,59 @@ func marshalGroup(g domain.Group) (*anypb.Any, error) {
 	if c.Funcs == 0 {
 		t.Fatal("дерево без переводчиков роли: разобрано ноль функций — отказ выше пришёл " +
 			"от пустого обхода, а не от пустого предмета")
+	}
+}
+
+// Новый API подчиняется тому же контракту: тип роли, ответ операции и вызов проекции.
+// Синтетическая форма с одним аргументом проверяет AST IndexExpr; полный вызов — IndexListExpr.
+func TestRoleOperationResponseStateValueTransferInjection(t *testing.T) {
+	for _, args := range []string{"*iamv1.Role", "*iamv1.Role, domain.Role, *dto.DTO[domain.Role, *iamv1.Role]"} {
+		t.Run(args, func(t *testing.T) {
+			sound := `package role
+func marshalRole(r domain.Role) (*anypb.Any, error) {
+	dst, err := dto.Convert[` + args + `](r.WithoutComputedState())
+	if err != nil { return nil, err }
+	return anypb.New(dst)
+}
+func marshalGroup(g domain.Group) (*anypb.Any, error) {
+	dst, err := dto.Convert[*iamv1.Group](g)
+	if err != nil { return nil, err }
+	return anypb.New(dst)
+}
+func getRole(r domain.Role) (*iamv1.Role, error) {
+	return dto.Convert[*iamv1.Role](r)
+}
+func delegate(r domain.Role) (*anypb.Any, error) { return marshalRole(r) }
+`
+			// Законный близнец всегда проверяется до снятия проекции.
+			f, c, err := roleOpStateInjRun(t, sound)
+			if err != nil || len(f) != 0 || c.RoleTranslators != 1 || c.ProjectionCalled != 1 || c.AnypbFuncs != 3 {
+				t.Fatalf("законный value-переводчик: findings=%v census=%+v error=%v", f, c, err)
+			}
+			broken := strings.Replace(sound, "r.WithoutComputedState()", "r", 1)
+			commented := strings.Replace(broken, "\tdst, err :=", "\t// WithoutComputedState() упомянут, но не вызван.\n\tdst, err :=", 1)
+			for _, src := range []string{broken, commented} {
+				f, c, err = roleOpStateInjRun(t, src)
+				if err != nil || len(f) != 1 || c.RoleTranslators != 1 || c.ProjectionCalled != 0 {
+					t.Fatalf("снятие проекции: findings=%v census=%+v error=%v", f, c, err)
+				}
+				if f[0].File != "helpers.go" || f[0].Line != 2 || f[0].Func != "marshalRole" {
+					t.Fatalf("потеряна точная координата переводчика: %+v", f[0])
+				}
+			}
+			// Старый и новый API одновременно остаются предметом проверки.
+			valueOnly := strings.NewReplacer(
+				"package role", "",
+				"marshalRole", "marshalValueRole",
+				"marshalGroup", "marshalValueGroup",
+				"getRole", "getValueRole",
+				"delegate", "delegateValue",
+			).Replace(broken)
+			mixed := roleOpStateInjSound + valueOnly
+			f, c, err = roleOpStateInjRun(t, mixed)
+			if err != nil || len(f) != 1 || c.RoleTranslators != 2 || c.ProjectionCalled != 1 {
+				t.Fatalf("смешанный API: findings=%v census=%+v error=%v", f, c, err)
+			}
+		})
 	}
 }
