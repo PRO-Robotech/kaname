@@ -63,16 +63,9 @@ func rulesFromJSON(raw []byte) (domain.Rules, error) {
 }
 
 func (r *roleReader) Get(ctx context.Context, id domain.RoleID) (domain.Role, error) {
-	row := r.tx.QueryRow(ctx,
-		fmt.Sprintf(`SELECT %s FROM roles WHERE id = $1`, roleCols), string(id))
-	out, err := scanRole(row)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return domain.Role{}, iamerr.Wrapf(iamerr.ErrNotFound, "Role %s not found", id)
-		}
-		return domain.Role{}, mapErr(err, "", string(id))
-	}
-	return out, nil
+	out, version, err := r.GetWithVersion(ctx, id)
+	out.ResourceVersion = version
+	return out, err
 }
 
 // GetWithVersion returns the role + its xmin::text OCC token. roles
@@ -429,7 +422,7 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 	if len(conditions) > 0 {
 		where = "WHERE " + strings.Join(conditions, " AND ")
 	}
-	q := fmt.Sprintf(`SELECT %s FROM roles %s ORDER BY created_at ASC, id ASC LIMIT $%d`,
+	q := fmt.Sprintf(`SELECT xmin::text, %s FROM roles %s ORDER BY created_at ASC, id ASC LIMIT $%d`,
 		roleCols, where, argIdx)
 	args = append(args, pageSize+1)
 
@@ -441,10 +434,12 @@ func (r *roleReader) List(ctx context.Context, f role.ListFilter) ([]domain.Role
 
 	var out []domain.Role
 	for rows.Next() {
-		ro, err := scanRole(rows)
+		var version string
+		ro, err := scanRoleWithVersion(rows, &version)
 		if err != nil {
 			return nil, "", mapErr(err, "", "")
 		}
+		ro.ResourceVersion = version
 		out = append(out, ro)
 	}
 	if err := rows.Err(); err != nil {
@@ -764,13 +759,18 @@ func (w *roleWriter) UpdateCAS(ctx context.Context, r domain.Role, updateMask []
 	return out, nil
 }
 
-func (w *roleWriter) updateCASAt(ctx context.Context, r domain.Role, updateMask []string, expectedVersion string, stamp time.Time) (domain.Role, error) {
+func (w *roleWriter) updateCASAt(ctx context.Context, r domain.Role, updateMask []string, expectedVersion string, stamp time.Time, image json.RawMessage) (domain.Role, error) {
 	if err := holdRoleNames(ctx, w.tx, r.HeldNames); err != nil {
 		return domain.Role{}, err
 	}
 	args, changed, err := roleUpdateArgs(r, updateMask)
 	if err != nil {
 		return domain.Role{}, err
+	}
+	if image != nil {
+		// Stamp сопоставил этот образ с той же авторской редакцией и маской.
+		// JSONB сохраняет неизменённые поля, которых нет в Go-проекции.
+		args[6] = []byte(image)
 	}
 	// Пустая маска НЕ выводит из-под сторожа: оператор исполняется с ложными
 	// признаками применимости, то есть переписывает строку теми же значениями.

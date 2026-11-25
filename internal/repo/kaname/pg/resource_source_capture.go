@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
@@ -62,7 +63,25 @@ const (
 	resourceSourceMetadataAuthoredBindings
 	resourceSourceMetadataHistoricalCarriers
 	resourceSourceMetadataPolicyReceipt
+	resourceSourceRoleSelectorObjects
+	resourceSourceRoleNestedDescendants
+	resourceSourceRoleProposedSelectorObjects
+	resourceSourceRoleProposedNestedDescendants
+	resourceSourceRoleMoveObjectUpdate
+	resourceSourceRoleMoveCluster
+	resourceSourceRegistrationScopeBindings
+	resourceSourceRegistrationOtherClusterBindings
 )
+
+func (k resourceSourceKind) roleMoveOnly() bool {
+	switch k {
+	case resourceSourceRoleSelectorObjects, resourceSourceRoleNestedDescendants,
+		resourceSourceRoleProposedSelectorObjects, resourceSourceRoleProposedNestedDescendants, resourceSourceRoleMoveObjectUpdate, resourceSourceRoleMoveCluster:
+		return true
+	default:
+		return false
+	}
+}
 
 type resourceSourceKey struct {
 	kind       resourceSourceKind
@@ -102,12 +121,23 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 	singleKey := false
 	args := []any{k.typ, k.id, limit}
 	switch k.kind {
+	case resourceSourceRegistrationOtherClusterBindings:
+		if k.typ != "cluster" || k.id != domain.ClusterSingletonID || k.projection != "" {
+			return "", nil, kaname.ErrSourceUnconfirmed
+		}
+		from = "ONLY kaname.access_bindings r WHERE r.resource_type=$1 AND r.resource_id IS DISTINCT FROM $2 AND r.role_id IS NOT NULL"
+	case resourceSourceRegistrationScopeBindings:
+		if k.projection != "" || (k.typ != "cluster" && k.typ != "account" && k.typ != "project") ||
+			(k.typ == "cluster" && k.id != domain.ClusterSingletonID) {
+			return "", nil, kaname.ErrSourceUnconfirmed
+		}
+		from = "ONLY kaname.access_bindings r WHERE r.resource_type=$1 AND r.resource_id=$2 AND r.role_id IS NOT NULL"
 	case resourceSourceMetadataBindings, resourceSourceMetadataBindingCoverage, resourceSourceMetadataAuthoredBindings,
 		resourceSourceMetadataHistoricalCarriers:
 		return resourceMetadataBindingsSQL(k, limit)
-	case resourceSourceSelectorObjects:
+	case resourceSourceSelectorObjects, resourceSourceRoleSelectorObjects, resourceSourceRoleProposedSelectorObjects:
 		return resourceSelectorObjectsSQL(k, limit)
-	case resourceSourceNestedDescendants:
+	case resourceSourceNestedDescendants, resourceSourceRoleNestedDescendants, resourceSourceRoleProposedNestedDescendants:
 		return resourceNestedDescendantsSQL(k, limit)
 	case resourceSourceIAMObject:
 		spec, ok := iamDirectScanSpecs[k.typ]
@@ -130,6 +160,10 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 		// Проекция получена тем же RR capture и отдельно сравнивается в RC.
 		// Это сохраняет accountsExpr semantics без незамкнутого ARRAY memberships.
 		args = append(args, k.projection)
+		nested := ""
+		if k.typ == domain.ScopeTypeProjectDotted {
+			nested = " OR " + projectNestedBindingConditionSQL
+		}
 		return `SELECT jsonb_build_array(b.xmin::text,b.ctid::text,to_jsonb(b),
    rrs.xmin::text,rrs.ctid::text,to_jsonb(rrs),o.xmin::text,o.ctid::text,to_jsonb(o))::text,
    jsonb_build_object('binding_id',b.id)::text
@@ -142,7 +176,7 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
      OR (b.resource_type='project' AND b.resource_id=$4::jsonb->>'project')))
      OR (rrs.arm='names' AND $2=ANY(rrs.resource_names))
      OR (rrs.arm='labels' AND o.labels @> rrs.match_labels)
-     OR (rrs.arm='access_labels' AND o.access_labels @> rrs.match_access_labels)) LIMIT $3`, args, nil
+     OR (rrs.arm='access_labels' AND o.access_labels @> rrs.match_access_labels)` + nested + `) LIMIT $3`, args, nil
 	case resourceSourceMatchingMirrorBindings:
 		if !nativeQuestionToken(k.typ) {
 			return "", nil, kaname.ErrSourceUnconfirmed
@@ -176,6 +210,8 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 			return "", nil, kaname.ErrSourceUnconfirmed
 		}
 		from = "kaname.catalog_verb r WHERE r.module='iam' AND r.resource=$1 AND r.verb=$2 AND NOT r.per_object AND r.container_parent IS NULL AND r.container_relation IS NULL"
+	case resourceSourceRoleMoveObjectUpdate:
+		from = "ONLY kaname.catalog_verb r WHERE r.module=$1 AND r.resource=$2 AND r.live AND r.per_object AND r.verb='update'"
 	case resourceSourceProject:
 		if k.typ != "project" {
 			return "", nil, kaname.ErrSourceUnconfirmed
@@ -261,6 +297,12 @@ func resourceSourceSQL(k resourceSourceKey, limit int) (string, []any, error) {
 			return "", nil, kaname.ErrSourceUnconfirmed
 		}
 		from = "kaname.cluster_admin_grants r WHERE $1::text='cluster' AND r.cluster_id=$2"
+	case resourceSourceRoleMoveCluster:
+		if k.typ != "cluster" || k.id != domain.ClusterSingletonID || k.projection != "" {
+			return "", nil, kaname.ErrSourceUnconfirmed
+		}
+		singleKey = true
+		from = "ONLY kaname.clusters r WHERE r.id=$1"
 	case resourceSourceObjectLedger:
 		from = "kaname.access_binding_emitted_tuples r WHERE r.member_object_type=$1 AND r.member_object_id=$2"
 	default:
@@ -378,7 +420,11 @@ func (c *resourceSourceCapture) recheck(ctx context.Context, w *authorityWriteTx
 	tx := w.tx
 	if c.metadataParents != nil {
 		for _, typ := range slices.Sorted(maps.Keys(c.metadataParents.catalogs)) {
-			if err := c.metadataParents.catalogs[typ].recheck(ctx, tx, c.budget); err != nil {
+			catalog := c.metadataParents.catalogs[typ]
+			if catalog == nil || catalog.input != typ {
+				return kaname.ErrSourceUnconfirmed
+			}
+			if err := catalog.recheck(ctx, tx, c.budget); err != nil {
 				return err
 			}
 		}

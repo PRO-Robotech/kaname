@@ -357,7 +357,8 @@ type UpdateRoleRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Role resource to update.
 	RoleId string `protobuf:"bytes,1,opt,name=role_id,json=roleId,proto3" json:"role_id,omitempty"`
-	// Field mask. Allowed fields: name, description, rules, labels.
+	// Поля обычного обновления: name, description, rules, labels, access_labels.
+	// Перенос селектора использует единственный путь access_label_selector_move.
 	// is_system / account_id / project_id / cluster_id / permissions (derived)
 	// are immutable.
 	UpdateMask *fieldmaskpb.FieldMask `protobuf:"bytes,2,opt,name=update_mask,json=updateMask,proto3" json:"update_mask,omitempty"`
@@ -387,9 +388,13 @@ type UpdateRoleRequest struct {
 	// всю карту, в том числе очищает при пустом/отсутствующем поле.
 	// При пустой маске отсутствие/пустая proto3 map сохраняет карту;
 	// непустая map задаёт замену. Для очистки нужна явная маска access_labels.
-	AccessLabels  map[string]string `protobuf:"bytes,9,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	AccessLabels map[string]string `protobuf:"bytes,9,rep,name=access_labels,json=accessLabels,proto3" json:"access_labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	// Явный перенос выбранных селекторов на защищённые метки. Требует
+	// resource_version из Get/List и единственный путь access_label_selector_move
+	// в update_mask. Остальные изменяемые поля должны отсутствовать.
+	AccessLabelSelectorMove *RoleAccessLabelSelectorMove `protobuf:"bytes,10,opt,name=access_label_selector_move,json=accessLabelSelectorMove,proto3" json:"access_label_selector_move,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *UpdateRoleRequest) Reset() {
@@ -486,6 +491,58 @@ func (x *UpdateRoleRequest) GetAccessLabels() map[string]string {
 	return nil
 }
 
+func (x *UpdateRoleRequest) GetAccessLabelSelectorMove() *RoleAccessLabelSelectorMove {
+	if x != nil {
+		return x.AccessLabelSelectorMove
+	}
+	return nil
+}
+
+type RoleAccessLabelSelectorMove struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Непустой список без повторов.
+	Positions     []*RoleAccessLabelSelectorMove_Position `protobuf:"bytes,1,rep,name=positions,proto3" json:"positions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoleAccessLabelSelectorMove) Reset() {
+	*x = RoleAccessLabelSelectorMove{}
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoleAccessLabelSelectorMove) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoleAccessLabelSelectorMove) ProtoMessage() {}
+
+func (x *RoleAccessLabelSelectorMove) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoleAccessLabelSelectorMove.ProtoReflect.Descriptor instead.
+func (*RoleAccessLabelSelectorMove) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *RoleAccessLabelSelectorMove) GetPositions() []*RoleAccessLabelSelectorMove_Position {
+	if x != nil {
+		return x.Positions
+	}
+	return nil
+}
+
 type DeleteRoleRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// ID of the Role resource to delete.
@@ -496,7 +553,7 @@ type DeleteRoleRequest struct {
 
 func (x *DeleteRoleRequest) Reset() {
 	*x = DeleteRoleRequest{}
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -508,7 +565,7 @@ func (x *DeleteRoleRequest) String() string {
 func (*DeleteRoleRequest) ProtoMessage() {}
 
 func (x *DeleteRoleRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[5]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -521,7 +578,7 @@ func (x *DeleteRoleRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteRoleRequest.ProtoReflect.Descriptor instead.
 func (*DeleteRoleRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{5}
+	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DeleteRoleRequest) GetRoleId() string {
@@ -547,7 +604,7 @@ type ListRoleOperationsRequest struct {
 
 func (x *ListRoleOperationsRequest) Reset() {
 	*x = ListRoleOperationsRequest{}
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -559,7 +616,7 @@ func (x *ListRoleOperationsRequest) String() string {
 func (*ListRoleOperationsRequest) ProtoMessage() {}
 
 func (x *ListRoleOperationsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[6]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -572,7 +629,7 @@ func (x *ListRoleOperationsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleOperationsRequest.ProtoReflect.Descriptor instead.
 func (*ListRoleOperationsRequest) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{6}
+	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListRoleOperationsRequest) GetRoleId() string {
@@ -608,7 +665,7 @@ type ListRoleOperationsResponse struct {
 
 func (x *ListRoleOperationsResponse) Reset() {
 	*x = ListRoleOperationsResponse{}
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -620,7 +677,7 @@ func (x *ListRoleOperationsResponse) String() string {
 func (*ListRoleOperationsResponse) ProtoMessage() {}
 
 func (x *ListRoleOperationsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[7]
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -633,7 +690,7 @@ func (x *ListRoleOperationsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListRoleOperationsResponse.ProtoReflect.Descriptor instead.
 func (*ListRoleOperationsResponse) Descriptor() ([]byte, []int) {
-	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{7}
+	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListRoleOperationsResponse) GetOperations() []*operation.Operation {
@@ -648,6 +705,60 @@ func (x *ListRoleOperationsResponse) GetNextPageToken() string {
 		return x.NextPageToken
 	}
 	return ""
+}
+
+type RoleAccessLabelSelectorMove_Position struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Обязательная позиция правила в текущей версии, начиная с нуля.
+	RuleIndex *uint32 `protobuf:"varint,1,opt,name=rule_index,json=ruleIndex,proto3,oneof" json:"rule_index,omitempty"`
+	// Позиция вложенного правила с нуля. Если отсутствует, выбран родитель.
+	ChildIndex    *uint32 `protobuf:"varint,2,opt,name=child_index,json=childIndex,proto3,oneof" json:"child_index,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RoleAccessLabelSelectorMove_Position) Reset() {
+	*x = RoleAccessLabelSelectorMove_Position{}
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RoleAccessLabelSelectorMove_Position) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RoleAccessLabelSelectorMove_Position) ProtoMessage() {}
+
+func (x *RoleAccessLabelSelectorMove_Position) ProtoReflect() protoreflect.Message {
+	mi := &file_kaname_cloud_iam_v1_role_service_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RoleAccessLabelSelectorMove_Position.ProtoReflect.Descriptor instead.
+func (*RoleAccessLabelSelectorMove_Position) Descriptor() ([]byte, []int) {
+	return file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP(), []int{5, 0}
+}
+
+func (x *RoleAccessLabelSelectorMove_Position) GetRuleIndex() uint32 {
+	if x != nil && x.RuleIndex != nil {
+		return *x.RuleIndex
+	}
+	return 0
+}
+
+func (x *RoleAccessLabelSelectorMove_Position) GetChildIndex() uint32 {
+	if x != nil && x.ChildIndex != nil {
+		return *x.ChildIndex
+	}
+	return 0
 }
 
 var File_kaname_cloud_iam_v1_role_service_proto protoreflect.FileDescriptor
@@ -684,7 +795,7 @@ const file_kaname_cloud_iam_v1_role_service_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
 	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xc8\x04\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xb7\x05\n" +
 	"\x11UpdateRoleRequest\x12\x17\n" +
 	"\arole_id\x18\x01 \x01(\tR\x06roleId\x12;\n" +
 	"\vupdate_mask\x18\x02 \x01(\v2\x1a.google.protobuf.FieldMaskR\n" +
@@ -695,13 +806,24 @@ const file_kaname_cloud_iam_v1_role_service_proto_rawDesc = "" +
 	"\x05rules\x18\x06 \x03(\v2\x19.kaname.cloud.iam.v1.RuleR\x05rules\x12)\n" +
 	"\x10resource_version\x18\a \x01(\tR\x0fresourceVersion\x12J\n" +
 	"\x06labels\x18\b \x03(\v22.kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntryR\x06labels\x12]\n" +
-	"\raccess_labels\x18\t \x03(\v28.kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntryR\faccessLabels\x1a9\n" +
+	"\raccess_labels\x18\t \x03(\v28.kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntryR\faccessLabels\x12m\n" +
+	"\x1aaccess_label_selector_move\x18\n" +
+	" \x01(\v20.kaname.cloud.iam.v1.RoleAccessLabelSelectorMoveR\x17accessLabelSelectorMove\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a?\n" +
 	"\x11AccessLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\",\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xeb\x01\n" +
+	"\x1bRoleAccessLabelSelectorMove\x12W\n" +
+	"\tpositions\x18\x01 \x03(\v29.kaname.cloud.iam.v1.RoleAccessLabelSelectorMove.PositionR\tpositions\x1as\n" +
+	"\bPosition\x12\"\n" +
+	"\n" +
+	"rule_index\x18\x01 \x01(\rH\x00R\truleIndex\x88\x01\x01\x12$\n" +
+	"\vchild_index\x18\x02 \x01(\rH\x01R\n" +
+	"childIndex\x88\x01\x01B\r\n" +
+	"\v_rule_indexB\x0e\n" +
+	"\f_child_index\",\n" +
 	"\x11DeleteRoleRequest\x12\x17\n" +
 	"\arole_id\x18\x01 \x01(\tR\x06roleId\"p\n" +
 	"\x19ListRoleOperationsRequest\x12\x17\n" +
@@ -742,54 +864,58 @@ func file_kaname_cloud_iam_v1_role_service_proto_rawDescGZIP() []byte {
 	return file_kaname_cloud_iam_v1_role_service_proto_rawDescData
 }
 
-var file_kaname_cloud_iam_v1_role_service_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_kaname_cloud_iam_v1_role_service_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_kaname_cloud_iam_v1_role_service_proto_goTypes = []any{
-	(*GetRoleRequest)(nil),             // 0: kaname.cloud.iam.v1.GetRoleRequest
-	(*ListRolesRequest)(nil),           // 1: kaname.cloud.iam.v1.ListRolesRequest
-	(*ListRolesResponse)(nil),          // 2: kaname.cloud.iam.v1.ListRolesResponse
-	(*CreateRoleRequest)(nil),          // 3: kaname.cloud.iam.v1.CreateRoleRequest
-	(*UpdateRoleRequest)(nil),          // 4: kaname.cloud.iam.v1.UpdateRoleRequest
-	(*DeleteRoleRequest)(nil),          // 5: kaname.cloud.iam.v1.DeleteRoleRequest
-	(*ListRoleOperationsRequest)(nil),  // 6: kaname.cloud.iam.v1.ListRoleOperationsRequest
-	(*ListRoleOperationsResponse)(nil), // 7: kaname.cloud.iam.v1.ListRoleOperationsResponse
-	nil,                                // 8: kaname.cloud.iam.v1.CreateRoleRequest.LabelsEntry
-	nil,                                // 9: kaname.cloud.iam.v1.CreateRoleRequest.AccessLabelsEntry
-	nil,                                // 10: kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntry
-	nil,                                // 11: kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntry
-	(*Role)(nil),                       // 12: kaname.cloud.iam.v1.Role
-	(*Rule)(nil),                       // 13: kaname.cloud.iam.v1.Rule
-	(*DefinitionTier)(nil),             // 14: kaname.cloud.iam.v1.DefinitionTier
-	(*fieldmaskpb.FieldMask)(nil),      // 15: google.protobuf.FieldMask
-	(*operation.Operation)(nil),        // 16: corelib.operation.Operation
+	(*GetRoleRequest)(nil),              // 0: kaname.cloud.iam.v1.GetRoleRequest
+	(*ListRolesRequest)(nil),            // 1: kaname.cloud.iam.v1.ListRolesRequest
+	(*ListRolesResponse)(nil),           // 2: kaname.cloud.iam.v1.ListRolesResponse
+	(*CreateRoleRequest)(nil),           // 3: kaname.cloud.iam.v1.CreateRoleRequest
+	(*UpdateRoleRequest)(nil),           // 4: kaname.cloud.iam.v1.UpdateRoleRequest
+	(*RoleAccessLabelSelectorMove)(nil), // 5: kaname.cloud.iam.v1.RoleAccessLabelSelectorMove
+	(*DeleteRoleRequest)(nil),           // 6: kaname.cloud.iam.v1.DeleteRoleRequest
+	(*ListRoleOperationsRequest)(nil),   // 7: kaname.cloud.iam.v1.ListRoleOperationsRequest
+	(*ListRoleOperationsResponse)(nil),  // 8: kaname.cloud.iam.v1.ListRoleOperationsResponse
+	nil,                                 // 9: kaname.cloud.iam.v1.CreateRoleRequest.LabelsEntry
+	nil,                                 // 10: kaname.cloud.iam.v1.CreateRoleRequest.AccessLabelsEntry
+	nil,                                 // 11: kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntry
+	nil,                                 // 12: kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntry
+	(*RoleAccessLabelSelectorMove_Position)(nil), // 13: kaname.cloud.iam.v1.RoleAccessLabelSelectorMove.Position
+	(*Role)(nil),                  // 14: kaname.cloud.iam.v1.Role
+	(*Rule)(nil),                  // 15: kaname.cloud.iam.v1.Rule
+	(*DefinitionTier)(nil),        // 16: kaname.cloud.iam.v1.DefinitionTier
+	(*fieldmaskpb.FieldMask)(nil), // 17: google.protobuf.FieldMask
+	(*operation.Operation)(nil),   // 18: corelib.operation.Operation
 }
 var file_kaname_cloud_iam_v1_role_service_proto_depIdxs = []int32{
-	12, // 0: kaname.cloud.iam.v1.ListRolesResponse.roles:type_name -> kaname.cloud.iam.v1.Role
-	13, // 1: kaname.cloud.iam.v1.CreateRoleRequest.rules:type_name -> kaname.cloud.iam.v1.Rule
-	8,  // 2: kaname.cloud.iam.v1.CreateRoleRequest.labels:type_name -> kaname.cloud.iam.v1.CreateRoleRequest.LabelsEntry
-	14, // 3: kaname.cloud.iam.v1.CreateRoleRequest.definition_tier:type_name -> kaname.cloud.iam.v1.DefinitionTier
-	9,  // 4: kaname.cloud.iam.v1.CreateRoleRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateRoleRequest.AccessLabelsEntry
-	15, // 5: kaname.cloud.iam.v1.UpdateRoleRequest.update_mask:type_name -> google.protobuf.FieldMask
-	13, // 6: kaname.cloud.iam.v1.UpdateRoleRequest.rules:type_name -> kaname.cloud.iam.v1.Rule
-	10, // 7: kaname.cloud.iam.v1.UpdateRoleRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntry
-	11, // 8: kaname.cloud.iam.v1.UpdateRoleRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntry
-	16, // 9: kaname.cloud.iam.v1.ListRoleOperationsResponse.operations:type_name -> corelib.operation.Operation
-	0,  // 10: kaname.cloud.iam.v1.RoleService.Get:input_type -> kaname.cloud.iam.v1.GetRoleRequest
-	1,  // 11: kaname.cloud.iam.v1.RoleService.List:input_type -> kaname.cloud.iam.v1.ListRolesRequest
-	3,  // 12: kaname.cloud.iam.v1.RoleService.Create:input_type -> kaname.cloud.iam.v1.CreateRoleRequest
-	4,  // 13: kaname.cloud.iam.v1.RoleService.Update:input_type -> kaname.cloud.iam.v1.UpdateRoleRequest
-	5,  // 14: kaname.cloud.iam.v1.RoleService.Delete:input_type -> kaname.cloud.iam.v1.DeleteRoleRequest
-	6,  // 15: kaname.cloud.iam.v1.RoleService.ListOperations:input_type -> kaname.cloud.iam.v1.ListRoleOperationsRequest
-	12, // 16: kaname.cloud.iam.v1.RoleService.Get:output_type -> kaname.cloud.iam.v1.Role
-	2,  // 17: kaname.cloud.iam.v1.RoleService.List:output_type -> kaname.cloud.iam.v1.ListRolesResponse
-	16, // 18: kaname.cloud.iam.v1.RoleService.Create:output_type -> corelib.operation.Operation
-	16, // 19: kaname.cloud.iam.v1.RoleService.Update:output_type -> corelib.operation.Operation
-	16, // 20: kaname.cloud.iam.v1.RoleService.Delete:output_type -> corelib.operation.Operation
-	7,  // 21: kaname.cloud.iam.v1.RoleService.ListOperations:output_type -> kaname.cloud.iam.v1.ListRoleOperationsResponse
-	16, // [16:22] is the sub-list for method output_type
-	10, // [10:16] is the sub-list for method input_type
-	10, // [10:10] is the sub-list for extension type_name
-	10, // [10:10] is the sub-list for extension extendee
-	0,  // [0:10] is the sub-list for field type_name
+	14, // 0: kaname.cloud.iam.v1.ListRolesResponse.roles:type_name -> kaname.cloud.iam.v1.Role
+	15, // 1: kaname.cloud.iam.v1.CreateRoleRequest.rules:type_name -> kaname.cloud.iam.v1.Rule
+	9,  // 2: kaname.cloud.iam.v1.CreateRoleRequest.labels:type_name -> kaname.cloud.iam.v1.CreateRoleRequest.LabelsEntry
+	16, // 3: kaname.cloud.iam.v1.CreateRoleRequest.definition_tier:type_name -> kaname.cloud.iam.v1.DefinitionTier
+	10, // 4: kaname.cloud.iam.v1.CreateRoleRequest.access_labels:type_name -> kaname.cloud.iam.v1.CreateRoleRequest.AccessLabelsEntry
+	17, // 5: kaname.cloud.iam.v1.UpdateRoleRequest.update_mask:type_name -> google.protobuf.FieldMask
+	15, // 6: kaname.cloud.iam.v1.UpdateRoleRequest.rules:type_name -> kaname.cloud.iam.v1.Rule
+	11, // 7: kaname.cloud.iam.v1.UpdateRoleRequest.labels:type_name -> kaname.cloud.iam.v1.UpdateRoleRequest.LabelsEntry
+	12, // 8: kaname.cloud.iam.v1.UpdateRoleRequest.access_labels:type_name -> kaname.cloud.iam.v1.UpdateRoleRequest.AccessLabelsEntry
+	5,  // 9: kaname.cloud.iam.v1.UpdateRoleRequest.access_label_selector_move:type_name -> kaname.cloud.iam.v1.RoleAccessLabelSelectorMove
+	13, // 10: kaname.cloud.iam.v1.RoleAccessLabelSelectorMove.positions:type_name -> kaname.cloud.iam.v1.RoleAccessLabelSelectorMove.Position
+	18, // 11: kaname.cloud.iam.v1.ListRoleOperationsResponse.operations:type_name -> corelib.operation.Operation
+	0,  // 12: kaname.cloud.iam.v1.RoleService.Get:input_type -> kaname.cloud.iam.v1.GetRoleRequest
+	1,  // 13: kaname.cloud.iam.v1.RoleService.List:input_type -> kaname.cloud.iam.v1.ListRolesRequest
+	3,  // 14: kaname.cloud.iam.v1.RoleService.Create:input_type -> kaname.cloud.iam.v1.CreateRoleRequest
+	4,  // 15: kaname.cloud.iam.v1.RoleService.Update:input_type -> kaname.cloud.iam.v1.UpdateRoleRequest
+	6,  // 16: kaname.cloud.iam.v1.RoleService.Delete:input_type -> kaname.cloud.iam.v1.DeleteRoleRequest
+	7,  // 17: kaname.cloud.iam.v1.RoleService.ListOperations:input_type -> kaname.cloud.iam.v1.ListRoleOperationsRequest
+	14, // 18: kaname.cloud.iam.v1.RoleService.Get:output_type -> kaname.cloud.iam.v1.Role
+	2,  // 19: kaname.cloud.iam.v1.RoleService.List:output_type -> kaname.cloud.iam.v1.ListRolesResponse
+	18, // 20: kaname.cloud.iam.v1.RoleService.Create:output_type -> corelib.operation.Operation
+	18, // 21: kaname.cloud.iam.v1.RoleService.Update:output_type -> corelib.operation.Operation
+	18, // 22: kaname.cloud.iam.v1.RoleService.Delete:output_type -> corelib.operation.Operation
+	8,  // 23: kaname.cloud.iam.v1.RoleService.ListOperations:output_type -> kaname.cloud.iam.v1.ListRoleOperationsResponse
+	18, // [18:24] is the sub-list for method output_type
+	12, // [12:18] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_kaname_cloud_iam_v1_role_service_proto_init() }
@@ -798,13 +924,14 @@ func file_kaname_cloud_iam_v1_role_service_proto_init() {
 		return
 	}
 	file_kaname_cloud_iam_v1_role_proto_init()
+	file_kaname_cloud_iam_v1_role_service_proto_msgTypes[13].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_kaname_cloud_iam_v1_role_service_proto_rawDesc), len(file_kaname_cloud_iam_v1_role_service_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

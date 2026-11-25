@@ -37,59 +37,14 @@ func (c *resourceOutputCapture) captureWholeBindingDiff(ctx context.Context, par
 	if !whole || !bs.Active {
 		return empty, nil, kaname.ErrSourceUnconfirmed
 	}
-	members, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: resourceSourceBindingMembers, typ: "binding", id: id})
+	coordinates, fullLedger, err := parents.captureBindingDiffHistory(ctx, id)
 	if err != nil {
 		return empty, nil, err
 	}
-	ledger, err := parents.source.read(ctx, parents.tx, resourceSourceKey{kind: resourceSourceBindingLedger, typ: "binding", id: id})
+	keys, err := parents.captureBindingDiffKeys(ctx, facts, coordinates, bs)
 	if err != nil {
 		return empty, nil, err
 	}
-	coordinates, fullLedger, err := resourceBindingDiffCoordinates(id, members, ledger)
-	if err != nil {
-		return empty, nil, err
-	}
-	hasHuman := slices.ContainsFunc(bs.Subjects, func(subject domain.Subject) bool {
-		return subject.Type == domain.SubjectTypeUser
-	})
-	for _, selector := range bs.Selectors {
-		// То же исключение классов и пустого набора глаголов, что у live traversal.
-		if len(domain.GrantRecipients(bs.Subjects, selector.Verbs, selector.Container != nil)) == 0 {
-			continue
-		}
-		var objects []domain.MirrorObject
-		if selector.Container != nil {
-			includeParents := hasHuman && len(facts.ChildRegistrationActions(selector)) != 0
-			objects, err = parents.captureNestedObjectCandidates(ctx, bs, selector, includeParents)
-		} else {
-			objects, err = parents.captureSelectorObjects(ctx, bs.BindingID, selector, bs.Scope, bs.Target)
-		}
-		if err != nil {
-			return empty, nil, err
-		}
-		for _, object := range objects {
-			coordinates[domain.ResourceRef{Type: object.ObjectType, ID: object.ObjectID}] = true
-		}
-	}
-	// Якорный member выводится полным materializer даже без content selector.
-	// ContainerVerb может дать parent tuple даже при retired mapping якоря.
-	// Его существование и владелец ниже подтверждаются обычной IAM projection.
-	if bs.Scope.Type == "account" || bs.Scope.Type == "project" {
-		coordinates[domain.ResourceRef{Type: "iam." + bs.Scope.Type, ID: bs.Scope.ID}] = true
-	}
-	if err = parents.source.budget.Charge(len(coordinates), 0); err != nil {
-		return empty, nil, err
-	}
-	keys := make([]domain.ResourceRef, 0, len(coordinates))
-	for key := range coordinates {
-		keys = append(keys, key)
-	}
-	slices.SortFunc(keys, func(a, b domain.ResourceRef) int {
-		if n := cmp.Compare(a.Type, b.Type); n != 0 {
-			return n
-		}
-		return cmp.Compare(a.ID, b.ID)
-	})
 	result := reconcile.CapturedObjectDiff{Binding: bs, Ledger: fullLedger, Additive: additive, Live: map[reconcile.MemberCoord]bool{}}
 	var outputs []*resourceOutputCapture
 	for _, key := range keys {
@@ -148,6 +103,86 @@ func (c *resourceOutputCapture) captureWholeBindingDiff(ctx context.Context, par
 		outputs = append(outputs, output)
 	}
 	return result, outputs, ctx.Err()
+}
+
+func (p *resourceParentCapture) captureBindingDiffHistory(ctx context.Context, id string) (map[domain.ResourceRef]bool, []reconcile.LedgerRow, error) {
+	members, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceBindingMembers, typ: "binding", id: id})
+	if err != nil {
+		return nil, nil, err
+	}
+	ledger, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceBindingLedger, typ: "binding", id: id})
+	if err != nil {
+		return nil, nil, err
+	}
+	return resourceBindingDiffCoordinates(id, members, ledger)
+}
+
+// captureBindingDiffKeys сохраняет старые координаты журнала и объединяет
+// их с кандидатами каждого переданного набора селекторов в том же снимке.
+// Предикаты RR удерживаются по отдельности; совпадение ключа объекта
+// не подменяет доказательство полноты ни одного из исходных предикатов.
+func (p *resourceParentCapture) captureBindingDiffKeys(ctx context.Context, facts *catalog.Facts, coordinates map[domain.ResourceRef]bool, scopes ...reconcile.BindingScope) ([]domain.ResourceRef, error) {
+	if p == nil || p.source == nil || p.source.sealed || p.source.budget == nil || coordinates == nil {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	for _, scope := range scopes {
+		if err := p.captureBindingDiffScope(ctx, facts, coordinates, scope, resourceSourceSelectorObjects); err != nil {
+			return nil, err
+		}
+	}
+	return p.finishBindingDiffKeys(ctx, coordinates)
+}
+
+func (p *resourceParentCapture) captureBindingDiffScope(
+	ctx context.Context, facts *catalog.Facts, coordinates map[domain.ResourceRef]bool, scope reconcile.BindingScope, kind resourceSourceKind,
+) error {
+	source := resourceSourceKey{kind: kind, id: string(scope.BindingID)}
+	hasHuman := slices.ContainsFunc(scope.Subjects, func(subject domain.Subject) bool {
+		return subject.Type == domain.SubjectTypeUser
+	})
+	for _, selector := range scope.Selectors {
+		// Те же получатели, что у полного materializer.
+		if len(domain.GrantRecipients(scope.Subjects, selector.Verbs, selector.Container != nil)) == 0 {
+			continue
+		}
+		var objects []domain.MirrorObject
+		var err error
+		if selector.Container != nil {
+			includeParents := hasHuman && len(facts.ChildRegistrationActions(selector)) != 0
+			objects, err = p.captureNestedCandidatesFrom(ctx, source, scope, selector, includeParents)
+		} else {
+			objects, err = p.captureSelectorFrom(ctx, source, selector, scope.Scope, scope.Target, selector.RuleFP, false)
+		}
+		if err != nil {
+			return err
+		}
+		for _, object := range objects {
+			coordinates[domain.ResourceRef{Type: object.ObjectType, ID: object.ObjectID}] = true
+		}
+	}
+	// scope_self и контейнерные действия могут меняться даже тогда,
+	// когда ни один предикат содержимого не выбрал объект.
+	if scope.Scope.Type == "account" || scope.Scope.Type == "project" {
+		coordinates[domain.ResourceRef{Type: "iam." + scope.Scope.Type, ID: scope.Scope.ID}] = true
+	}
+	return ctx.Err()
+}
+
+func (p *resourceParentCapture) finishBindingDiffKeys(ctx context.Context, coordinates map[domain.ResourceRef]bool) ([]domain.ResourceRef, error) {
+	if err := p.source.budget.Charge(len(coordinates), 0); err != nil {
+		return nil, err
+	}
+	keys := make([]domain.ResourceRef, 0, len(coordinates))
+	for key := range coordinates {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b domain.ResourceRef) int {
+		if n := cmp.Compare(a.Type, b.Type); n != 0 {
+			return n
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+	return keys, ctx.Err()
 }
 
 // Структурные ledger rows имеют обе пустые member-координаты. Они сохраняются

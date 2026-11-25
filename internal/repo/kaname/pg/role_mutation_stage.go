@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	ab "github.com/PRO-Robotech/kaname/internal/repo/kaname/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -22,6 +23,7 @@ import (
 // OLD/NEW набор живёт в private temp spool той же leased connection.
 type roleMutationStage struct {
 	accessLabelMode roleAccessLabelMode
+	selectorMove    *roleSelectorMoveStage
 	request         kaname.RoleMutationRequest
 	projection      catalog.GrantProjection
 	plan            *policyPlan
@@ -36,6 +38,11 @@ func (s *roleMutationStage) charge(n int) error {
 	if n < 0 || n > policyDiscoveryRows-s.rows {
 		return kaname.ErrSourceReadLimit
 	}
+	if s.selectorMove != nil {
+		if err := chargeNativePolicyBudget(s.selectorMove.budget(), n, 0); err != nil {
+			return err
+		}
+	}
 	s.rows += n
 	return nil
 }
@@ -45,6 +52,11 @@ func (s *roleMutationStage) charge(n int) error {
 func (s *roleMutationStage) read(rows int) error {
 	if s.reads >= 4096 {
 		return kaname.ErrSourceReadLimit
+	}
+	if s.selectorMove != nil {
+		if err := chargeNativePolicyBudget(s.selectorMove.budget(), 0, 1); err != nil {
+			return err
+		}
 	}
 	s.reads++
 	return s.charge(rows)
@@ -74,6 +86,11 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	if p == nil || p.repo == nil || actor.Validate() != nil || request.Role.ID == "" || (request.Create && !request.Rules) || (!request.Create && !request.Update) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
+	move := len(request.SelectorMoves) != 0
+	if move && (request.Create || !request.Update || !request.Rules || request.ExpectedVersion == "" ||
+		!slices.Equal(request.UpdateMask, []string{"rules"}) || request.Tuples == nil) {
+		return nil, kaname.ErrInvalidAuthorityFencePlan
+	}
 	conn, err := p.repo.master.Acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -89,7 +106,13 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	if err != nil {
 		return nil, err
 	}
-	stage, err := p.stageRoleMutation(ctx, snapshot, request, actor)
+	var stage *roleMutationStage
+	if move {
+		stage, err = p.stageRoleSelectorMove(ctx, snapshot, request.Role.ID, request.ExpectedVersion,
+			request.SelectorMoves, actor, request.Tuples)
+	} else {
+		stage, err = p.stageRoleMutation(ctx, snapshot, request, actor, nil)
+	}
 	if err != nil {
 		return nil, errors.Join(err, policyRollback(ctx, snapshot))
 	}
@@ -128,7 +151,13 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	if err = stage.lockMutation(ctx, w); err != nil {
 		return nil, err
 	}
-	if err = stage.prepareSequenceProgram(ctx, w); err != nil {
+	var authorization *roleSelectorMoveAuthorization
+	if stage.selectorMove != nil {
+		authorization, err = stage.holdSelectorMove(ctx, newSemanticAuthorityWriter(w, p.bundle))
+	} else {
+		err = stage.prepareSequenceProgram(ctx, w)
+	}
+	if err != nil {
 		return nil, err
 	}
 	// Ни одной записи роли/проекции ещё нет. После ВСЕХ legacy row waits
@@ -138,6 +167,22 @@ func (p *GrantPolicyWriters) RoleMutationWriter(ctx context.Context, request kan
 	}
 	if err = p.protectPolicyPlan(ctx, w, stage.plan); err != nil {
 		return nil, err
+	}
+	if stage.selectorMove != nil {
+		// Checker привязан к границе native-чтения, обновлённой последним
+		// protectPolicyPlan. Сама транзакция и бюджет остались прежними.
+		final := newSemanticAuthorityWriter(w, p.bundle)
+		decision, err := authorization.decide(ctx, final)
+		if err != nil {
+			return nil, err
+		}
+		prepared := &preparedRoleWriteTx{semanticAuthorityWriteTx: final, conn: conn, stage: stage}
+		// До Grant и подтверждения слота writer остаётся внутри фабрики.
+		if err = prepared.finalizePendingSelectorMove(ctx, decision); err != nil {
+			return nil, err
+		}
+		transferred = true
+		return prepared, nil
 	}
 	if _, err = w.tx.Exec(ctx, `SELECT kaname.authority_role_sequence_finalize_v3()`); err != nil {
 		return nil, err
@@ -156,21 +201,72 @@ func closeRoleStageConnection(conn *pgxpool.Conn) {
 	_ = c.Close(ctx)
 }
 
-func (p *GrantPolicyWriters) stageRoleMutation(ctx context.Context, tx pgx.Tx, request kaname.RoleMutationRequest, actor domain.Subject) (*roleMutationStage, error) {
-	s := &roleMutationStage{request: request, accounts: map[string]bool{}}
+// Получателя определяет тот же объект, что и authority_protocol_require_owner.
+// LOGIN выдаёт только SELECT на собственную временную таблицу в этой RR-транзакции.
+const roleMoveStageTupleGrantSQL = `DO $grant$
+DECLARE
+    owner_oid oid;
+    owner_name name;
+    spool_oid oid;
+    prior_path text:=pg_catalog.current_setting('search_path');
+BEGIN
+    PERFORM pg_catalog.set_config('search_path','pg_catalog,pg_temp',true);
+    IF current_user IS DISTINCT FROM session_user OR kaname.authority_role_actor_login_ready_v1() IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'selector move tuple stage requires enrolled login' USING ERRCODE='42501';
+    END IF;
+    SELECT root.relowner,r.rolname,spool.oid INTO owner_oid,owner_name,spool_oid
+    FROM pg_catalog.pg_class root
+    JOIN pg_catalog.pg_namespace ns ON ns.oid=root.relnamespace AND ns.nspowner=root.relowner
+    JOIN pg_catalog.pg_roles r ON r.oid=root.relowner
+    JOIN pg_catalog.pg_proc guard ON guard.pronamespace=ns.oid AND guard.proowner=root.relowner
+    JOIN pg_catalog.pg_class spool ON spool.relnamespace=pg_catalog.pg_my_temp_schema()
+    WHERE root.oid='kaname.authority_writer_protocol'::pg_catalog.regclass
+        AND guard.oid='kaname._authority_role_move_stage_tuple_census_v1(boolean,integer,integer)'::pg_catalog.regprocedure
+        AND spool.relname='kaname_role_stage_tuples' AND spool.relpersistence='t' AND spool.relkind='r'
+        AND spool.relowner=current_user::pg_catalog.regrole AND spool.relowner<>root.relowner;
+    IF NOT FOUND THEN RAISE EXCEPTION 'selector move tuple stage owner differs' USING ERRCODE='42501';END IF;
+
+    EXECUTE pg_catalog.format('GRANT SELECT ON TABLE pg_temp.kaname_role_stage_tuples TO %I',owner_name);
+    -- Проверяем фактический OID получателя и отсутствие посторонних default grants
+    -- до записи первого кортежа. Ошибка откатывает GRANT вместе с созданием spool.
+    IF (SELECT pg_catalog.count(*)=1 AND pg_catalog.bool_and(a.grantee=owner_oid AND a.grantor=c.relowner
+            AND a.privilege_type='SELECT' AND NOT a.is_grantable)
+        FROM pg_catalog.pg_class c CROSS JOIN LATERAL pg_catalog.aclexplode(c.relacl) a
+        WHERE c.oid=spool_oid AND a.grantee<>c.relowner) IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'selector move tuple stage read grant differs' USING ERRCODE='42501';
+    END IF;
+    PERFORM pg_catalog.set_config('search_path',prior_path,true);
+END;
+$grant$`
+
+func (p *GrantPolicyWriters) stageRoleMutation(ctx context.Context, tx pgx.Tx, request kaname.RoleMutationRequest, actor domain.Subject, move *roleSelectorMoveStage) (*roleMutationStage, error) {
+	s := &roleMutationStage{request: request, selectorMove: move, accounts: map[string]bool{}}
 	if _, err := tx.Exec(ctx, `CREATE TEMP TABLE kaname_role_stage_bindings(id text PRIMARY KEY,retier boolean NOT NULL) ON COMMIT PRESERVE ROWS;
 CREATE TEMP TABLE kaname_role_stage_rows(seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,kind text NOT NULL,owner_id text NOT NULL,row_tid text NOT NULL,row_xmin text NOT NULL) ON COMMIT PRESERVE ROWS;
 CREATE TEMP TABLE kaname_role_stage_tuples(binding_id text NOT NULL,side text NOT NULL,object text NOT NULL,fga_user text NOT NULL,relation text NOT NULL,PRIMARY KEY(binding_id,side,object,fga_user,relation)) ON COMMIT PRESERVE ROWS`); err != nil {
 		return nil, err
 	}
-	if request.Create || request.Rules {
-		var halves catalog.Halves
-		if err := json.Unmarshal(p.bundle.CanonicalCatalog(), &halves); err != nil {
+	if move != nil {
+		// Проверки LOGIN, владельца и выданного ACL расходуют общий бюджет переноса.
+		for range 3 {
+			if err := s.read(1); err != nil {
+				return nil, err
+			}
+		}
+		if _, err := tx.Exec(ctx, roleMoveStageTupleGrantSQL); err != nil {
 			return nil, err
 		}
-		facts, err := catalog.NewFacts(halves)
-		if err != nil {
-			return nil, err
+	}
+	if request.Create || request.Rules {
+		var facts *catalog.Facts
+		var err error
+		if move == nil {
+			facts, err = p.roleMutationCatalog()
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			facts = move.facts
 		}
 		s.projection, err = facts.ProjectRoleMutationRules(request.Role.Rules, domain.PolicyOfRole(request.Role.IsSystem, request.Role.OwnerModule))
 		if err != nil {
@@ -225,7 +321,16 @@ CREATE TEMP TABLE kaname_role_stage_tuples(binding_id text NOT NULL,side text NO
 	}
 	in := rolePolicyRequest(request.Role, request.Create, actor)
 	in.roleNative = &roleNativeRequest{role: request.Role, create: request.Create, content: request.Create || request.Rules}
-	in.consumedReads = s.reads
+	var shared []*relverdict.AdministrativeReadBudget
+	if move == nil {
+		in.consumedReads = s.reads
+	} else {
+		in.roleNative.selectorMove = &move.captured
+		shared = append(shared, move.budget())
+		// SQL аттестует перенос только под глобальной оградой. Это также
+		// удерживает источники других ролей, затронутых возможной копией.
+		in.global = true
+	}
 	in.global = in.global || s.global
 	// GLOBAL уже покрывает полный сохранённый census. Локальный входной
 	// список имеет отдельный предел 256: oversized список отвергался раньше
@@ -236,7 +341,7 @@ CREATE TEMP TABLE kaname_role_stage_tuples(binding_id text NOT NULL,side text NO
 		}
 	}
 	var err error
-	s.plan, err = p.discoverPolicyPlanWithRows(ctx, tx, in, s.rows)
+	s.plan, err = p.discoverPolicyPlanWithRows(ctx, tx, in, s.rows, shared...)
 	if errors.Is(err, errPolicyDiscoveryBudget) {
 		return nil, kaname.ErrSourceReadLimit
 	}
@@ -372,9 +477,23 @@ func (s *roleMutationStage) saveTuple(ctx context.Context, tx pgx.Tx, id domain.
 	return err
 }
 func (s *roleMutationStage) recheck(ctx context.Context, w *authorityWriteTx) error {
+	if s.selectorMove != nil {
+		// Перенос удерживает одну глобальную эпоху. Её повторная сверка
+		// расходует тот же бюджет источников, что и RR и owner prepare.
+		if err := chargeNativePolicyBudget(w.producerBudget, 1, 1); err != nil {
+			return err
+		}
+	}
 	var at time.Time
 	if err := w.tx.QueryRow(ctx, `SELECT kaname.authority_role_stage_epoch_lock($1::text[],$2::jsonb)`, s.scopeAccounts(), []byte(s.epochs)).Scan(&at); err != nil {
 		return err
+	}
+	if s.selectorMove != nil {
+		// SQL уже записал именно эти часы в аттестацию текущей транзакции.
+		if at.IsZero() {
+			return kaname.ErrSourceUnconfirmed
+		}
+		w.fence.decisionAt = at.UTC()
 	}
 	return ctx.Err()
 }
@@ -466,6 +585,7 @@ type preparedRoleWriteTx struct {
 	roleWriteStarted          bool
 	contentApprovalAttempted  bool
 	contentApprovalRecorded   bool
+	selectorMoveFinalized     bool
 	roleWriteSucceeded        bool
 	grantCapabilitiesReplaced bool
 }

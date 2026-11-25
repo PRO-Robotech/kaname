@@ -27,6 +27,9 @@ type RoleMutationRequest struct {
 	Update          bool
 	UpdateMask      []string
 	ExpectedVersion string
+	// SelectorMoves указывает позиции в прочитанной версии. Предложенные
+	// правила и эффекты определяет writer из удержанного исходного образа.
+	SelectorMoves []domain.AccessLabelSelectorMove
 }
 
 type RoleMutationWriterFactory interface {

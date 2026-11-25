@@ -37,6 +37,7 @@ type policyWriteRequest struct {
 	owners               []kaname.AuthorityOwnerRef
 	roleID               domain.RoleID
 	groupID              domain.GroupID
+	membershipReaders    []domain.UserID
 	mutationSubjects     []domain.Subject
 	readRoles            []domain.RoleID
 	additionalAccounts   []domain.AccountID
@@ -222,7 +223,7 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 	if p == nil || p.repo == nil || tx == nil || in.actor.Validate() != nil || in.actor.ID == "*" || (in.actor.Type != domain.SubjectTypeUser && in.actor.Type != domain.SubjectTypeServiceAccount) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
-	if len(in.readRoles) > kaname.MaxAuthorityOwnershipRefs || len(in.owners) > kaname.MaxAuthorityOwnershipRefs || len(in.mutationSubjects) > policyDiscoveryGuards || len(in.additionalAccounts) > kaname.MaxAuthorityFenceAccounts {
+	if len(in.readRoles) > kaname.MaxAuthorityOwnershipRefs || len(in.owners) > kaname.MaxAuthorityOwnershipRefs || len(in.mutationSubjects)+len(in.membershipReaders) > policyDiscoveryGuards || len(in.additionalAccounts) > kaname.MaxAuthorityFenceAccounts {
 		return nil, errPolicyDiscoveryBudget
 	}
 	// Предыдущие RR reads входят в тот же бюджет до следующего SQL. У старых
@@ -290,6 +291,14 @@ func (p *GrantPolicyWriters) discoverPolicyPlanWithRows(ctx context.Context, tx 
 		}
 		plan.add("", subjectPolicyKey(s), false)
 		plan.write(subjectPolicyKey(s))
+	}
+	// Даже пустой предикат членства другого пользователя защищает его эпоха.
+	// Этот ключ удерживается при чтении без изменения версии.
+	for _, uid := range in.membershipReaders {
+		if !nativeQuestionToken(string(uid)) {
+			return nil, kaname.ErrInvalidAuthorityFencePlan
+		}
+		plan.add("", "user:"+string(uid), false)
 	}
 	for _, a := range in.additionalAccounts {
 		if a == "" {

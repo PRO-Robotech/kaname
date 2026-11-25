@@ -44,6 +44,11 @@ type preparedRoleContentApproval interface {
 	RecordRoleContentApproval(context.Context) error
 }
 
+// Ветку переноса авторизует фабрика до передачи writer и резерва SQL.
+type preparedSelectorMoveApproval interface {
+	ConfirmPreparedSelectorMove(context.Context) error
+}
+
 var errRoleMutationCleanup = errors.New("role mutation cleanup failed")
 
 // Три полных попытки: фабрика, OLD-authority gate, тело и Commit. Ошибка
@@ -79,15 +84,19 @@ func roleMutationAttempts(ctx context.Context, attempt func() (domain.Role, erro
 }
 
 func (s rolePolicySelection) run(ctx context.Context, repo Repo, r domain.Role, create, rules bool, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (out domain.Role, result error) {
-	return s.runPrepared(ctx, repo, r, create, rules, nil, "", body, reconcilers...)
+	return s.runPrepared(ctx, repo, r, create, rules, nil, "", nil, body, reconcilers...)
 }
 func (s rolePolicySelection) runUpdate(ctx context.Context, repo Repo, r domain.Role, rules bool, mask []string, version string,
-	body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (domain.Role, error) {
+	moves []domain.AccessLabelSelectorMove, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (domain.Role, error) {
 	exactMask := append([]string{}, mask...)
-	return s.runPrepared(ctx, repo, r, false, rules, &exactMask, version, body, reconcilers...)
+	return s.runPrepared(ctx, repo, r, false, rules, &exactMask, version, moves, body, reconcilers...)
 }
 func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domain.Role, create, rules bool,
-	mask *[]string, version string, body func(context.Context, Writer) (domain.Role, error), reconcilers ...TupleReconciler) (out domain.Role, result error) {
+	mask *[]string, version string, moves []domain.AccessLabelSelectorMove, body func(context.Context, Writer) (domain.Role, error),
+	reconcilers ...TupleReconciler) (out domain.Role, result error) {
+	if len(moves) != 0 && (!s.configured || create || !rules || mask == nil || version == "") {
+		return out, shared.MapRepoErrAt(ctx, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared selector move unavailable"))
+	}
 	if !s.configured {
 		// Прямой запуск worker также требует подготовленной записи для accessLabels и apply.
 		if create || rules {
@@ -113,7 +122,7 @@ func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domai
 	if !ok || factory == nil {
 		return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Role mutation preparation unavailable")
 	}
-	request := kaname.RoleMutationRequest{Role: r, Create: create, Rules: rules}
+	request := kaname.RoleMutationRequest{Role: r, Create: create, Rules: rules, SelectorMoves: moves}
 	if !create {
 		if mask == nil {
 			return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Role update preparation unavailable")
@@ -146,7 +155,13 @@ func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domai
 		}()
 		// Фабрика уже удерживает весь mutation footprint и взяла final DB clock.
 		// Сама роль и её проекции пока OLD: собственная запись не доказывает право.
-		if create || rules {
+		if len(moves) != 0 {
+			approval, ok := w.(preparedSelectorMoveApproval)
+			if !ok {
+				return out, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared selector move approval unavailable")
+			}
+			err = approval.ConfirmPreparedSelectorMove(ctx)
+		} else if create || rules {
 			err = grantpolicy.RequireRole(ctx, w, actor, r, create)
 			// RequireRole должен завершить все страницы и все scopes прежде,
 			// чем owner SQL получит подтверждение полного content gate.

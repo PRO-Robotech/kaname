@@ -45,6 +45,9 @@ type UpdateRoleInput struct {
 	// ResourceVersion — xmin OCC token echoed from a prior Get/List; when set on a
 	// rules-changing Update it guards against a concurrent edit (A-08/OCC).
 	ResourceVersion string
+	// SelectorMoves задаёт явный перенос из прочитанной версии роли.
+	// Содержимое предлагаемых правил вычисляется из исходного снимка.
+	SelectorMoves []domain.AccessLabelSelectorMove
 }
 
 var roleMutableFields = map[string]struct{}{
@@ -150,6 +153,16 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 		return nil, err
 	}
 
+	if len(in.SelectorMoves) != 0 {
+		if !slices.Equal(in.UpdateMask, []string{"rules"}) || in.ResourceVersion == "" ||
+			in.Rules != nil || in.Name != nil || in.Description != nil || in.Labels != nil {
+			return nil, status.Error(codes.InvalidArgument, "Selector move requires an exact rules mask, role version and positions")
+		}
+		if !u.policy.configured || u.reconciler == nil {
+			return nil, status.Error(codes.Unavailable, "Prepared selector move unavailable")
+		}
+	}
+
 	rd, err := u.repo.Reader(ctx)
 	if err != nil {
 		return nil, shared.MapRepoErr(err)
@@ -186,6 +199,7 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 
 	target := current
 	var changed []string
+	var moves []domain.AccessLabelSelectorMove
 	if in.Name != nil && shared.MaskAllows(in.UpdateMask, "name") && *in.Name != current.Name {
 		target.Name = *in.Name
 		changed = append(changed, "name")
@@ -202,6 +216,19 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	// ниже строится проекция глаголов: обе стороны правила обязаны судиться
 	// согласованным множеством, а не двумя моментами времени.
 	facts := authzsnapshot.FactsForRequest(ctx, u.cat)
+	if len(in.SelectorMoves) != 0 {
+		if in.ResourceVersion != version {
+			return nil, shared.MapRepoErr(iamerr.Wrapf(iamerr.ErrFailedPrecondition, "Role was modified concurrently, retry"))
+		}
+		moves, err = roleSelectorMoveFingerprints(current.Rules, in.SelectorMoves)
+		if err != nil {
+			return nil, err
+		}
+		in.Rules, err = current.Rules.MoveAccessLabelSelectors(moves, domain.PolicyOfRole(current.IsSystem, current.OwnerModule), facts)
+		if err != nil {
+			return nil, shared.MapValidationErr(err)
+		}
+	}
 	if in.Rules != nil && shared.MaskAllows(in.UpdateMask, "rules") {
 		// Validate the new rules first (specific cardinality/wildcard/feed errors),
 		// then compile (enforces the ≤1024 compiled-cap).
@@ -311,13 +338,14 @@ func (u *UpdateRoleUseCase) Execute(ctx context.Context, in UpdateRoleInput) (*o
 	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
 		ctx = operations.WithPrincipal(ctx, principal)
-		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy, version)
+		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy, version, moves)
 	})
 	return &op, nil
 }
 
-func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string, expectedVersion string) (*anypb.Any, error) {
-	updated, err := u.policy.runUpdate(ctx, u.repo, r, slices.Contains(changed, "rules"), mask, expectedVersion,
+func (u *UpdateRoleUseCase) doUpdate(ctx context.Context, r domain.Role, mask []string, actor string, changed []string,
+	expectedVersion string, moves []domain.AccessLabelSelectorMove) (*anypb.Any, error) {
+	updated, err := u.policy.runUpdate(ctx, u.repo, r, slices.Contains(changed, "rules"), mask, expectedVersion, moves,
 		func(ctx context.Context, w Writer) (domain.Role, error) {
 			var projection catalog.GrantProjection
 			if slices.Contains(changed, "rules") {

@@ -29,7 +29,8 @@ type resourceSelectorPredicate struct {
 
 func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any, error) {
 	var predicate resourceSelectorPredicate
-	if key.kind != resourceSourceSelectorObjects || !nativeQuestionToken(key.typ) || !nativeQuestionToken(key.id) || limit < 1 || json.Unmarshal([]byte(key.projection), &predicate) != nil {
+	roleOwned := key.kind == resourceSourceRoleSelectorObjects
+	if (!roleOwned && key.kind != resourceSourceSelectorObjects && key.kind != resourceSourceRoleProposedSelectorObjects) || !nativeQuestionToken(key.typ) || !nativeQuestionToken(key.id) || limit < 1 || json.Unmarshal([]byte(key.projection), &predicate) != nil {
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
 	if !nativeQuestionToken(predicate.RuleFP) {
@@ -62,6 +63,9 @@ func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
 	if predicate.Scope.Type != "account" && predicate.Scope.Type != "project" && predicate.Scope.Type != "cluster" {
+		return "", nil, kaname.ErrSourceUnconfirmed
+	}
+	if roleOwned && (predicate.Scope.Type == "cluster" || len(predicate.Targets) != 0) {
 		return "", nil, kaname.ErrSourceUnconfirmed
 	}
 	if !nativeQuestionToken(predicate.Scope.ID) {
@@ -112,8 +116,19 @@ func resourceSelectorObjectsSQL(key resourceSourceKey, limit int) (string, []any
 		}
 	} else if domain.FeedSourceForType(key.typ) == domain.FeedIAMDirect {
 		return "", nil, kaname.ErrSourceUnconfirmed
+	} else if roleOwned {
+		// Включаем и физический проект: любое расхождение двух аккаунтов
+		// участника проверяется до копирования, даже если заявлен чужой.
+		account = "(" + account + " OR p.account_id=$7::text)"
 	}
-	query := "SELECT " + state + ",jsonb_build_object('object_type',$1::text,'object_id'," + identity + ")::text FROM " + source + " WHERE " + typeFilter + " AND (($3::text='names' AND " + identity + "=ANY($4::text[])) OR ($3::text='labels' AND o.labels @> $5::jsonb) OR ($3::text='access_labels' AND o.access_labels @> $9::jsonb) OR ($3::text='anchor' AND ($6::text='cluster' OR ($6::text='account' AND (" + account + ")) OR ($6::text='project' AND (" + project + "))))) AND (cardinality($8::text[])=0 OR " + identity + "=ANY($8::text[])) LIMIT $2"
+	inScope := "($6::text='cluster' OR ($6::text='account' AND (" + account + ")) OR ($6::text='project' AND (" + project + ")))"
+	query := "SELECT " + state + ",jsonb_build_object('object_type',$1::text,'object_id'," + identity + ")::text FROM " + source + " WHERE " + typeFilter + " AND (($3::text='names' AND " + identity + "=ANY($4::text[])) OR ($3::text='labels' AND o.labels @> $5::jsonb) OR ($3::text='access_labels' AND o.access_labels @> $9::jsonb) OR ($3::text='anchor' AND " + inScope + ")) AND (cardinality($8::text[])=0 OR " + identity + "=ANY($8::text[]))"
+	if roleOwned {
+		// Для определения роли совпадение меток не расширяет область аккаунта
+		// или проекта. В обычной выдаче широкий census нужен для REJECTED audit.
+		query += " AND " + inScope
+	}
+	query += " LIMIT $2"
 	return query, args, nil
 }
 
@@ -124,7 +139,16 @@ func (p *resourceParentCapture) captureSelectorObjects(ctx context.Context, bind
 // Для owner-ветви сохраняем fingerprint исходного nested selector. Сервер
 // сверяет его container columns; синтетический owner FP не выдаётся за PK.
 func (p *resourceParentCapture) captureSelectorPredicate(ctx context.Context, binding domain.AccessBindingID, selector domain.RuleSelector, scope domain.ScopeAnchor, target domain.AccessTarget, sourceFP string, container bool) ([]domain.MirrorObject, error) {
-	if p == nil || p.source == nil || p.source.sealed || p.source.budget == nil || binding == "" || selector.RuleFP == "" || !nativeQuestionToken(sourceFP) || selector.Container != nil {
+	return p.captureSelectorFrom(ctx, resourceSourceKey{kind: resourceSourceSelectorObjects, id: string(binding)}, selector, scope, target, sourceFP, container)
+}
+
+func (p *resourceParentCapture) captureSelectorFrom(
+	ctx context.Context, source resourceSourceKey, selector domain.RuleSelector, scope domain.ScopeAnchor,
+	target domain.AccessTarget, sourceFP string, container bool,
+) ([]domain.MirrorObject, error) {
+	if p == nil || p.source == nil || p.source.sealed || p.source.budget == nil || !nativeQuestionToken(source.id) ||
+		(source.kind != resourceSourceSelectorObjects && source.kind != resourceSourceRoleSelectorObjects && source.kind != resourceSourceRoleProposedSelectorObjects) ||
+		selector.RuleFP == "" || !nativeQuestionToken(sourceFP) || selector.Container != nil {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
 	types := slices.Clone(selector.ObjectTypes)
@@ -155,7 +179,7 @@ func (p *resourceParentCapture) captureSelectorPredicate(ctx context.Context, bi
 		if err != nil {
 			return nil, err
 		}
-		key := resourceSourceKey{kind: resourceSourceSelectorObjects, typ: typ, id: string(binding), projection: string(raw)}
+		key := resourceSourceKey{kind: source.kind, typ: typ, id: source.id, projection: string(raw)}
 		rows, err := p.source.read(ctx, p.tx, key)
 		if err != nil {
 			return nil, err

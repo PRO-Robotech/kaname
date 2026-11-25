@@ -72,6 +72,15 @@ func (c *resourceOutputCapture) coordinateDiffInputs(ctx context.Context, parent
 			return nil, kaname.ErrSourceUnconfirmed
 		}
 	}
+	var projectGraph resourceeffect.ProjectGraphProjection
+	useProjectGraph := present && object.ObjectType == domain.ScopeTypeProjectDotted
+	if useProjectGraph {
+		var err error
+		projectGraph, err = parents.captureProjectObjectGraph(ctx, object.ObjectID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	var inputs []reconcile.CapturedObjectDiff
 	for _, id := range resourceSortedSet(ids) {
 		if err := ctx.Err(); err != nil {
@@ -86,7 +95,14 @@ func (c *resourceOutputCapture) coordinateDiffInputs(ctx context.Context, parent
 		input := reconcile.CapturedObjectDiff{Binding: bs, Current: members[id], Ledger: ledger[id], Additive: additive,
 			Live: map[reconcile.MemberCoord]bool{{ObjectType: object.ObjectType, ObjectID: object.ObjectID}: present}}
 		if present && bs.Active {
-			desired, err := resourceeffect.CompileObjectDesired(facts, resourceeffect.ObjectBinding{BindingID: bs.BindingID, RoleID: bs.RoleID, Scope: bs.Scope, Subjects: bs.Subjects, Policy: bs.Policy, Selectors: bs.Selectors, ScopeSelfVerbs: bs.ScopeSelfVerbs, Target: bs.Target, Active: bs.Active}, object, ancestors)
+			binding := resourceEffectBinding(bs)
+			var desired []resourceeffect.ObjectDesiredMember
+			var err error
+			if useProjectGraph {
+				desired, err = resourceeffect.CompileProjectObjectDesired(facts, binding, object, projectGraph)
+			} else {
+				desired, err = resourceeffect.CompileObjectDesired(facts, binding, object, ancestors)
+			}
 			if err != nil {
 				return nil, err
 			}
@@ -104,4 +120,12 @@ func (c *resourceOutputCapture) coordinateDiffInputs(ctx context.Context, parent
 		inputs = append(inputs, input)
 	}
 	return inputs, nil
+}
+
+func resourceEffectBinding(scope reconcile.BindingScope) resourceeffect.ObjectBinding {
+	return resourceeffect.ObjectBinding{
+		BindingID: scope.BindingID, RoleID: scope.RoleID, Scope: scope.Scope,
+		Subjects: scope.Subjects, Policy: scope.Policy, Selectors: scope.Selectors,
+		ScopeSelfVerbs: scope.ScopeSelfVerbs, Target: scope.Target, Active: scope.Active,
+	}
 }

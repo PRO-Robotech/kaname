@@ -3,6 +3,7 @@
 package pg
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"slices"
@@ -16,6 +17,8 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/fga_outbox"
 	roleport "github.com/PRO-Robotech/kaname/internal/repo/kaname/role"
 )
+
+const roleSequencePrepareSQL = `SELECT kaname.authority_role_sequence_prepare_v3($1::jsonb,$2,$3)`
 
 func roleSequenceInput(request kaname.RoleMutationRequest) ([]byte, error) {
 	r := request.Role
@@ -40,6 +43,11 @@ func (s *roleMutationStage) prepareSequenceProgram(ctx context.Context, w *autho
 	if s == nil || s.plan == nil || s.plan.nativeBudget == nil {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}
+	// Обычная подпись не содержит свидетельства переноса. Такой запрос
+	// должен пройти отдельную проверку источников и эффектов владельцем.
+	if s.selectorMove != nil {
+		return kaname.ErrSourceUnconfirmed
+	}
 	raw, err := roleSequenceInput(s.request)
 	if err != nil {
 		return err
@@ -49,7 +57,7 @@ func (s *roleMutationStage) prepareSequenceProgram(ctx context.Context, w *autho
 		return err
 	}
 	var costJSON []byte
-	if err = w.tx.QueryRow(ctx, `SELECT kaname.authority_role_sequence_prepare_v3($1::jsonb,$2,$3)`, raw,
+	if err = w.tx.QueryRow(ctx, roleSequencePrepareSQL, raw,
 		s.plan.nativeBudget.RemainingRows(), s.plan.nativeBudget.RemainingReads()).Scan(&costJSON); err != nil {
 		return err
 	}
@@ -81,26 +89,44 @@ type preparedRoleRowWriter struct {
 	owner *preparedRoleWriteTx
 }
 
-func (w *preparedRoleRowWriter) stamp(ctx context.Context, r domain.Role, create bool, mask []string, version string) (time.Time, error) {
+func (w *preparedRoleRowWriter) stamp(ctx context.Context, r domain.Role, create bool, mask []string, version string) (time.Time, json.RawMessage, error) {
 	if w.owner == nil || w.owner.stage == nil {
-		return time.Time{}, kaname.ErrInvalidAuthorityFencePlan
+		return time.Time{}, nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	expected := w.owner.stage.request
 	if expected.Create != create || expected.Role.ID != r.ID || (!create && (!expected.Update ||
 		expected.ExpectedVersion != version || !slices.Equal(expected.UpdateMask, mask))) {
-		return time.Time{}, kaname.ErrInvalidAuthorityFencePlan
+		return time.Time{}, nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	expected.Role = r
 	raw, err := roleSequenceInput(expected)
 	if err != nil {
-		return time.Time{}, err
+		return time.Time{}, nil, err
+	}
+	var image json.RawMessage
+	if move := w.owner.stage.selectorMove; move != nil {
+		if create || move.replay == nil || !slices.Equal(mask, []string{"rules"}) || version == "" || version != move.replay.version {
+			return time.Time{}, nil, kaname.ErrSourceUnconfirmed
+		}
+		rules, err := rulesToJSON(r.Rules)
+		if err != nil {
+			return time.Time{}, nil, err
+		}
+		if !bytes.Equal(rules, move.replay.rules) {
+			return time.Time{}, nil, kaname.ErrSourceUnconfirmed
+		}
+		image = move.replay.image
+		raw, err = replaceSelectorMoveRules(raw, image)
+		if err != nil {
+			return time.Time{}, nil, err
+		}
 	}
 	var stamp time.Time
 	err = w.owner.tx.QueryRow(ctx, `SELECT kaname.authority_role_sequence_stamp_v3($1::jsonb)`, raw).Scan(&stamp)
-	return stamp, err
+	return stamp, image, err
 }
 func (w *preparedRoleRowWriter) Insert(ctx context.Context, r domain.Role) (domain.Role, error) {
-	stamp, err := w.stamp(ctx, r, true, nil, "")
+	stamp, _, err := w.stamp(ctx, r, true, nil, "")
 	if err != nil {
 		return domain.Role{}, err
 	}
@@ -116,7 +142,7 @@ func (w *preparedRoleRowWriter) Insert(ctx context.Context, r domain.Role) (doma
 	return inserted, err
 }
 func (w *preparedRoleRowWriter) UpdateCAS(ctx context.Context, r domain.Role, mask []string, version string) (domain.Role, error) {
-	stamp, err := w.stamp(ctx, r, false, mask, version)
+	stamp, image, err := w.stamp(ctx, r, false, mask, version)
 	if err != nil {
 		return domain.Role{}, err
 	}
@@ -125,7 +151,7 @@ func (w *preparedRoleRowWriter) UpdateCAS(ctx context.Context, r domain.Role, ma
 		return domain.Role{}, kaname.ErrInvalidAuthorityFencePlan
 	}
 	w.owner.roleWriteStarted = true
-	updated, err := raw.updateCASAt(ctx, r, mask, version, stamp)
+	updated, err := raw.updateCASAt(ctx, r, mask, version, stamp, image)
 	if err == nil {
 		w.owner.roleWriteSucceeded = true
 	}

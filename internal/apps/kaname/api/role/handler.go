@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -69,6 +70,27 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateRoleRequest) (*op
 }
 
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateRoleRequest) (*operationpb.Operation, error) {
+	paths := req.GetUpdateMask().GetPaths()
+	const movePath = "access_label_selector_move"
+	if move := req.GetAccessLabelSelectorMove(); move != nil || slices.Contains(paths, movePath) {
+		if !slices.Equal(paths, []string{movePath}) || req.GetResourceVersion() == "" ||
+			req.GetName() != "" || req.GetDescription() != "" || len(req.GetPermissions()) != 0 ||
+			len(req.GetRules()) != 0 || len(req.GetLabels()) != 0 || len(req.GetAccessLabels()) != 0 {
+			return nil, status.Error(codes.InvalidArgument, "Selector move requires its exact mask, role version and positions")
+		}
+		moves, err := roleSelectorMovePositions(move)
+		if err != nil {
+			return nil, err
+		}
+		op, err := h.update.Execute(ctx, UpdateRoleInput{
+			ID: domain.RoleID(req.GetRoleId()), UpdateMask: []string{"rules"},
+			ResourceVersion: req.GetResourceVersion(), SelectorMoves: moves,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return shared.OperationToProto(op), nil
+	}
 	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
 		return nil, err
 	}

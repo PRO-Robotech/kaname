@@ -252,7 +252,8 @@ message UpdateRoleRequest {
   // ID of the Role resource to update.
   string role_id = 1;
 
-  // Field mask. Allowed fields: name, description, rules, labels.
+  // Поля обычного обновления: name, description, rules, labels, access_labels.
+  // Перенос селектора использует единственный путь access_label_selector_move.
   // is_system / account_id / project_id / cluster_id / permissions (derived)
   // are immutable.
   google.protobuf.FieldMask update_mask = 2;
@@ -288,6 +289,24 @@ message UpdateRoleRequest {
   // При пустой маске отсутствие/пустая proto3 map сохраняет карту;
   // непустая map задаёт замену. Для очистки нужна явная маска access_labels.
   map<string, string> access_labels = 9;
+
+  // Явный перенос выбранных селекторов на защищённые метки. Требует
+  // resource_version из Get/List и единственный путь access_label_selector_move
+  // в update_mask. Остальные изменяемые поля должны отсутствовать.
+  RoleAccessLabelSelectorMove access_label_selector_move = 10;
+}
+
+message RoleAccessLabelSelectorMove {
+  message Position {
+    // Обязательная позиция правила в текущей версии, начиная с нуля.
+    optional uint32 rule_index = 1;
+
+    // Позиция вложенного правила с нуля. Если отсутствует, выбран родитель.
+    optional uint32 child_index = 2;
+  }
+
+  // Непустой список без повторов.
+  repeated Position positions = 1;
 }
 
 message DeleteRoleRequest {

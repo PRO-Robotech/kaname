@@ -48,6 +48,41 @@ const scopeSelfRuleFP = "scope_self"
 // проверенного снимка. Порядок, fingerprints, REJECTED и вывод кортежей совпадают
 // с прежним общим materializer. Полнота, живость, часы и авторизация остаются у TX.
 func CompileObjectDesired(facts *catalog.Facts, binding ObjectBinding, object domain.MirrorObject, ancestors []domain.MirrorObject) ([]ObjectDesiredMember, error) {
+	return compileObjectDesired(facts, binding, object, &object, ancestors)
+}
+
+// ProjectGraphProjection описывает проверенный снимок строки графа для iam.project.
+// При наличии строки Object и Ancestors задают её данные и полный набор предков.
+// При доказанном отсутствии строки заполняется только ConfirmedAbsent её координатой.
+type ProjectGraphProjection struct {
+	Object          *domain.MirrorObject
+	Ancestors       []domain.MirrorObject
+	ConfirmedAbsent domain.ResourceRef
+}
+
+// CompileProjectObjectDesired использует собственную строку проекта для прямых
+// правил. Для вложенных правил метки доступа берутся из той же строки, а обычные
+// метки, область, создатель и предки — из подтверждённого графа. Полноту и
+// происхождение обоих снимков до вызова проверяет владелец TX.
+func CompileProjectObjectDesired(facts *catalog.Facts, binding ObjectBinding, own domain.MirrorObject, graph ProjectGraphProjection) ([]ObjectDesiredMember, error) {
+	if own.ObjectType != domain.ScopeTypeProjectDotted || own.ObjectID == "" {
+		return nil, fmt.Errorf("%w: expected native project", ErrInvalidSnapshot)
+	}
+	if graph.Object == nil {
+		if graph.ConfirmedAbsent != (domain.ResourceRef{Type: own.ObjectType, ID: own.ObjectID}) || len(graph.Ancestors) != 0 {
+			return nil, fmt.Errorf("%w: missing or inconsistent project graph absence", ErrInvalidSnapshot)
+		}
+		return compileObjectDesired(facts, binding, own, nil, nil)
+	}
+	nested := *graph.Object
+	if graph.ConfirmedAbsent != (domain.ResourceRef{}) || nested.ObjectType != own.ObjectType || nested.ObjectID != own.ObjectID {
+		return nil, fmt.Errorf("%w: inconsistent project graph projection", ErrInvalidSnapshot)
+	}
+	nested.AccessLabels = own.AccessLabels
+	return compileObjectDesired(facts, binding, own, &nested, graph.Ancestors)
+}
+
+func compileObjectDesired(facts *catalog.Facts, binding ObjectBinding, object domain.MirrorObject, nested *domain.MirrorObject, ancestors []domain.MirrorObject) ([]ObjectDesiredMember, error) {
 	if facts == nil || binding.Scope.Type == "" || binding.Scope.ID == "" || object.ObjectType == "" || object.ObjectID == "" {
 		return nil, fmt.Errorf("%w: incomplete object compiler input", ErrInvalidSnapshot)
 	}
@@ -64,12 +99,12 @@ func CompileObjectDesired(facts *catalog.Facts, binding ObjectBinding, object do
 			return nil, fmt.Errorf("%w: incomplete object ancestor", ErrInvalidSnapshot)
 		}
 	}
-	return desiredMembersForObject(facts, binding, object, ancestors), nil
+	return desiredMembersForObject(facts, binding, object, nested, ancestors), nil
 }
 
 // Следующие чистые решения перенесены из прежнего materializer без изменения
 // алгоритмов. Владелец Resource подключает к этому compiler все три маршрута.
-func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.MirrorObject,
+func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.MirrorObject, nested *domain.MirrorObject,
 	ancestors []domain.MirrorObject) []ObjectDesiredMember {
 	perObject := len(bs.Target.Resources) > 0
 
@@ -99,14 +134,16 @@ func desiredMembersForObject(cat *catalog.Facts, bs ObjectBinding, o domain.Mirr
 		if len(gs) == 0 {
 			continue
 		}
+		selected := &o
 		if sel.Container != nil {
-			if !nestedCoversObject(sel, bs, o, ancestors) {
+			if nested == nil || !nestedCoversObject(sel, bs, *nested, ancestors) {
 				continue
 			}
+			selected = nested
 		} else if !inTarget || !sel.MatchesObject(o) {
 			continue
 		}
-		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, o, bs.Scope)
+		dm, ok := desiredMemberForObject(cat, bs.Policy, gs, sel, *selected, bs.Scope)
 		if !ok {
 			// У типа нет объекта FGA в модели → нет кортежа → пропускаем объект
 			// (отказ по умолчанию: опечатка в типе ничего не выдаёт).
@@ -132,6 +169,11 @@ func desiredMemberForObject(cat *catalog.Facts, policy domain.RulePolicy, gs []g
 		return ObjectDesiredMember{}, false
 	}
 	if !o.IsContainedIn(scope) {
+		// REJECTED относится только к кандидату полного прохода. Действие
+		// регистрации на выбранном родителе уже обработано отдельно.
+		if !cat.SelectsMemberObjects(sel) {
+			return ObjectDesiredMember{}, false
+		}
 		return ObjectDesiredMember{
 			Derivation: derivation, RuleFP: sel.RuleFP, ObjectType: o.ObjectType, ObjectID: o.ObjectID,
 			Status: domain.VerificationRejected,

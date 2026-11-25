@@ -17,6 +17,7 @@ import (
 type roleNativeRequest struct {
 	role            domain.Role
 	create, content bool
+	selectorMove    *accessLabelSelectorMoveCapture
 }
 
 // Весь список вопросов строится в RR ДО общего epoch token и coordinator.
@@ -41,6 +42,16 @@ func discoverRoleNativeQuestions(ctx context.Context, tx pgx.Tx, actor domain.Su
 	questions := newNativePolicyQuestions()
 	if err := questions.roleBase(actor, role, request.create, capabilities); err != nil {
 		return nil, 0, err
+	}
+	if request.selectorMove != nil {
+		move := request.selectorMove
+		if request.create || !request.content || role.ID == "" || move.Before.ID != role.ID || move.proof == nil || move.proof.role != role.ID {
+			return nil, 0, kaname.ErrInvalidAuthorityFencePlan
+		}
+		if err := move.declareNativeQuestions(ctx, tx, questions, actor, capabilities, budget); err != nil {
+			return nil, 0, err
+		}
+		return questions, 0, nil
 	}
 	if request.create || !request.content {
 		return questions, 0, nil
@@ -100,4 +111,69 @@ func discoverRoleNativeQuestions(ctx context.Context, tx pgx.Tx, actor domain.Su
 			return questions, total, nil
 		}
 	}
+}
+
+// Перенос уже прочитал полную популяцию данной роли. Обычный повторный
+// role_id scan здесь не нужен. Для соседних ролей вопросы строятся из
+// их исходных правил, которые удерживаются тем же RR replay.
+func (move *accessLabelSelectorMoveCapture) declareNativeQuestions(
+	ctx context.Context, tx pgx.Tx, questions *nativePolicyQuestions, actor domain.Subject,
+	capabilities []domain.GrantCapabilityRule, budget *relverdict.AdministrativeReadBudget,
+) error {
+	source := move.proof.source
+	if source == nil || source.stageTX != tx || source.budget != budget || !source.sealed {
+		return kaname.ErrSourceUnconfirmed
+	}
+	if err := move.proof.updates.declare(ctx, questions, actor, budget); err != nil {
+		return err
+	}
+	for _, scope := range move.Carriers {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := budget.Charge(1, 0); err != nil {
+			return err
+		}
+		b := scope.Carrier.Binding
+		if b.ID == "" || b.RoleID != move.Before.ID {
+			return kaname.ErrSourceUnconfirmed
+		}
+		if err := questions.roleCarrier(actor, b, capabilities); err != nil {
+			return err
+		}
+	}
+	roles := make(map[domain.RoleID]domain.Role)
+	for _, scope := range move.Collateral {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := budget.Charge(1, 0); err != nil {
+			return err
+		}
+		b := scope.Carrier.Binding
+		if b.ID == "" || b.RoleID == "" || b.RoleID == move.Before.ID {
+			return kaname.ErrSourceUnconfirmed
+		}
+		role, found := roles[b.RoleID]
+		if !found {
+			key := resourceSourceKey{kind: resourceSourceRole, typ: "role", id: string(b.RoleID)}
+			rows := source.entries[key]
+			if len(rows) != 1 {
+				return kaname.ErrSourceUnconfirmed
+			}
+			var err error
+			role, err = resourceCapturedRole(rows[0].value)
+			if err != nil {
+				return err
+			}
+			if role.ID != b.RoleID {
+				return kaname.ErrSourceUnconfirmed
+			}
+			roles[b.RoleID] = role
+		}
+		if err := questions.bindingRole(actor, scopeAnchorFor(b), role); err != nil {
+			return err
+		}
+	}
+	return ctx.Err()
 }

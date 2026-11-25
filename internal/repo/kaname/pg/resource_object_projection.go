@@ -16,13 +16,18 @@ import (
 // источника сохраняется отдельно с версией, включая полный bounded перечень
 // memberships личности. SQL ARRAY-подзапрос без лимита здесь не используется.
 func (p *resourceParentCapture) captureObjectProjection(ctx context.Context, typ, id string) (domain.MirrorObject, bool, error) {
-	var out domain.MirrorObject
-	if p == nil || p.source == nil || p.source.sealed || !nativeQuestionToken(typ) || !nativeQuestionToken(id) {
-		return out, false, kaname.ErrSourceUnconfirmed
-	}
 	kind := resourceSourceMirror
 	if domain.FeedSourceForType(typ) == domain.FeedIAMDirect {
 		kind = resourceSourceIAMObject
+	}
+	return p.captureObjectProjectionFrom(ctx, typ, id, kind)
+}
+
+func (p *resourceParentCapture) captureObjectProjectionFrom(ctx context.Context, typ, id string, kind resourceSourceKind) (domain.MirrorObject, bool, error) {
+	var out domain.MirrorObject
+	if p == nil || p.source == nil || p.source.sealed || !nativeQuestionToken(typ) || !nativeQuestionToken(id) ||
+		(kind != resourceSourceIAMObject && kind != resourceSourceMirror) {
+		return out, false, kaname.ErrSourceUnconfirmed
 	}
 	rows, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: kind, typ: typ, id: id})
 	if err != nil {
@@ -86,31 +91,10 @@ func (p *resourceParentCapture) captureObjectProjection(ctx context.Context, typ
 				return domain.MirrorObject{}, false, kaname.ErrSourceUnconfirmed
 			}
 		case "iam.user":
-			memberships, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceUserMemberships, typ: typ, id: id})
+			out.ParentAccountIDs, err = p.userMembershipAccounts(ctx, id)
 			if err != nil {
 				return domain.MirrorObject{}, false, err
 			}
-			seen := map[string]bool{}
-			for _, captured := range memberships {
-				var member struct {
-					User    string `json:"user_id"`
-					Account string `json:"account_id"`
-				}
-				if err = json.Unmarshal(captured.value, &member); err != nil {
-					return domain.MirrorObject{}, false, err
-				}
-				if member.User != id {
-					return domain.MirrorObject{}, false, kaname.ErrSourceUnconfirmed
-				}
-				if member.Account != "" && !seen[member.Account] {
-					if !nativeQuestionToken(member.Account) {
-						return domain.MirrorObject{}, false, kaname.ErrSourceUnconfirmed
-					}
-					seen[member.Account] = true
-					out.ParentAccountIDs = append(out.ParentAccountIDs, member.Account)
-				}
-			}
-			slices.Sort(out.ParentAccountIDs)
 		default:
 			return domain.MirrorObject{}, false, kaname.ErrSourceUnconfirmed
 		}
@@ -140,4 +124,34 @@ func (p *resourceParentCapture) captureObjectProjection(ctx context.Context, typ
 		out.ParentAccountIDs = []string{account}
 	}
 	return out, true, nil
+}
+
+// userMembershipAccounts сохраняет полный источник членств, включая
+// подтверждённое отсутствие. Аккаунт из строки users не описывает эту область.
+func (p *resourceParentCapture) userMembershipAccounts(ctx context.Context, id string) ([]string, error) {
+	rows, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceUserMemberships, typ: "iam.user", id: id})
+	if err != nil {
+		return nil, err
+	}
+	var accounts []string
+	if len(rows) > 0 {
+		accounts = make([]string, 0, len(rows))
+	}
+	seen := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		var member struct {
+			User    string `json:"user_id"`
+			Account string `json:"account_id"`
+		}
+		if err := json.Unmarshal(row.value, &member); err != nil {
+			return nil, err
+		}
+		if member.User != id || !nativeQuestionToken(member.Account) || seen[member.Account] {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		seen[member.Account] = true
+		accounts = append(accounts, member.Account)
+	}
+	slices.Sort(accounts)
+	return accounts, nil
 }

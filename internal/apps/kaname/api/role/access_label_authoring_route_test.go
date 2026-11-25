@@ -13,6 +13,8 @@ import (
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 type positiveRouteFactory struct {
@@ -67,7 +69,7 @@ func TestPositiveApplyWorkerProjectionNeverFallsBack(t *testing.T) {
 func TestPositiveApplyDirectWorkerRefusesLegacyBeforeBody(t *testing.T) {
 	for _, create := range []bool{true, false} {
 		called := false
-		_, err := (rolePolicySelection{}).runPrepared(context.Background(), nil, domain.Role{Rules: positiveRouteRules()}, create, true, nil, "", func(context.Context, Writer) (domain.Role, error) { called = true; return domain.Role{}, nil })
+		_, err := (rolePolicySelection{}).runPrepared(context.Background(), nil, domain.Role{Rules: positiveRouteRules()}, create, true, nil, "", nil, func(context.Context, Writer) (domain.Role, error) { called = true; return domain.Role{}, nil })
 		require.ErrorIs(t, err, iamerr.ErrUnavailable)
 		require.False(t, called)
 	}
@@ -106,12 +108,31 @@ func TestProtectedSelectorTransportAndPreparedWriterGuards(t *testing.T) {
 		_, err = projectWriterRoleRules(context.Background(), nil, value, nil)
 		require.ErrorIs(t, err, iamerr.ErrUnavailable)
 		for _, create := range []bool{true, false} {
-			_, err = (rolePolicySelection{}).runPrepared(context.Background(), nil, value, create, true, nil, "",
+			_, err = (rolePolicySelection{}).runPrepared(context.Background(), nil, value, create, true, nil, "", nil,
 				func(context.Context, Writer) (domain.Role, error) {
 					t.Fatal("защищённый селектор дошёл до обычной записи роли")
 					return domain.Role{}, nil
 				})
 			require.ErrorIs(t, err, iamerr.ErrUnavailable)
 		}
+	}
+}
+
+func TestSelectorMoveRequiresPreparedAuthorityBeforeBody(t *testing.T) {
+	mask := []string{"rules"}
+	moves := []domain.AccessLabelSelectorMove{{RuleIndex: 0}}
+	called := false
+	body := func(context.Context, Writer) (domain.Role, error) {
+		called = true
+		return domain.Role{}, nil
+	}
+
+	for _, selection := range []rolePolicySelection{
+		{},
+		{configured: true, factory: &positiveRouteFactory{}},
+	} {
+		_, err := selection.runPrepared(context.Background(), nil, domain.Role{}, false, true, &mask, "1", moves, body)
+		require.Equal(t, codes.Unavailable, status.Code(err))
+		require.False(t, called)
 	}
 }

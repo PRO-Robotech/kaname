@@ -477,7 +477,7 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 			return nil, err
 		}
 		rows, err := s.transaction().Query(ctx, `SELECT pe.depth,m.object_type,m.object_id,m.parent_project_id,
- COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,''),m.labels
+ COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,''),m.labels,m.access_labels
  FROM kaname.catalog_resource co
  JOIN kaname.resource_parent_edge pe ON pe.object_type=co.object_type AND pe.object_id=$2
  JOIN kaname.catalog_resource cp ON cp.object_type=pe.parent_type AND cp.live
@@ -493,14 +493,17 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 		for rows.Next() {
 			var o domain.MirrorObject
 			var account string
-			var labels []byte
-			if err = rows.Scan(&depth, &o.ObjectType, &o.ObjectID, &o.ParentProjectID, &account, &labels); err != nil {
+			var labels, accessLabels []byte
+			if err = rows.Scan(&depth, &o.ObjectType, &o.ObjectID, &o.ParentProjectID, &account, &labels, &accessLabels); err != nil {
 				break
 			}
 			if err = budget.Charge(1, 0); err != nil {
 				break
 			}
 			if err = json.Unmarshal(labels, &o.Labels); err != nil {
+				break
+			}
+			if err = json.Unmarshal(accessLabels, &o.AccessLabels); err != nil {
 				break
 			}
 			if account != "" {
@@ -531,8 +534,8 @@ func (s *nativeAdministrativeSources) currentAncestors(ctx context.Context, dott
 // до накопления, а не после неограниченного ARRAY в единственной SQL-строке.
 func (s *nativeAdministrativeSources) currentUserObject(ctx context.Context, id string, budget *relverdict.AdministrativeReadBudget) (domain.MirrorObject, bool, error) {
 	o := domain.MirrorObject{ObjectType: "iam.user", ObjectID: id}
-	var labels []byte
-	err := s.transaction().QueryRow(ctx, `SELECT labels FROM kaname.users WHERE id=$1`, id).Scan(&labels)
+	var labels, accessLabels []byte
+	err := s.transaction().QueryRow(ctx, `SELECT labels,access_labels FROM kaname.users WHERE id=$1`, id).Scan(&labels, &accessLabels)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return o, false, nil
 	}
@@ -540,6 +543,9 @@ func (s *nativeAdministrativeSources) currentUserObject(ctx context.Context, id 
 		return o, false, err
 	}
 	if err = json.Unmarshal(labels, &o.Labels); err != nil {
+		return o, false, err
+	}
+	if err = json.Unmarshal(accessLabels, &o.AccessLabels); err != nil {
 		return o, false, err
 	}
 	cursor := ""

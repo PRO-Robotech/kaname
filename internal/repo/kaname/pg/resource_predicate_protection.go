@@ -29,14 +29,11 @@ func classifyResourcePredicate(key resourceSourceKey) (resourcePredicateProtecti
 	if !nativeQuestionToken(key.typ) || !nativeQuestionToken(key.id) {
 		return out, kaname.ErrSourceUnconfirmed
 	}
-	source, err := json.Marshal(struct {
-		Kind                resourceSourceKind
-		Type, ID, Predicate string
-	}{key.kind, key.typ, key.id, key.projection})
+	source, err := resourcePredicateIdentity(key)
 	if err != nil {
 		return out, err
 	}
-	out.Source = string(source)
+	out.Source = source
 	switch key.kind {
 	case resourceSourceSelectorObjects:
 		var predicate resourceSelectorPredicate
@@ -92,6 +89,14 @@ func classifyResourcePredicate(key resourceSourceKey) (resourcePredicateProtecti
 		return out, kaname.ErrSourceUnconfirmed
 	}
 	return out, nil
+}
+
+func resourcePredicateIdentity(key resourceSourceKey) (string, error) {
+	raw, err := json.Marshal(struct {
+		Kind                resourceSourceKind
+		Type, ID, Predicate string
+	}{key.kind, key.typ, key.id, key.projection})
+	return string(raw), err
 }
 
 // GLOBAL здесь вытекает из исходного predicate, не из ошибки, лимита или
