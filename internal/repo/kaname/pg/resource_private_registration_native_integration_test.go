@@ -11,13 +11,16 @@ import (
 	"time"
 
 	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/seed"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
+	"github.com/PRO-Robotech/kaname/internal/catalog"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/moduleidentity"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/testsupport/bindingset"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -42,6 +45,28 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		ID:        domain.ServiceAccountID(authzguard.ServiceAccountIDForService("vpc")),
 		AccountID: domain.AccountID(r.a), Name: "kacho-vpc", Description: "private registration component",
 	})
+	require.NoError(t, err)
+	// A genuine project role that does not select this object must still be
+	// present in the scope census. The account's installer uses relation form.
+	var halves catalog.Halves
+	require.NoError(t, json.Unmarshal(r.bundle.CanonicalCatalog(), &halves))
+	facts, err := catalog.NewFacts(halves)
+	require.NoError(t, err)
+	rules := domain.Rules{{Module: "vpc", Resources: []string{"network"}, Verbs: []string{"get"}, ResourceNames: []string{"other-private-network"}}}
+	projection, err := facts.ProjectGrantRules(rules, domain.TenantPolicy())
+	require.NoError(t, err)
+	role, err := writer.RolesW().Insert(r.ctx, domain.Role{ID: domain.RoleID(ids.NewID("rol")), ProjectID: domain.ProjectID(scenes[0].Project),
+		Name: "private_census_reader", Rules: rules, Permissions: projection.Permissions})
+	require.NoError(t, err)
+	require.NoError(t, writer.RolesW().ReplaceRuleSelectors(r.ctx, role.ID, projection.Selectors))
+	require.NoError(t, writer.RolesW().ReplaceRoleVerbs(r.ctx, role.ID, projection.Verbs))
+	require.NoError(t, writer.RolesW().ReplaceRuleRefs(r.ctx, role.ID, domain.RuleRefsOf(rules)))
+	var member string
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, scenes[0].Account).Scan(&member))
+	bindingID := domain.AccessBindingID(ids.NewID("acb"))
+	_, err = bindingset.Insert(r.ctx, writer.AccessBindingsW(), domain.AccessBinding{ID: bindingID, RoleID: role.ID,
+		SubjectType: domain.SubjectTypeUser, SubjectID: domain.SubjectID(member), ResourceType: "project", ResourceID: scenes[0].Project,
+		Scope: domain.ScopeProject, Status: domain.AccessBindingStatusActive, Target: domain.AccessTarget{AllInScope: true}})
 	require.NoError(t, err)
 	require.NoError(t, writer.Commit(r.ctx))
 	require.NoError(t, seed.ApplyRegistrationAccountWriters(r.ctx, kanamepg.NewRegistrationAccountWriterStore(r.admin), roster,
@@ -80,25 +105,31 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		return raw
 	}
 	t.Run("first registration evidence requires owner and signed RC", func(t *testing.T) {
-		const query = `SELECT kaname._authority_resource_first_registration_absence_v1(NULL,NULL,NULL,100,100)`
+		queries := []string{
+			`SELECT kaname._authority_resource_first_registration_absence_v1(NULL,NULL,NULL,100,100)`,
+			`SELECT kaname._authority_resource_first_registration_scope_bindings_v1(NULL,NULL,NULL,100,100)`,
+		}
 		var sqlErr *pgconn.PgError
-		require.ErrorAs(t, r.runtime.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
-		require.Equal(t, "42501", sqlErr.Code)
-		require.Contains(t, sqlErr.Message, "permission denied for function")
-		require.ErrorAs(t, r.admin.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
-		require.Equal(t, "42501", sqlErr.Code)
-		require.Equal(t, "authority transaction attestation required", sqlErr.Message)
+		for _, query := range queries {
+			require.ErrorAs(t, r.runtime.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+			require.Equal(t, "42501", sqlErr.Code)
+			require.Contains(t, sqlErr.Message, "permission denied for function")
+			require.ErrorAs(t, r.admin.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+			require.Equal(t, "42501", sqlErr.Code)
+			require.Equal(t, "authority transaction attestation required", sqlErr.Message)
 
-		tx, err := r.admin.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-		require.NoError(t, err)
-		lifecycleRollback(t, tx)
-		r.enter(t, tx, r.intent(r.a), "participant")
-		var kind string
-		require.NoError(t, tx.QueryRow(ctx, `SELECT kaname.authority_protocol_attestation()->>'kind'`).Scan(&kind))
-		require.Equal(t, string(kaname.AuthorityGroup), kind)
-		require.ErrorAs(t, tx.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
-		require.Equal(t, "42501", sqlErr.Code)
-		require.Equal(t, "generation participant requires signed resource frame", sqlErr.Message)
+			tx, err := r.admin.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+			require.NoError(t, err)
+			lifecycleRollback(t, tx)
+			r.enter(t, tx, r.intent(r.a), "participant")
+			var kind string
+			require.NoError(t, tx.QueryRow(ctx, `SELECT kaname.authority_protocol_attestation()->>'kind'`).Scan(&kind))
+			require.Equal(t, string(kaname.AuthorityGroup), kind)
+			require.ErrorAs(t, tx.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+			require.Equal(t, "42501", sqlErr.Code)
+			require.Equal(t, "generation participant requires signed resource frame", sqlErr.Message)
+			require.NoError(t, tx.Rollback(ctx))
+		}
 	})
 	t.Run("genuine private Register commits all effects", func(t *testing.T) {
 		input := makeIntent(0, "private-registration-positive")
@@ -119,6 +150,11 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		require.True(t, trace.RRClosed)
 		require.True(t, trace.TypedRCEntered)
 		require.Equal(t, 16, trace.FirstRegistrationAbsenceReads)
+		require.Len(t, trace.FirstRegistrationScopeCounts, 4)
+		require.Equal(t, 1, trace.FirstRegistrationScopeCounts[0], "project role outside the selected object")
+		require.Zero(t, trace.FirstRegistrationScopeCounts[1], "account installation is relation-form")
+		require.Zero(t, trace.FirstRegistrationScopeCounts[3], "all cluster role carriers are canonical")
+		require.Contains(t, trace.FirstRegistrationScopeBindings, string(bindingID))
 		require.True(t, trace.Finalized)
 		require.True(t, trace.Authorized)
 		require.True(t, trace.BodyExecuted)
@@ -224,7 +260,7 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		require.NoError(t, seed.ApplyRegistrationAccountWriters(ctx, kanamepg.NewRegistrationAccountWriterStore(r.admin), roster,
 			seed.RegistrationWriterPlan{Assignments: assignments}))
 		input := makeIntent(1, "private-unregistration-denied")
-		_, registered, callErr := kanamepg.ProbePrivateRegistration(ctx, kanamepg.New(r.admin, nil), r.bundle, gate, input)
+		_, registered, callErr := kanamepg.ProbePrivateFirstRegistrationAbsence(ctx, kanamepg.New(r.admin, nil), r.bundle, gate, input)
 		t.Logf("denied cleanup seed trace: %+v", registered)
 		{
 			var sqlCause *pgconn.PgError
@@ -234,6 +270,9 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		}
 		require.NoError(t, callErr)
 		require.True(t, registered.Committed)
+		require.Len(t, registered.FirstRegistrationScopeCounts, 4)
+		require.Zero(t, registered.FirstRegistrationScopeCounts[0], "the other project's role is outside this census")
+		require.NotContains(t, registered.FirstRegistrationScopeBindings, string(bindingID))
 		require.NoError(t, seed.ApplyRegistrationAccountWriters(ctx, kanamepg.NewRegistrationAccountWriterStore(r.admin), roster,
 			seed.RegistrationWriterPlan{Assignments: assignments[:1]}))
 		require.Error(t, gate.AuthorizeAccount(ctx, scenes[1].Account))

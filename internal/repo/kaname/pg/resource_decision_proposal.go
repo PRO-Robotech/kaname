@@ -33,6 +33,16 @@ type resourceProposalSource struct {
 	Projection string             `json:"projection"`
 	States     []string           `json:"states"`
 }
+
+func resourceSourceProposal(key resourceSourceKey, rows []resourceSourceRow) resourceProposalSource {
+	item := resourceProposalSource{Kind: key.kind, Type: key.typ, ID: key.id, Projection: key.projection, States: make([]string, 0, len(rows))}
+	for _, row := range rows {
+		item.States = append(item.States, row.state)
+	}
+	slices.Sort(item.States)
+	return item
+}
+
 type resourceProposalCatalog struct {
 	Input  string   `json:"input"`
 	States []string `json:"states"`
@@ -103,12 +113,7 @@ func makeResourceProposalEnvelope(intent json.RawMessage, parents *resourceParen
 	}
 	envelope := resourceProposalEnvelope{SourceEffects: slices.Clone(footprint.sourceEffects), ABI: 2, Intent: intent, Owners: slices.Clone(footprint.owners), Objects: slices.Clone(footprint.objects), Registration: slices.Clone(footprint.registration), NativeEpochs: json.RawMessage("{}")}
 	for key, rows := range parents.source.entries {
-		item := resourceProposalSource{Kind: key.kind, Type: key.typ, ID: key.id, Projection: key.projection, States: make([]string, 0, len(rows))}
-		for _, row := range rows {
-			item.States = append(item.States, row.state)
-		}
-		slices.Sort(item.States)
-		envelope.Sources = append(envelope.Sources, item)
+		envelope.Sources = append(envelope.Sources, resourceSourceProposal(key, rows))
 		if key.kind == resourceSourceSelectorObjects || key.kind == resourceSourceNestedDescendants {
 			protection, err := classifyResourcePredicate(key)
 			if err != nil {

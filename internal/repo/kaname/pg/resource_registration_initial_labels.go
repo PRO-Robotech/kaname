@@ -92,14 +92,12 @@ func (p *resourceRegistrationPreparation) captureInitialRegistrationLabels(ctx c
 			Labels: maps.Clone(p.row.Labels), AccessLabels: protected,
 		}},
 	}
-	project := domain.ScopeAnchor{Type: "project", ID: scope.ProjectID}
-	account := domain.ScopeAnchor{Type: "account", ID: scope.AccountID}
-	cluster := domain.ScopeAnchor{Type: "cluster", ID: domain.ClusterSingletonID}
-	if err := out.captureAncestors(ctx, p.parents, p.catalog.identity.ObjectType, project, account, cluster); err != nil {
+	scopes := initialRegistrationBindingScopes(scope.ProjectID, scope.AccountID)
+	if err := out.captureAncestors(ctx, p.parents, p.catalog.identity.ObjectType, scopes[0], scopes[1], scopes[2]); err != nil {
 		return nil, err
 	}
 	var err error
-	out.bindings, err = captureInitialRegistrationBindings(ctx, p.parents, ref, []domain.ScopeAnchor{project, account, cluster})
+	out.bindings, err = captureInitialRegistrationBindings(ctx, p.parents, ref, scopes)
 	if err != nil {
 		return nil, err
 	}
@@ -243,16 +241,21 @@ func (s initialRegistrationAncestorSources) hasPointer(relation string, target d
 	return found, nil
 }
 
-func captureInitialRegistrationBindings(ctx context.Context, parents *resourceParentCapture, ref domain.ResourceRef, scopes []domain.ScopeAnchor) ([]initialRegistrationBinding, error) {
-	ids := make(map[string]bool)
-	keys := make([]resourceSourceKey, 0, len(scopes)+2)
+func initialRegistrationBindingScopes(project, account string) []domain.ScopeAnchor {
+	return []domain.ScopeAnchor{{Type: "project", ID: project}, {Type: "account", ID: account}, {Type: "cluster", ID: domain.ClusterSingletonID}}
+}
+
+func initialRegistrationBindingScopeKeys(scopes []domain.ScopeAnchor) []resourceSourceKey {
+	keys := make([]resourceSourceKey, 0, len(scopes)+1)
 	for _, scope := range scopes {
 		keys = append(keys, resourceSourceKey{kind: resourceSourceRegistrationScopeBindings, typ: scope.Type, id: scope.ID})
 	}
-	keys = append(keys,
-		resourceSourceKey{kind: resourceSourceRegistrationOtherClusterBindings, typ: "cluster", id: domain.ClusterSingletonID},
-		resourceSourceKey{kind: resourceSourceBindingsNamingObject, typ: ref.Type, id: ref.ID},
-	)
+	return append(keys, resourceSourceKey{kind: resourceSourceRegistrationOtherClusterBindings, typ: "cluster", id: domain.ClusterSingletonID})
+}
+
+func captureInitialRegistrationBindings(ctx context.Context, parents *resourceParentCapture, ref domain.ResourceRef, scopes []domain.ScopeAnchor) ([]initialRegistrationBinding, error) {
+	ids := make(map[string]bool)
+	keys := append(initialRegistrationBindingScopeKeys(scopes), resourceSourceKey{kind: resourceSourceBindingsNamingObject, typ: ref.Type, id: ref.ID})
 	for _, key := range keys {
 		rows, err := parents.source.read(ctx, parents.tx, key)
 		if err != nil {

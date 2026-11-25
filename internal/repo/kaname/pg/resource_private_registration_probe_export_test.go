@@ -10,6 +10,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
@@ -17,18 +18,20 @@ import (
 )
 
 type PrivateRegistrationProbeTrace struct {
-	Stage                         string
-	BackendPID                    uint32
-	RRClosed                      bool
-	TypedRCEntered                bool
-	Finalized                     bool
-	RefusalIdentityVerified       bool
-	Authorized                    bool
-	BodyExecuted                  bool
-	Committed                     bool
-	DirectCaptureKinds            []int
-	RootParentEdgeRows            int
-	FirstRegistrationAbsenceReads int
+	Stage                          string
+	BackendPID                     uint32
+	RRClosed                       bool
+	TypedRCEntered                 bool
+	Finalized                      bool
+	RefusalIdentityVerified        bool
+	Authorized                     bool
+	BodyExecuted                   bool
+	Committed                      bool
+	DirectCaptureKinds             []int
+	RootParentEdgeRows             int
+	FirstRegistrationAbsenceReads  int
+	FirstRegistrationScopeCounts   []int
+	FirstRegistrationScopeBindings []string
 }
 
 // Только test build и только private compiler component. Этот вход не вызывает
@@ -105,6 +108,7 @@ func probePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 	var footprint resourceFenceFootprint
 	var proposal *resourceDecisionProposal
 	var receipt *resourceProposalSource
+	var bindingScopes []resourceProposalSource
 	if in.Action == kaname.ResourceDecisionRecordRefusal {
 		source, err = newResourceSourceCapture(rr, budget, lifetime)
 		if err != nil {
@@ -159,10 +163,32 @@ func probePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 			// prepare envelope still accepts only its original kinds.
 			key := resourceSourceKey{kind: resourceSourceMetadataPolicyReceipt,
 				typ: registration.registration.catalog.identity.Dotted, id: registration.registration.row.ObjectID}
-			receipt = &resourceProposalSource{Kind: key.kind, Type: key.typ, ID: key.id, States: []string{}}
+			rows, found := source.entries[key]
+			if !found {
+				return result, trace, kaname.ErrSourceUnconfirmed
+			}
+			row := resourceSourceProposal(key, rows)
+			receipt = &row
 			delete(source.entries, key)
 		}
 		proposal, err = makeResourceRegistrationProposal(in.Snapshot(), parents, footprint, registration)
+		if err == nil && checkFirstAbsence {
+			// Same RR transaction and typed carrier checks as the initial-label
+			// collector. Keep the additional kinds outside the direct ABI.
+			row := registration.registration.row
+			scopes := initialRegistrationBindingScopes(row.ParentProjectID, row.ParentAccountID)
+			_, err = captureInitialRegistrationBindings(ctx, parents, domain.ResourceRef{Type: row.ObjectType, ID: row.ObjectID}, scopes)
+			if err != nil {
+				return result, trace, err
+			}
+			for _, key := range initialRegistrationBindingScopeKeys(scopes) {
+				rows, found := source.entries[key]
+				if !found {
+					return result, trace, kaname.ErrSourceUnconfirmed
+				}
+				bindingScopes = append(bindingScopes, resourceSourceProposal(key, rows))
+			}
+		}
 	}
 	if err != nil {
 		return result, trace, err
@@ -218,25 +244,32 @@ func probePrivateRegistration(ctx context.Context, repo *Repository, bundle *gra
 		return result, trace, err
 	}
 	if receipt != nil {
-		trace.Stage = "held first registration absence"
+		trace.Stage = "held first registration absence and scope bindings"
 		var proof struct {
-			Rows     int    `json:"logical_rows"`
-			Reads    int    `json:"logical_reads"`
-			ObjectID string `json:"object_id"`
+			Rows          int      `json:"logical_rows"`
+			Reads         int      `json:"logical_reads"`
+			ObjectID      string   `json:"object_id"`
+			AbsenceReads  int      `json:"absence_reads"`
+			ScopeCounts   []int    `json:"scope_counts"`
+			ScopeBindings []string `json:"scope_binding_ids"`
 		}
-		if err = rc.QueryRow(ctx, `SELECT kaname._authority_resource_first_registration_absence_v1(
-          m.registration_certificate, kaname._authority_resource_capture_index_v2($1::jsonb->'sources',100000),$2::jsonb,$3,$4)
-          FROM pg_temp.kaname_authority_resource_manifest m`,
-			proposal.payload, receipt, budget.RemainingRows(), budget.RemainingReads()).Scan(&proof); err != nil {
+		if err = chargeNativePolicyBudget(budget, 0, 1); err != nil {
 			return result, trace, err
 		}
-		if proof.Reads < 1 || proof.ObjectID != in.Mirror.ObjectID {
+		if err = rc.QueryRow(ctx, `SELECT kaname._authority_resource_first_registration_scope_bindings_v1(
+          kaname._authority_resource_capture_index_v2($1::jsonb->'sources',100000),$2::jsonb,$3::jsonb,$4,$5)`,
+			proposal.payload, receipt, bindingScopes, budget.RemainingRows(), budget.RemainingReads()).Scan(&proof); err != nil {
+			return result, trace, err
+		}
+		if proof.AbsenceReads < 1 || proof.Reads != proof.AbsenceReads+5 || len(proof.ScopeCounts) != len(bindingScopes) || proof.ObjectID != in.Mirror.ObjectID {
 			return result, trace, kaname.ErrSourceUnconfirmed
 		}
 		if err = chargeNativePolicyBudget(budget, proof.Rows, proof.Reads); err != nil {
 			return result, trace, err
 		}
-		trace.FirstRegistrationAbsenceReads = proof.Reads
+		trace.FirstRegistrationAbsenceReads = proof.AbsenceReads
+		trace.FirstRegistrationScopeCounts = proof.ScopeCounts
+		trace.FirstRegistrationScopeBindings = proof.ScopeBindings
 	}
 	trace.Stage = "actual finalize"
 	if err = proposal.finalize(ctx, writer, lifetime, budget); err != nil {
