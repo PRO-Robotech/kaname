@@ -72,6 +72,10 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 			SELECT $1,'member','iam.project',$2,'user:'||$3::text,verb,'project:'||$2::text
 			FROM unnest(ARRAY['v_get','viewer']) AS verbs(verb)`, binding, project, actor)
 		require.NoError(t, err)
+		_, err = seed.Exec(r.ctx, `INSERT INTO kaname.fga_outbox(event_type,payload)
+			VALUES('fga.tuple.write',jsonb_build_object('user','user:'||$1::text,'object','project:'||$2::text,
+				'relation','v_get','relations',jsonb_build_array('v_get','viewer')))`, actor, project)
+		require.NoError(t, err)
 	}
 	require.NoError(t, seed.Commit(r.ctx))
 	move, err := json.Marshal(map[string]any{"role_id": role, "version": version, "physical": physical, "proposed_rules": json.RawMessage(proposed),
@@ -126,6 +130,12 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 			PERFORM kaname.authority_role_stage_epoch_lock(NULL::text[],epoch);
 			IF action='transport_finalize' THEN PERFORM kaname._authority_role_move_sequence_finalize_v1('[]'::jsonb,100000,4096);END IF;
 			RETURN 'true'::jsonb;
+		END IF;
+		IF action='member_reservation' THEN
+			RETURN kaname._authority_sequence_store_v3()->'maximum';
+		END IF;
+		IF action='active_write_record' THEN
+			RETURN kaname._authority_role_move_active_write_record_v1(40,18);
 		END IF;
 		IF action='active_member_insert' THEN
 			RETURN kaname._authority_role_move_active_member_insert_v1(100000,4096);
@@ -310,6 +320,40 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 		require.False(t, privileged)
 		_, err = tx.Exec(r.ctx, call, "prepare", nil)
 		require.NoError(t, err)
+		var slots []struct {
+			Ordinal int
+			Table   string
+			ID      int64 `json:"reserved_id"`
+			Origin  struct {
+				Family, User, Project string
+				Fact                  []json.RawMessage `json:"viewer_old"`
+			}
+			Row struct {
+				Event   string `json:"event_type"`
+				Payload struct {
+					User, Relation, Object string
+					Relations              []string
+				}
+			}
+		}
+		require.NoError(t, tx.QueryRow(r.ctx, call, "member_reservation", nil).Scan(&slots))
+		require.Len(t, slots, 2)
+		require.Equal(t, "resource_journal", slots[0].Table)
+		fga := slots[1]
+		require.Equal(t, 2, fga.Ordinal)
+		require.Equal(t, "fga_outbox", fga.Table)
+		require.Positive(t, fga.ID)
+		require.Equal(t, "role.selector_move.active_member", fga.Origin.Family)
+		require.Equal(t, project, fga.Origin.Project)
+		require.Len(t, fga.Origin.Fact, 3)
+		require.Equal(t, "fga.tuple.write", fga.Row.Event)
+		require.Equal(t, "project:"+project, fga.Row.Payload.Object)
+		require.Equal(t, "user:"+actor, fga.Row.Payload.User)
+		require.Equal(t, "v_get", fga.Row.Payload.Relation)
+		require.Equal(t, []string{"v_get", "viewer"}, fga.Row.Payload.Relations)
+		var visible bool
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(SELECT FROM ONLY kaname.fga_outbox WHERE id=$1)`, fga.ID).Scan(&visible))
+		require.False(t, visible)
 		payload, err := json.Marshal(all)
 		require.NoError(t, err)
 		var report struct {
@@ -423,6 +467,12 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 		require.NoError(t, json.Unmarshal(consumed.NewMember[2], &inserted))
 		require.Equal(t, report.NewFP, inserted.FP)
 		reject("active_member_insert", nil, "42501")
+		reject("active_write_record", nil, "42501")
+		const privateWrite = `SELECT has_function_privilege(current_user,'kaname._authority_role_move_active_write_record_v1(integer,integer)','EXECUTE')`
+		require.NoError(t, tx.QueryRow(r.ctx, privateWrite).Scan(&privileged))
+		require.False(t, privileged)
+		require.NoError(t, r.runtime.QueryRow(r.ctx, privateWrite).Scan(&privileged))
+		require.False(t, privileged)
 		const members = `SELECT count(*) FILTER (WHERE rule_fp=$4),count(*) FILTER (WHERE rule_fp=$5)
 			FROM ONLY kaname.access_binding_target_members WHERE binding_id=$1 AND role_id=$2 AND
 			object_type='iam.project' AND object_id=$3 AND verification_status='ACTIVE'`
@@ -438,6 +488,8 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 		verify(r.admin.QueryRow(r.ctx, members, args...), 0)
 		requireAccessDefinitionSQLState(t, tx.Commit(r.ctx), "42501")
 		verify(r.admin.QueryRow(r.ctx, members, args...), 0)
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT EXISTS(SELECT FROM ONLY kaname.fga_outbox WHERE id=$1)`, fga.ID).Scan(&visible))
+		require.False(t, visible)
 		return
 	}
 	// Штатный prepare удерживает OLD в той же backend-сессии. Самостоятельная
@@ -596,6 +648,10 @@ func testRoleSelectorMoveSources(t *testing.T, active bool) {
 	})
 	_, err = tx.Exec(r.ctx, call, "prepare", nil)
 	require.NoError(t, err)
+	var pendingMaximum []struct{ Table string }
+	require.NoError(t, tx.QueryRow(r.ctx, call, "member_reservation", nil).Scan(&pendingMaximum))
+	require.Len(t, pendingMaximum, 1)
+	require.Equal(t, "resource_journal", pendingMaximum[0].Table)
 	reject := func(action string, proposal json.RawMessage, code string) {
 		t.Helper()
 		probe, err := tx.Begin(r.ctx)
