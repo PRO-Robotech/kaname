@@ -168,7 +168,7 @@ AND b.subject_type='service_account' AND b.status='ACTIVE' AND g.granted_until I
 	require.ErrorIs(t, evaluate("service_account", machine, bindingEnd, false), iamerr.ErrPermissionDenied)
 
 	_, err = tx.Exec(ctx, `INSERT INTO kaname.cluster_admin_grants(id,cluster_id,subject_type,subject_id,granted_by,granted_at,granted_until)
-VALUES($1,$2,'user',$3,$3,$4,$5)`, ids.NewID(domain.PrefixClusterAdminGrant), domain.ClusterSingletonID, human, at, directEnd)
+VALUES($1,$2,'user',$3,$3,$4,$5)`, domain.NewKac127ID(domain.PrefixClusterAdminGrant), domain.ClusterSingletonID, human, at, directEnd)
 	require.NoError(t, err)
 	require.NoError(t, fga_outbox.EmitWriteTx(ctx, tx, []clients.RelationTuple{{User: "user:" + human, Relation: "system_admin", Object: authzguard.ClusterObject()}}))
 	require.NoError(t, evaluate("user", human, at, false))
