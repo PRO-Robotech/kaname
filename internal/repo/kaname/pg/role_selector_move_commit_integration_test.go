@@ -23,14 +23,18 @@ import (
 // Вызовы используют одну и ту же редакцию роли. Отказ постороннему должен
 // оставить её пригодной для последующей авторизованной операции.
 func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
-	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusPending)
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusPending, false)
 }
 
 func TestRoleSelectorMoveUpdatePreservesActiveNoCopy(t *testing.T) {
-	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive)
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, false)
 }
 
-func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingStatus) {
+func TestRoleSelectorMoveUpdatePreservesActiveSelectedPairs(t *testing.T) {
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, true)
+}
+
+func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingStatus, unrelatedLabel bool) {
 	t.Helper()
 	active := status == domain.AccessBindingStatusActive
 	r, owner := writerProtocolRigBeforePreparation(t)
@@ -45,7 +49,11 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 	}
 	project := seedMetadataActualProject(t, r, "selector-move-project")
 	old := domain.Rule{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}, MatchLabels: map[string]string{"team": "blue"}}
-	setProjectLabels(t, r.ctx, r.admin, project.ID, old.MatchLabels)
+	projectLabels := map[string]string{"team": "blue"}
+	if unrelatedLabel {
+		projectLabels["description"] = "legacy-only"
+	}
+	setProjectLabels(t, r.ctx, r.admin, project.ID, projectLabels)
 	role := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(r.a),
 		Name: "selector_move_commit", Rules: domain.Rules{old}}
 	var err error
@@ -197,10 +205,10 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		require.True(t, hasRead)
 	}
 	var ready bool
-	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.labels='{"team":"blue"}' AND p.access_labels=p.labels AND b.status=$3
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.labels=$4::jsonb AND p.access_labels='{"team":"blue"}'::jsonb AND b.status=$3
 		AND b.target=jsonb_build_object('resources',jsonb_build_array(jsonb_build_object('type','iam.project','id',p.id)))
 		AND ($3='ACTIVE' OR NOT EXISTS(SELECT FROM kaname.access_binding_target_members WHERE binding_id=b.id))
-		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID, status).Scan(&ready))
+		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID, status, jsonObject(projectLabels)).Scan(&ready))
 	require.True(t, ready)
 	if active {
 		require.NotEqual(t, old.Fingerprint(), next.Fingerprint())
