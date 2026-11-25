@@ -9,8 +9,8 @@ import (
 	"go/types"
 )
 
-// Нулевой локальный срез с присваиваниями только из self-append получает
-// backing исключительно от append. Копия заголовка передаёт доступ к тем же
+// Нулевой локальный срез или прямое поле нулевой структуры получает
+// backing исключительно от self-append. Копия заголовка передаёт доступ к тем же
 // элементам. Это выделение отлично от другого точного literal/make.
 // Доказываем только несовпадение владельцев записи:
 // элементы, возвращённые алиасы и неизвестное происхождение самого среза
@@ -26,8 +26,8 @@ func (p *callerLifetimeProbe) separateLocalAppendBacking(write callerLifetimeWri
 	if !callerExactAllocation(object) {
 		return false
 	}
-	id, ok := ast.Unparen(src.expr).(*ast.Ident)
-	if !ok {
+	id, _ := callerLocalAppendPlace(src.pkg, src.expr)
+	if id == nil {
 		return false
 	}
 	v, ok := src.pkg.info.Uses[id].(*types.Var)
@@ -38,7 +38,11 @@ func (p *callerLifetimeProbe) separateLocalAppendBacking(write callerLifetimeWri
 	if !zero || fk != src.fk || fk.fn == nil && fk.lit == nil {
 		return false
 	}
-	if _, slice := v.Type().Underlying().(*types.Slice); !slice {
+	ownerType := src.pkg.info.TypeOf(src.expr)
+	if ownerType == nil {
+		return false
+	}
+	if _, slice := ownerType.Underlying().(*types.Slice); !slice {
 		return false
 	}
 	if known, found := p.g.localAppendBuilders[v]; found {
@@ -55,6 +59,29 @@ func (p *callerLifetimeProbe) separateLocalAppendBacking(write callerLifetimeWri
 	// а повторный unknown owner не запускает новый обход AST.
 	p.g.localAppendBuilders[v] = known
 	return known
+}
+
+// Прямой селектор адресует ячейку самого value, а не вложенный или
+// разыменованный объект. Идентификатор возвращается для полного учёта uses.
+func callerLocalAppendPlace(sp *surfaceSrcPkg, expr ast.Expr) (*ast.Ident, *types.Var) {
+	switch e := ast.Unparen(expr).(type) {
+	case *ast.Ident:
+		return e, nil
+	case *ast.SelectorExpr:
+		base, ok := ast.Unparen(e.X).(*ast.Ident)
+		selection := sp.info.Selections[e]
+		if !ok || selection == nil || selection.Kind() != types.FieldVal || selection.Indirect() || len(selection.Index()) != 1 {
+			return nil, nil
+		}
+		if _, value := selection.Recv().Underlying().(*types.Struct); !value {
+			return nil, nil
+		}
+		field, _ := selection.Obj().(*types.Var)
+		if field != nil {
+			return base, field
+		}
+	}
+	return nil, nil
 }
 
 func callerExactAllocation(object callerObjectKey) bool {
@@ -131,12 +158,19 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 			if n.Tok != token.ASSIGN || len(n.Lhs) != 1 || len(n.Rhs) != 1 {
 				break
 			}
-			lhs, ok := ast.Unparen(n.Lhs[0]).(*ast.Ident)
-			if !ok || sp.info.Uses[lhs] != variable {
+			lhs, field := callerLocalAppendPlace(sp, n.Lhs[0])
+			if lhs == nil || sp.info.Uses[lhs] != variable {
+				break
+			}
+			lhsType := sp.info.TypeOf(n.Lhs[0])
+			if lhsType == nil {
+				break
+			}
+			if _, slice := lhsType.Underlying().(*types.Slice); !slice {
 				break
 			}
 			call, ok := ast.Unparen(n.Rhs[0]).(*ast.CallExpr)
-			if !ok || len(call.Args) < 2 || !types.Identical(sp.info.TypeOf(call), variable.Type()) {
+			if !ok || len(call.Args) < 2 || !types.Identical(sp.info.TypeOf(call), lhsType) {
 				break
 			}
 			fun, ok := ast.Unparen(call.Fun).(*ast.Ident)
@@ -147,8 +181,8 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 			if !ok || builtin.Name() != "append" {
 				break
 			}
-			first, ok := ast.Unparen(call.Args[0]).(*ast.Ident)
-			if !ok || sp.info.Uses[first] != variable || !types.Identical(sp.info.TypeOf(first), variable.Type()) {
+			first, firstField := callerLocalAppendPlace(sp, call.Args[0])
+			if first == nil || sp.info.Uses[first] != variable || firstField != field || !types.Identical(sp.info.TypeOf(call.Args[0]), lhsType) {
 				break
 			}
 			allowed[lhs], allowed[first], appended = true, true, true

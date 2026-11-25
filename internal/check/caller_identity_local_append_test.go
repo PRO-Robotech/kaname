@@ -168,6 +168,42 @@ func TestCallerIdentityLocalAppendBuilderBoundary(t *testing.T) {
 	}
 }
 
+func TestCallerIdentityLocalAppendDirectStructField(t *testing.T) {
+	const direct = "out.Values=append(out.Values,source.Value());"
+	for _, tc := range []struct {
+		name, definition, body string
+		want                   bool
+	}{
+		{"zero_fields_value_call", "", `var out Rows;for i:=0;i<2;i++{` + direct + `out.More=append(out.More,source.Value())};return keep(out)`, true},
+		{"foreign_field", "", `var out Rows;out.Values=source.Value().([]any);` + direct + `return out`, false},
+		{"foreign_sibling", "", `var out Rows;` + direct + `out.More=source.Value().([]any);return out`, false},
+		{"struct_rebind", "", `var out Rows;out=source.Value().(Rows);` + direct + `return out`, false},
+		{"struct_address", "", `var out Rows;` + direct + `source.Mutate(&out);return out`, false},
+		{"field_address", "", `var out Rows;` + direct + `source.Mutate(&out.Values);return out`, false},
+		{"capture", "", `var out Rows;` + direct + `_=func(){_=out.Values};return out`, false},
+		{"pointer_receiver", "", `out:=new(Rows);` + direct + `return *out`, false},
+		{"foreign_append_receiver", "", `var out Rows;out.Values=append(out.More,source.Value());return out`, false},
+		{"promoted_field", `type inner struct{Values []any};type Rows struct{inner}`, `var out Rows;` + direct + `return out`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			definition := tc.definition
+			if definition == "" {
+				definition = `type Rows struct{Values, More []any}`
+			}
+			setup := definition + `
+type Target struct{ Value any }
+func keep(r Rows) Rows{return r}
+func build() Rows{` + tc.body + `}`
+			program := callerSoundnessProgram(t, setup, `anchor:=&Box{};candidate:=Target{};_=anchor;_=candidate;_=build()`, `&Handler{}`)
+			g, _, wanted, allocation, write := callerLocalAppendFixture(t, program)
+			probe := callerLifetimeProbe{g: g, want: wanted}
+			if got := probe.separateLocalAppendBacking(write, allocation); got != tc.want {
+				t.Fatalf("доказательство=%t want=%t", got, tc.want)
+			}
+		})
+	}
+}
+
 // Чужие объявления не расходуют лимит доказательства локального среза.
 func TestCallerIdentityLocalAppendLargePackage(t *testing.T) {
 	unrelated := "func unrelated(x int) {\n" + strings.Repeat("_ = x\n", callerLifetimeStepLimit+1) + "}"
@@ -206,6 +242,7 @@ func TestCallerIdentityLocalAppendContentsRemainVisible(t *testing.T) {
 		{"returned_builder", `build(anchor)`, ``},
 		{"returned_variadic_builder", `buildVariadic(anchor)`, ``},
 		{"fixed_argument_alias", `buildFixed(anchor)`, ``},
+		{"direct_struct_append_contents", `buildStruct(anchor)`, ``},
 		{"direct_nil", `append([]*Box(nil),anchor)`, ``},
 		{"base_alias", `append([]*Box{anchor},nil)`, ``},
 		{"spread", `append([]*Box(nil),[]*Box{anchor}...)`, ``},
@@ -219,7 +256,9 @@ func TestCallerIdentityLocalAppendContentsRemainVisible(t *testing.T) {
 		{"unsafe_integer", `Carrier{Value:source.Value().(uintptr)}`, ``},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			program := callerSoundnessProgram(t, `type Carrier struct{Value any};func build(v *Box)[]*Box{var out []*Box;out=append(out,v);return out};func bind(xs []*Box)[]*Box{return xs};func buildFixed(v *Box)[]*Box{var out []*Box;out=append(out,v);held:=bind(out);return held};func pass(xs ...*Box)[]*Box{return xs};func buildVariadic(v *Box)[]*Box{var out []*Box;out=append(out,v);return pass(out...)}`, `anchor:=&Box{};`+tc.prefix+`candidate:=`+tc.expression+`;_=anchor;_=candidate`, `&Handler{}`)
+			program := callerSoundnessProgram(t, `type Carrier struct{Value any};func build(v *Box)[]*Box{var out []*Box;out=append(out,v);return out};func bind(xs []*Box)[]*Box{return xs};func buildFixed(v *Box)[]*Box{var out []*Box;out=append(out,v);held:=bind(out);return held};func pass(xs ...*Box)[]*Box{return xs};func buildVariadic(v *Box)[]*Box{var out []*Box;out=append(out,v);return pass(out...)}
+type Rows struct{Values []*Box}
+func buildStruct(v *Box) Rows { var rows Rows; rows.Values=append(rows.Values,v);return rows }`, `anchor:=&Box{};`+tc.prefix+`candidate:=`+tc.expression+`;_=anchor;_=candidate`, `&Handler{}`)
 			g, query, wanted, _, _ := callerLocalAppendFixture(t, program)
 			probe := callerLifetimeProbe{g: g, want: wanted, seen: map[callerResolveKey]bool{}, objects: map[callerObjectKey]bool{}}
 			if !probe.contains(query) {
@@ -340,8 +379,12 @@ func callerLocalAppendFixture(t *testing.T, program *surfaceProgram) (*callerGra
 			if !ok || len(assignment.Lhs) != 1 || len(assignment.Rhs) != 1 {
 				return true
 			}
-			id, ok := assignment.Lhs[0].(*ast.Ident)
-			if !ok {
+			lhs := assignment.Lhs[0]
+			id, _ := lhs.(*ast.Ident)
+			if field, ok := lhs.(*ast.SelectorExpr); ok && field.Sel.Name == "Values" && node.fn.Name() == "build" {
+				id, _ = field.X.(*ast.Ident)
+			}
+			if id == nil {
 				return true
 			}
 			if id.Name == "anchor" {
