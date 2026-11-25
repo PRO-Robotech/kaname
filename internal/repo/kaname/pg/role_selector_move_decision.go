@@ -31,10 +31,17 @@ type roleSelectorMoveAuthorization struct {
 const (
 	pendingNoCopyPrepareTransport = "pending_no_copy_v1"
 	activeNoCopyPrepareTransport  = "active_project_no_copy_v1"
+	nestedNoCopyPrepareTransport  = "active_nested_project_no_copy_v1"
 )
 
 func (s *roleSelectorMoveStage) sourceTransport() string {
 	if s != nil && len(s.captured.Carriers) == 1 && s.captured.Carriers[0].Carrier.Binding.Status == domain.AccessBindingStatusActive {
+		if len(s.captured.Moves) == 1 {
+			rule, child := s.captured.Moves[0].Position()
+			if rule == 0 && child == 0 {
+				return nestedNoCopyPrepareTransport
+			}
+		}
 		return activeNoCopyPrepareTransport
 	}
 	return pendingNoCopyPrepareTransport
@@ -335,6 +342,46 @@ func (d roleSelectorMoveAuthorizedChanges) activeProjectSourceInput(ctx context.
 			return nil, kaname.ErrSourceUnconfirmed
 		}
 		if err := chargeNativePolicyBudget(w.producerBudget, 1+len(c.Before)+len(c.Proposed), 0); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"coordinates": binding.Coordinates, "commands": effect.Commands})
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 131072 {
+		return nil, kaname.ErrSourceReadLimit
+	}
+	return raw, ctx.Err()
+}
+
+// У одной выдачи появляются две новые координаты rule_fp и исчезают обе старые.
+// SQL повторно подтверждает обе карты, состав получателей, все команды и OLD.
+func (d roleSelectorMoveAuthorizedChanges) activeNestedSourceInput(ctx context.Context, w *semanticAuthorityWriteTx) (json.RawMessage, error) {
+	owner, effect := d.changes.owner, d.changes.access
+	copies, err := owner.copyInput(w)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(copies, []byte("[]")) || !bytes.Equal(d.copies, copies) || len(owner.move.captured.Collateral) != 0 ||
+		len(owner.move.captured.Carriers) != 1 || len(effect.Bindings) != 1 || len(effect.Commands) != 8 ||
+		len(d.retained)+len(effect.Added)+len(effect.Removed)+len(effect.ResidualFold) != 0 {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	carrier, binding := owner.move.captured.Carriers[0].Carrier.Binding, effect.Bindings[0]
+	account := domain.ResourceRef{Type: "iam.account", ID: carrier.ResourceID}
+	if carrier.Status != domain.AccessBindingStatusActive || carrier.ExpiresAt != nil || carrier.RevokedAt != nil || carrier.RoleID != owner.move.captured.Before.ID ||
+		carrier.ResourceType != "account" || account.ID == "" || carrier.Target.AllInScope || len(carrier.Target.Resources) != 1 || carrier.Target.Resources[0] != account ||
+		binding.Pending || binding.BindingID != carrier.ID || len(binding.Coordinates) != 2 || binding.Coordinates[0].Resource != account ||
+		binding.Coordinates[1].Resource.Type != "iam.project" || binding.Coordinates[1].Resource.ID == "" {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	for i, coordinate := range binding.Coordinates {
+		if !coordinate.Present || len(coordinate.Before) != 1 || len(coordinate.Proposed) != 1 || effect.Commands[i*3].Kind != "members" ||
+			effect.Commands[i*3+1].Kind != "write" || effect.Commands[i*3+2].Kind != "record" || effect.Commands[6+i].Kind != "member_delete" {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		if err := chargeNativePolicyBudget(w.producerBudget, 3, 0); err != nil {
 			return nil, err
 		}
 	}

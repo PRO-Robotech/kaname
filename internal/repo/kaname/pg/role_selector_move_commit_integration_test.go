@@ -4,11 +4,13 @@
 package pg_test
 
 import (
+	"log/slog"
 	"testing"
 
 	"github.com/PRO-Robotech/corelib/ids"
 	"github.com/PRO-Robotech/corelib/operations"
 	bindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
 	roleapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/role"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
@@ -17,24 +19,30 @@ import (
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
+	grpcstatus "google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 )
 
 // Вызовы используют одну и ту же редакцию роли. Отказ постороннему должен
 // оставить её пригодной для последующей авторизованной операции.
 func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
-	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusPending, false)
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusPending, false, false)
 }
 
 func TestRoleSelectorMoveUpdatePreservesActiveNoCopy(t *testing.T) {
-	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, false)
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, false, false)
 }
 
 func TestRoleSelectorMoveUpdatePreservesActiveSelectedPairs(t *testing.T) {
-	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, true)
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, true, false)
 }
 
-func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingStatus, unrelatedLabel bool) {
+func TestRoleSelectorMoveUpdatePreservesActiveNestedProjectNoCopy(t *testing.T) {
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive, false, true)
+}
+
+func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingStatus, unrelatedLabel, nested bool) {
 	t.Helper()
 	active := status == domain.AccessBindingStatusActive
 	r, owner := writerProtocolRigBeforePreparation(t)
@@ -54,6 +62,17 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		projectLabels["description"] = "legacy-only"
 	}
 	setProjectLabels(t, r.ctx, r.admin, project.ID, projectLabels)
+	target := domain.ResourceRef{Type: "iam.project", ID: string(project.ID)}
+	next := old
+	next.MatchAccessLabels, next.MatchLabels = old.MatchLabels, nil
+	if nested {
+		seedNestedProjectEdge(t, r, project.ID)
+		target = domain.ResourceRef{Type: "iam.account", ID: r.a}
+		old = domain.Rule{Module: "iam", Resources: []string{"account"}, ResourceNames: []string{r.a}, Verbs: []string{"get"},
+			Children: []domain.Rule{{Resources: []string{"project"}, Verbs: []string{"get"}, MatchLabels: old.MatchLabels}}}
+		next = old
+		next.Children = []domain.Rule{{Resources: []string{"project"}, Verbs: []string{"get"}, MatchAccessLabels: old.Children[0].MatchLabels}}
+	}
 	role := domain.Role{ID: domain.RoleID(ids.NewID(domain.PrefixRole)), AccountID: domain.AccountID(r.a),
 		Name: "selector_move_commit", Rules: domain.Rules{old}}
 	var err error
@@ -76,7 +95,7 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 	binding, err := bindingset.Insert(r.ctx, seed.AccessBindingsW(), domain.AccessBinding{
 		ID: domain.AccessBindingID(ids.NewID("acb")), RoleID: role.ID, SubjectType: subject.Type, SubjectID: subject.ID,
 		ResourceType: "account", ResourceID: r.a, Scope: domain.ScopeAccount, Status: status,
-		Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "iam.project", ID: string(project.ID)}}},
+		Target: domain.AccessTarget{Resources: []domain.ResourceRef{target}},
 	})
 	require.NoError(t, err)
 	reconciler := bindingapp.NewRoleTupleReconciler()
@@ -133,6 +152,9 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 			Positions: []*iamv1.RoleAccessLabelSelectorMove_Position{{RuleIndex: &first}},
 		},
 	}
+	if nested {
+		request.AccessLabelSelectorMove.Positions[0].ChildIndex = &first
+	}
 	handler := roleapp.NewHandler(nil, update, nil, nil, nil)
 	run := func(t *testing.T, user string) *operations.Operation {
 		t.Helper()
@@ -143,8 +165,9 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 	}
 	// Читаем физическую строку проекта и всю область выдачи с независимого
 	// соединения после завершения операции. Любая копия или расширение видны.
-	next := old
-	next.MatchAccessLabels, next.MatchLabels = old.MatchLabels, nil
+	oldSelectors := domain.Rules{old}.MaterializingSelectors()
+	nextSelectors := domain.Rules{next}.MaterializingSelectors()
+	oldFP, newFP := oldSelectors[len(oldSelectors)-1].RuleFP, nextSelectors[len(nextSelectors)-1].RuleFP
 	grantState := func(t *testing.T, compareRights bool) string {
 		t.Helper()
 		var state string
@@ -153,12 +176,13 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 			(SELECT jsonb_agg(to_jsonb(s) ORDER BY s.ordinal) FROM ONLY kaname.access_binding_subjects s WHERE s.binding_id=b.id),
 			(SELECT jsonb_agg(item ORDER BY item) FROM (
 				SELECT CASE WHEN $3 AND m.object_type='iam.project' AND m.object_id=p.id AND m.rule_fp IN ($4,$5)
+					OR $3 AND $6 AND m.object_type='iam.account' AND m.object_id=b.resource_id AND m.rule_fp IN ($7,$8)
 					THEN to_jsonb(m)-ARRAY['rule_fp','created_at','updated_at']
 					ELSE to_jsonb(m) END AS item
 				FROM ONLY kaname.access_binding_target_members m WHERE m.binding_id=b.id
 			) AS members),
 			(SELECT jsonb_agg(to_jsonb(e) ORDER BY e.object,e.fga_user,e.relation,e.member_object_type,e.member_object_id) FROM ONLY kaname.access_binding_emitted_tuples e WHERE e.binding_id=b.id)
-		)::text FROM ONLY kaname.access_bindings b, ONLY kaname.projects p WHERE b.id=$1 AND p.id=$2`, binding.ID, project.ID, compareRights, old.Fingerprint(), next.Fingerprint()).Scan(&state))
+		)::text FROM ONLY kaname.access_bindings b, ONLY kaname.projects p WHERE b.id=$1 AND p.id=$2`, binding.ID, project.ID, compareRights, oldFP, newFP, nested, old.Fingerprint(), next.Fingerprint()).Scan(&state))
 		return state
 	}
 	assertStored := func(t *testing.T, rule domain.Rule, arm string, auditCount int, sameVersion bool) {
@@ -173,11 +197,21 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 			s.arm,s.match_labels,s.match_access_labels,
 			(SELECT count(*) FROM kaname.audit_outbox WHERE event_type='iam.role.updated' AND event_payload->>'resource_id'=r.id),
 			(SELECT count(*) FROM kaname.resource_journal WHERE resource_kind='iam_role' AND resource_id=r.id AND event_type='UPDATED')
-			FROM ONLY kaname.roles r JOIN ONLY kaname.role_rule_selectors s ON s.role_id=r.id WHERE r.id=$1`, role.ID).
+			FROM ONLY kaname.roles r JOIN ONLY kaname.role_rule_selectors s ON s.role_id=r.id WHERE r.id=$1 AND (s.container_type IS NOT NULL)=$2`, role.ID, nested).
 			Scan(&current, &stored, &count, &storedArm, &labels, &access, &audit, &journal))
 		require.Equal(t, sameVersion, current == version)
 		require.JSONEq(t, string(expected), string(stored))
-		require.Equal(t, 1, count)
+		require.Equal(t, len(oldSelectors), count)
+		if nested {
+			var parent, child string
+			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.rule_fp, c.rule_fp FROM ONLY kaname.role_rule_selectors p
+				JOIN ONLY kaname.role_rule_selectors c ON c.role_id=p.role_id WHERE p.role_id=$1 AND p.arm='names'
+				AND p.container_type IS NULL AND c.container_type='iam.account' AND c.container_arm='names'
+				AND c.container_resource_names=ARRAY[$2::text]`, role.ID, r.a).Scan(&parent, &child))
+			selected := domain.Rules{rule}.MaterializingSelectors()
+			require.Equal(t, selected[0].RuleFP, parent)
+			require.Equal(t, selected[1].RuleFP, child)
+		}
 		require.Equal(t, arm, storedArm)
 		if arm == "labels" {
 			require.JSONEq(t, `{"team":"blue"}`, string(labels))
@@ -200,19 +234,32 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 			EXISTS(SELECT FROM ONLY kaname.access_binding_emitted_tuples
 				WHERE binding_id=$1 AND source='member' AND member_object_type='iam.project' AND member_object_id=$3
 				AND fga_user=$4 AND relation='v_get' AND object='project:'||$3)`,
-			binding.ID, role.ID, project.ID, "user:"+recipient, old.Fingerprint(), next.Fingerprint()).Scan(&fingerprints, &hasRead))
+			binding.ID, role.ID, project.ID, "user:"+recipient, oldFP, newFP).Scan(&fingerprints, &hasRead))
 		require.Equal(t, []string{fingerprint}, fingerprints)
 		require.True(t, hasRead)
+		if nested {
+			var parentFP string
+			require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT rule_fp FROM ONLY kaname.access_binding_target_members
+			     WHERE binding_id=$1 AND role_id=$2 AND object_type='iam.account' AND object_id=$3 AND live AND verification_status='ACTIVE'`,
+				binding.ID, role.ID, r.a).Scan(&parentFP))
+			want := old.Fingerprint()
+			if fingerprint == newFP {
+				want = next.Fingerprint()
+			}
+			require.Equal(t, want, parentFP)
+			check(t, recipient, "v_get", "account:"+r.a, true)
+			check(t, outsider, "v_get", "project:"+string(project.ID), false)
+		}
 	}
 	var ready bool
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.labels=$4::jsonb AND p.access_labels='{"team":"blue"}'::jsonb AND b.status=$3
-		AND b.target=jsonb_build_object('resources',jsonb_build_array(jsonb_build_object('type','iam.project','id',p.id)))
+		AND b.target=jsonb_build_object('resources',jsonb_build_array(jsonb_build_object('type',$5::text,'id',$6::text)))
 		AND ($3='ACTIVE' OR NOT EXISTS(SELECT FROM kaname.access_binding_target_members WHERE binding_id=b.id))
-		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID, status, jsonObject(projectLabels)).Scan(&ready))
+		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID, status, jsonObject(projectLabels), target.Type, target.ID).Scan(&ready))
 	require.True(t, ready)
 	if active {
 		require.NotEqual(t, old.Fingerprint(), next.Fingerprint())
-		assertActiveRows(t, old.Fingerprint())
+		assertActiveRows(t, oldFP)
 	}
 	before := grantState(t, false)
 	beforeRights := before
@@ -237,18 +284,40 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		require.Equal(t, before, grantState(t, false))
 		require.Equal(t, beforeWrites, countProjectWrite(t))
 		if active {
-			assertActiveRows(t, old.Fingerprint())
+			assertActiveRows(t, oldFP)
 			check(t, recipient, "v_get", "project:"+string(project.ID), true)
 			check(t, outsider, "v_get", "project:"+string(project.ID), false)
 		}
 	})
+
+	if nested {
+		t.Run("stale role version rolls back both members", func(t *testing.T) {
+			stale := proto.Clone(request).(*iamv1.UpdateRoleRequest)
+			stale.ResourceVersion = "1"
+			require.NotEqual(t, version, stale.ResourceVersion)
+			ctx := contract.Context(declarerCtx(r.ctx, actor))
+			reply, err := handler.Update(ctx, stale)
+			if err != nil {
+				require.Equal(t, codes.FailedPrecondition, grpcstatus.Code(err))
+			} else {
+				failed := awaitOperation(t, r.ctx, ops, reply.GetId())
+				require.NotNil(t, failed.Error)
+				require.Equal(t, int32(codes.FailedPrecondition), failed.Error.GetCode())
+			}
+			assertStored(t, old, "labels", 0, true)
+			require.Equal(t, before, grantState(t, false))
+			require.Equal(t, beforeWrites, countProjectWrite(t))
+			assertActiveRows(t, oldFP)
+			check(t, recipient, "v_get", "project:"+string(project.ID), true)
+		})
+	}
 
 	t.Run("authorized commits", func(t *testing.T) {
 		done := run(t, actor)
 		if active && done.Error != nil {
 			assertStored(t, old, "labels", 0, true)
 			require.Equal(t, before, grantState(t, false))
-			assertActiveRows(t, old.Fingerprint())
+			assertActiveRows(t, oldFP)
 			check(t, recipient, "v_get", "project:"+string(project.ID), true)
 			check(t, outsider, "v_get", "project:"+string(project.ID), false)
 		}
@@ -261,7 +330,7 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		}
 		require.Equal(t, wantWrites, countProjectWrite(t))
 		if active {
-			assertActiveRows(t, next.Fingerprint())
+			assertActiveRows(t, newFP)
 			check(t, outsider, "v_get", "project:"+string(project.ID), false)
 		}
 		check(t, recipient, "v_get", "project:"+string(project.ID), active)
@@ -269,5 +338,13 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT event_payload->>'actor'=$2 AND event_payload->'changed_fields'='["rules"]'::jsonb
 		FROM kaname.audit_outbox WHERE event_type='iam.role.updated' AND event_payload->>'resource_id'=$1`, role.ID, actor).Scan(&audited))
 		require.True(t, audited)
+		if nested {
+			source := rolePolicyCatalog(t, r)
+			engine := reconcile.New(kanamepg.NewReconcileAdapter(r.admin, source), slog.Default(), source)
+			require.NoError(t, engine.ReconcileBinding(r.ctx, binding.ID))
+			assertActiveRows(t, newFP)
+			check(t, recipient, "v_get", "project:"+string(project.ID), true)
+			require.Equal(t, beforeRights, grantState(t, true))
+		}
 	})
 }

@@ -28,8 +28,11 @@ func (w *preparedRoleWriteTx) finalizePendingSelectorMove(ctx context.Context, d
 	}
 	sourceInput := decision.pendingSourceInput
 	transport := w.stage.selectorMove.sourceTransport()
-	if transport == activeNoCopyPrepareTransport {
+	switch transport {
+	case activeNoCopyPrepareTransport:
 		sourceInput = decision.activeProjectSourceInput
+	case nestedNoCopyPrepareTransport:
+		sourceInput = decision.activeNestedSourceInput
 	}
 	sets, err := sourceInput(ctx, w.semanticAuthorityWriteTx)
 	if err != nil {
