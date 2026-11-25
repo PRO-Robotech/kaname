@@ -23,10 +23,12 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/corelib/safeconv"
 
+	"github.com/PRO-Robotech/kaname/internal/admission"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -79,10 +81,17 @@ func (r *UserOAuthClientRepo) InsertForActiveOwner(ctx context.Context, txh serv
 		return domain.UserOAuthClient{}, iamerr.ErrPermissionDenied
 	}
 
+	tx := txAsPgx(txh)
+	if actor.Type != "user" || actor.ID != string(c.UserID) {
+		if err := lockUserTokenIssuer(ctx, tx, actor, issuer); err != nil {
+			return domain.UserOAuthClient{}, err
+		}
+	}
+
 	// FOR SHARE совместим с параллельной выдачей. Изменение invite_status
 	// или удаление владельца ждёт завершения вставки и аудита.
 	var state domain.InviteStatus
-	err := txAsPgx(txh).QueryRow(ctx, `SELECT invite_status FROM kaname.users WHERE id=$1 FOR SHARE`, string(c.UserID)).Scan(&state)
+	err := tx.QueryRow(ctx, `SELECT invite_status FROM kaname.users WHERE id=$1 FOR SHARE`, string(c.UserID)).Scan(&state)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrNotFound, "User %s not found", c.UserID)
 	}
@@ -93,6 +102,48 @@ func (r *UserOAuthClientRepo) InsertForActiveOwner(ctx context.Context, txh serv
 		return domain.UserOAuthClient{}, iamerr.Wrapf(iamerr.ErrFailedPrecondition, "User %s is not active and cannot be issued a token", c.UserID)
 	}
 	return r.Insert(ctx, txh, c)
+}
+
+// При выдаче за другого человека у вызывающего и владельца разные строки.
+// Подтверждённый адрес, состояние пользователя или состояние служебной учётки
+// могут измениться после приёма запроса. Удерживаем строку вызывающего в той
+// же транзакции до записи удостоверения и аудита.
+func lockUserTokenIssuer(ctx context.Context, tx pgx.Tx, actor operations.Principal, subject string) error {
+	var (
+		err    error
+		active bool
+	)
+	switch actor.Type {
+	case "user":
+		var state domain.InviteStatus
+		err = tx.QueryRow(ctx, `SELECT invite_status FROM kaname.users WHERE id=$1 FOR SHARE`, actor.ID).Scan(&state)
+		active = state.MayAuthenticate()
+	case "service_account":
+		var account domain.ServiceAccount
+		err = tx.QueryRow(ctx, `SELECT enabled FROM kaname.service_accounts WHERE id=$1 FOR SHARE`, actor.ID).Scan(&account.Enabled)
+		active = account.MayAuthenticate()
+	default:
+		return iamerr.ErrPermissionDenied
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return iamerr.ErrPermissionDenied
+	}
+	if err != nil {
+		return mapErr(err, "UserOAuthClient.LockIssuer", actor.ID)
+	}
+	if !active {
+		return iamerr.ErrPermissionDenied
+	}
+	if actor.Type == "user" {
+		admitted, err := admission.Subject(ctx, personmarks.NewTransaction(tx), subject)
+		if err != nil {
+			return mapErr(err, "UserOAuthClient.IssuerAdmission", actor.ID)
+		}
+		if !admitted {
+			return iamerr.ErrPermissionDenied
+		}
+	}
+	return nil
 }
 
 // Insert персистит новую строку токена в writer-tx вызывающего. Принимает

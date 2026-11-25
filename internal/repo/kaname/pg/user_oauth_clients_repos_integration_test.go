@@ -112,6 +112,87 @@ func TestUserOAuthClient_IssueHoldsActiveOwnerThroughCommit(t *testing.T) {
 	require.Zero(t, count)
 }
 
+func TestUserOAuthClient_IssueHoldsDistinctIssuerUntilCommit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test (requires Docker)")
+	}
+	ctx := context.Background()
+	pool, err := coredb.NewPool(ctx, setupTestDB(t))
+	require.NoError(t, err)
+	defer pool.Close()
+
+	repo := kanamepg.NewUserOAuthClientRepo(pool)
+	target := mustSeedUser(t, ctx, pool, "uoc-target")
+	human := mustSeedUser(t, ctx, pool, "uoc-admin")
+	seedClusterAdmin(t, ctx, pool, human)
+	var home domain.AccountID
+	require.NoError(t, pool.QueryRow(ctx, `SELECT account_id FROM kaname.users WHERE id=$1`, string(target)).Scan(&home))
+	machine := seedNativeSA(t, ctx, pool, home, "uoc-admin")
+	grant, err := pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = grant.Rollback(ctx) }()
+	_, _, err = kanamepg.NewClusterAdminGrantWriter(pool).Grant(ctx, grant, domain.GrantSubjectTypeServiceAccount, domain.SubjectID(machine), string(human))
+	require.NoError(t, err)
+	require.NoError(t, grant.Commit(ctx))
+
+	for _, tc := range []struct {
+		name     string
+		actor    operations.Principal
+		creator  domain.UserID
+		lock     string
+		withdraw string
+	}{
+		{
+			name: "human loses verified address", actor: operations.Principal{Type: "user", ID: string(human)}, creator: human,
+			lock:     `SELECT id FROM kaname.users WHERE id=$1 FOR NO KEY UPDATE NOWAIT`,
+			withdraw: `UPDATE kaname.users SET email_verified_at=NULL WHERE id=$1`,
+		},
+		{
+			name: "human is blocked", actor: operations.Principal{Type: "user", ID: string(human)}, creator: human,
+			lock:     `SELECT id FROM kaname.users WHERE id=$1 FOR NO KEY UPDATE NOWAIT`,
+			withdraw: `UPDATE kaname.users SET invite_status='BLOCKED' WHERE id=$1`,
+		},
+		{
+			name: "machine", actor: operations.Principal{Type: "service_account", ID: machine}, creator: target,
+			lock:     `SELECT id FROM kaname.service_accounts WHERE id=$1 FOR NO KEY UPDATE NOWAIT`,
+			withdraw: `UPDATE kaname.service_accounts SET enabled=false WHERE id=$1`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.actor.Type == "user" {
+				markAddressVerified(t, ctx, pool, human)
+			}
+			call := operations.WithPrincipal(ctx, tc.actor)
+			tx, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = tx.Rollback(ctx) }()
+			row := newUOC(target, "admin")
+			row.CreatedByUserID = tc.creator
+			_, err = repo.InsertForActiveOwner(call, tx, tc.actor, row)
+			require.NoError(t, err)
+			_, err = pool.Exec(ctx, tc.lock, tc.actor.ID)
+			var busy *pgconn.PgError
+			require.ErrorAs(t, err, &busy)
+			require.Equal(t, "55P03", busy.Code)
+			require.NoError(t, tx.Commit(ctx))
+
+			_, err = pool.Exec(ctx, tc.withdraw, tc.actor.ID)
+			require.NoError(t, err)
+			refused, err := pool.Begin(ctx)
+			require.NoError(t, err)
+			defer func() { _ = refused.Rollback(ctx) }()
+			next := newUOC(target, "refused")
+			next.CreatedByUserID = tc.creator
+			_, err = repo.InsertForActiveOwner(call, refused, tc.actor, next)
+			require.ErrorIs(t, err, iamerr.ErrPermissionDenied)
+			require.NoError(t, refused.Commit(ctx))
+			var exists bool
+			require.NoError(t, pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM kaname.user_oauth_clients WHERE id=$1)`, string(next.ID)).Scan(&exists))
+			require.False(t, exists)
+		})
+	}
+}
+
 func TestUserOAuthClient_IssueRejectsDetachedActorOrCreator(t *testing.T) {
 	// Обе проверки происходят до обращения к базе.
 	repo := kanamepg.NewUserOAuthClientRepo(nil)
