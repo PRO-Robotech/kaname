@@ -78,6 +78,8 @@ type callerGraph struct {
 	bindingEpoch          int
 	zeroVars              map[*types.Var]fkey
 	lifetimeCalls         []callSrc
+	scalarSliceStores     map[*types.Var]callerScalarSliceStore
+	scalarStoreNative     bool                                      // В радиусе обнаружено тело, недоступное исходному анализу.
 	scalarStoreParams     map[*types.Var]bool                       // Только неизменяемые факты исходного кода.
 	projectedStoreCells   map[*ast.SelectorExpr]map[*types.Var]bool // Только неизменяемые источники адреса записи.
 	localAppendBuilders   map[*types.Var]bool                       // Полные лексические доказательства; не ответы resolver.
@@ -192,6 +194,7 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 	}
 	for fn, decl := range flow.decls {
 		if decl.decl.Body == nil {
+			g.scalarStoreNative = true
 			continue
 		}
 		fn = fn.Origin()

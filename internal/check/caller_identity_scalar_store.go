@@ -197,3 +197,90 @@ func (g *callerGraph) closedScalarStoreParam(sp *surfaceSrcPkg, variable *types.
 	}
 	return true
 }
+
+// Адрес отдельной локальной скалярной переменной не является выделением
+// срезового литерала. Объект литерала проверяет вызывающий objectWrites.
+// Сохраняем только неизменяемые данные вызова. Активную привязку проверяем
+// заново перед каждым пропуском, включая повторный вызов в том же корне.
+type callerScalarSliceStore struct {
+	address valueSrc
+	cell    *types.Var
+}
+
+func (p *callerLifetimeProbe) separateClosedScalarSliceStore(w callerLifetimeWrite) bool {
+	g, src := p.g, w.owner
+	if !w.whole || !g.lifetimeScanning || g.scalarStoreNative || g.semanticOverflow ||
+		p.steps > callerLifetimeStepLimit || !callerFreshReplayContext(g.ctx) || g.ctx != nil && g.ctx.Err() != nil ||
+		src.pkg == nil || src.pkg.info == nil || src.pkg.types == nil || src.fk.fn == nil || src.fk.lit != nil ||
+		src.tuple != -1 || src.elem || src.rangeKey || src.rangeVal || src.opAssign || w.value.pkg != src.pkg || w.value.fk != src.fk || w.value.expr == nil ||
+		w.value.tuple != -1 || w.value.elem || w.value.rangeKey || w.value.rangeVal || w.value.opAssign {
+		return false
+	}
+	id, ok := ast.Unparen(src.expr).(*ast.Ident)
+	if !ok {
+		return false
+	}
+	v, ok := src.pkg.info.Uses[id].(*types.Var)
+	if !ok || len(g.live[v]) != 1 || g.parameters[v].fk != src.fk {
+		return false
+	}
+	cert, known := g.scalarSliceStores[v]
+	if !known {
+		cert = g.closedScalarSliceStore(src, v)
+		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
+			return false
+		}
+		if g.scalarSliceStores == nil {
+			g.scalarSliceStores = map[*types.Var]callerScalarSliceStore{}
+		}
+		g.scalarSliceStores[v] = cert
+	}
+	return cert.cell != nil && g.live[v][0] == cert.address && len(g.live[cert.cell]) == 0
+}
+
+func (g *callerGraph) closedScalarSliceStore(src valueSrc, v *types.Var) callerScalarSliceStore {
+	var refused callerScalarSliceStore
+	param, ok := g.parameters[v]
+	if !ok || param.recv || param.fk.fn != src.fk.fn || param.index < 0 || g.index == nil {
+		return refused
+	}
+	fn := src.fk.fn
+	sites := g.index.calls[fn]
+	if len(sites) != 1 || sites[0].pkg != src.pkg || param.index >= len(sites[0].call.Args) {
+		return refused
+	}
+	for _, dep := range src.pkg.types.Imports() {
+		if dep.Path() == "unsafe" || dep.Path() == "C" {
+			return refused
+		}
+	}
+	site := sites[0]
+	sel, ok := ast.Unparen(site.call.Fun).(*ast.SelectorExpr)
+	if !ok {
+		return refused
+	}
+	method := src.pkg.info.Selections[sel]
+	if method == nil || method.Kind() != types.MethodVal || method.Obj() != fn || len(method.Index()) != 1 || isIfaceMethod(fn) {
+		return refused
+	}
+	arg := site.call.Args[param.index]
+	addr, ok := ast.Unparen(arg).(*ast.UnaryExpr)
+	if !ok || addr.Op != token.AND {
+		return refused
+	}
+	id, ok := ast.Unparen(addr.X).(*ast.Ident)
+	if !ok {
+		return refused
+	}
+	cell, ok := src.pkg.info.Uses[id].(*types.Var)
+	if !ok {
+		return refused
+	}
+	if _, zero := g.zeroVars[cell]; !zero {
+		return refused
+	}
+	if !g.closedScalarStoreParam(src.pkg, v) {
+		return refused
+	}
+	return callerScalarSliceStore{valueSrc{pkg: site.pkg, fk: site.fk, expr: arg, tuple: -1}, cell}
+}

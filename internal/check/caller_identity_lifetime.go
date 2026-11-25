@@ -511,6 +511,10 @@ func (p *callerLifetimeProbe) objectWrites(object callerObjectKey) bool {
 			adjacentOwners = callerContainerObjectReuse{}
 			continue
 		}
+		if sliceAllocation && p.separateClosedScalarSliceStore(write) {
+			adjacentOwners = callerContainerObjectReuse{}
+			continue
+		}
 		if sliceAllocation && p.separateUnpublishedMapWrite(write) {
 			p.g.work.UnpublishedMapWriteSkips++
 			adjacentOwners = callerContainerObjectReuse{}
