@@ -97,7 +97,7 @@ BEGIN
   "    IF p_frozen#>'{copies,roots}'='{}'::jsonb AND p_fixed=1\n        AND jsonb_array_length(p_frozen#>'{binding_census,bindings}')=1 AND p_frozen#>>'{binding_census,bindings,0,2,status}'='ACTIVE'\n        AND jsonb_array_length(p_frozen#>'{binding_census,members}')=1 AND jsonb_array_length(p_frozen#>'{role,physical,2,rules}')=1\n        AND (p_frozen#>'{role,physical,2,rules,0}')-'match_labels'='{\"module\":\"iam\",\"resources\":[\"project\"],\"verbs\":[\"get\"]}'::jsonb\n        AND (p_frozen#>'{role,new_role,rules,0}') ? 'match_access_labels' THEN\n        slot:=kaname._authority_role_move_active_fga_slot_v1(p_frozen,p_fixed+1,p_rows-used_rows,p_reads-used_reads);\n        slots:=array_append(slots,slot);used_rows:=used_rows+24;used_reads:=used_reads+5;\n    END IF;\n    RETURN jsonb_build_object('slots',to_jsonb(slots),'outputs',outputs,'rows',used_rows,'reads',used_reads);"
  ]
 ]$edits$::jsonb),
-        ('_authority_crud_storage_v3()','e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80','9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f',$edits$[
+        ('_authority_crud_storage_v3()','9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78','f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1',$edits$[
  [
   "a61a057c02720031cd029075490eb56a6cacabbca9bc18ef1e7d27463a40c577",
   "34ae2f688dc9b22da0b2d52b7e784d01550f3c9f162eb79dffb959ea204fa84d"
@@ -111,32 +111,32 @@ BEGIN
   "  ('_authority_role_move_sequence_extend_v1(jsonb,integer,integer,integer)','jsonb',4,ARRAY['p_frozen','p_fixed','p_rows','p_reads']),\n  ('_authority_role_move_active_fga_slot_v1(jsonb,integer,integer,integer)','jsonb',4,ARRAY['p_held','p_ordinal','p_rows','p_reads']),\n"
  ]
 ]$edits$::jsonb),
-        ('_authority_full_contract_storage_v3()','2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f','b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2',$edits$[
+        ('_authority_full_contract_storage_v3()','c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318','4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77',$edits$[
  [
-  "e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80",
-  "9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f"
+  "9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78",
+  "f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_service_account_access_label_ready_v1()','ca6302c65e6738c9ff9ac0e5e54c190bd2f5e2fa445f933d294c3f5666d3118c','ef49cdedd7e60295deff493de109d4b9101f2c25e40fd7b14fa105f045256139',$edits$[
+        ('authority_metadata_service_account_access_label_ready_v1()','28a980e86925f9f81f38d54bd3bc34c3903d7dc3a4f5e0be010b516b2cfc74b1','2ef7eeb6a95ef6d4a03c3622d5b7df1cadd8d33c94408ba45bab6ee2774e5c43',$edits$[
  [
-  "e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80",
-  "9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f"
+  "9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78",
+  "f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1"
  ],
  [
-  "2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f",
-  "b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2"
+  "c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318",
+  "4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77"
  ]
 ]$edits$::jsonb),
-        ('_authority_metadata_user_exports_v1(oid,boolean)','e90747cd52de4dfb2dd8861be8bac6f958a8711fb82dd16cce79131b4ec1905b','7c7cb9edea3cfb06e3fa607a8db91500f8185006ef4766b7355176ad0308d4ff',$edits$[
+        ('_authority_metadata_user_exports_v1(oid,boolean)','bb96a2654a9c80fca86ec7e6ec9485d66820fe1ae245aec0f578ad028a421d08','100e565d8f35cd980754f9b5daed5cfdea3bc81dc0f6a3b9c4deadc221848f0c',$edits$[
  [
-  "2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f",
-  "b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2"
+  "c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318",
+  "4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','6fcba8df5615e45f64fecd7724fa219effe0a4ec658dcb793bdd545f1ca2164c','be3f48e5567655cb21c98a5b6595894f4e267cee7815345247aa21c217dd891d',$edits$[
+        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','765c5d60b718fc5e14145712a1b3493f34c75a4b659b2494de8774c583ab0ebb','78805dd7d48c4a425d9ea93501461a9f911244f05bf6973cae42265c93c33974',$edits$[
  [
-  "e90747cd52de4dfb2dd8861be8bac6f958a8711fb82dd16cce79131b4ec1905b",
-  "7c7cb9edea3cfb06e3fa607a8db91500f8185006ef4766b7355176ad0308d4ff"
+  "bb96a2654a9c80fca86ec7e6ec9485d66820fe1ae245aec0f578ad028a421d08",
+  "100e565d8f35cd980754f9b5daed5cfdea3bc81dc0f6a3b9c4deadc221848f0c"
  ]
 ]$edits$::jsonb)
     ) AS x(signature,prior,installed,edits) LOOP
@@ -181,35 +181,35 @@ DO $storage$
 DECLARE item record;fn regprocedure;original text;body text;definition text;marker text;edit jsonb;
 BEGIN
     FOR item IN SELECT * FROM (VALUES
-        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','be3f48e5567655cb21c98a5b6595894f4e267cee7815345247aa21c217dd891d','6fcba8df5615e45f64fecd7724fa219effe0a4ec658dcb793bdd545f1ca2164c',$edits$[
+        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','78805dd7d48c4a425d9ea93501461a9f911244f05bf6973cae42265c93c33974','765c5d60b718fc5e14145712a1b3493f34c75a4b659b2494de8774c583ab0ebb',$edits$[
  [
-  "7c7cb9edea3cfb06e3fa607a8db91500f8185006ef4766b7355176ad0308d4ff",
-  "e90747cd52de4dfb2dd8861be8bac6f958a8711fb82dd16cce79131b4ec1905b"
+  "100e565d8f35cd980754f9b5daed5cfdea3bc81dc0f6a3b9c4deadc221848f0c",
+  "bb96a2654a9c80fca86ec7e6ec9485d66820fe1ae245aec0f578ad028a421d08"
  ]
 ]$edits$::jsonb),
-        ('_authority_metadata_user_exports_v1(oid,boolean)','7c7cb9edea3cfb06e3fa607a8db91500f8185006ef4766b7355176ad0308d4ff','e90747cd52de4dfb2dd8861be8bac6f958a8711fb82dd16cce79131b4ec1905b',$edits$[
+        ('_authority_metadata_user_exports_v1(oid,boolean)','100e565d8f35cd980754f9b5daed5cfdea3bc81dc0f6a3b9c4deadc221848f0c','bb96a2654a9c80fca86ec7e6ec9485d66820fe1ae245aec0f578ad028a421d08',$edits$[
  [
-  "b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2",
-  "2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f"
+  "4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77",
+  "c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_service_account_access_label_ready_v1()','ef49cdedd7e60295deff493de109d4b9101f2c25e40fd7b14fa105f045256139','ca6302c65e6738c9ff9ac0e5e54c190bd2f5e2fa445f933d294c3f5666d3118c',$edits$[
+        ('authority_metadata_service_account_access_label_ready_v1()','2ef7eeb6a95ef6d4a03c3622d5b7df1cadd8d33c94408ba45bab6ee2774e5c43','28a980e86925f9f81f38d54bd3bc34c3903d7dc3a4f5e0be010b516b2cfc74b1',$edits$[
  [
-  "b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2",
-  "2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f"
+  "4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77",
+  "c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318"
  ],
  [
-  "9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f",
-  "e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80"
+  "f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1",
+  "9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78"
  ]
 ]$edits$::jsonb),
-        ('_authority_full_contract_storage_v3()','b9f99fb5334ad256eca53326cf9bf2ba5a9fcd17a2382d74e6e6322d6b26caf2','2981bc05c2ee02ea1fd90a9e73ad400e1b82c471788e80019e6613cd0f55c42f',$edits$[
+        ('_authority_full_contract_storage_v3()','4adabc1d85217185a343128358ebf6a60a0b56dc250a7c2e412a2c8336a77e77','c2f591a96b9a63b616ba4c29b41f9a738bbaa61647f5c6a5b900674ecd747318',$edits$[
  [
-  "9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f",
-  "e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80"
+  "f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1",
+  "9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78"
  ]
 ]$edits$::jsonb),
-        ('_authority_crud_storage_v3()','9378c40cee3e4912ec5aec7705d3f2c8a8f682bb69e711b3b0f7c39ffea07a6f','e97d5bac873cafaa5a08f13bfd50da25e43b817ea42cf164815774571ca48c80',$edits$[
+        ('_authority_crud_storage_v3()','f43195bd02321e1a384b1bf41eccaf7118907572c8f60b8e0856dbe63bc064e1','9e2f66aec8cb66f81ffa9a48324818717ad41e633e845c8603eff54602309e78',$edits$[
  [
   "  ('_authority_role_move_sequence_extend_v1(jsonb,integer,integer,integer)','jsonb',4,ARRAY['p_frozen','p_fixed','p_rows','p_reads']),\n  ('_authority_role_move_active_fga_slot_v1(jsonb,integer,integer,integer)','jsonb',4,ARRAY['p_held','p_ordinal','p_rows','p_reads']),\n",
   "  ('_authority_role_move_sequence_extend_v1(jsonb,integer,integer,integer)','jsonb',4,ARRAY['p_frozen','p_fixed','p_rows','p_reads']),\n"
