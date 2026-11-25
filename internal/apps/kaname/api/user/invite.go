@@ -58,6 +58,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/outboxtypes"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
@@ -541,7 +542,9 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		mailAsked  bool
 		mailQueued bool
 	}
-	body := func(ctx context.Context, w InviteMutationWriter, prepared PreparedInvite) (inviteTxResult, error) {
+	body := func(ctx context.Context, w kanamerepo.InviteMutationEffects, prepared PreparedInvite,
+		insertPending func(context.Context, domain.User, time.Time) (domain.User, bool, error),
+	) (inviteTxResult, error) {
 		deadline := uc.inviteDeadline()
 		if prepared != nil && uc.inviteTTL > 0 {
 			deadline = prepared.DecisionAt().Add(uc.inviteTTL)
@@ -562,7 +565,7 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		// Признак заведения — несущий: с глобальным ключом идентичности
 		// конфликт означает «человек уже есть в платформе», и для такой
 		// строки указатель на предка и материализация не эмитятся.
-		ins, insertedNow, err := w.UsersW().InsertPending(ctx, domain.User{
+		ins, insertedNow, err := insertPending(ctx, domain.User{
 			ID:           candidateID,
 			AccountID:    in.AccountID,
 			Email:        in.Email,
@@ -778,11 +781,13 @@ func (uc *InviteUserUseCase) run(ctx context.Context, adm admission, in InviteUs
 		}
 		err = uc.inviteDecisions.RunInviteDecision(ctx, intent, func(ctx context.Context, w InviteMutationWriter, p PreparedInvite) error {
 			var e error
-			res, e = body(ctx, w, p)
+			res, e = body(ctx, w, p, w.InsertPendingInvitee)
 			return e
 		})
 	} else {
-		res, err = shared.DoWithWriteTx(ctx, uc.repo, func(ctx context.Context, w Writer) (inviteTxResult, error) { return body(ctx, w, nil) })
+		res, err = shared.DoWithWriteTx(ctx, uc.repo, func(ctx context.Context, w Writer) (inviteTxResult, error) {
+			return body(ctx, w, nil, w.UsersW().InsertPending)
+		})
 	}
 	if err != nil {
 		// Runner сохраняет ошибки для whole-attempt retry; публичную полосу

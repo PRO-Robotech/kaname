@@ -52,6 +52,75 @@ func TestInviteDecisionIntentIsBoundToAuthenticatedActor(t *testing.T) {
 		})
 	}
 }
+
+func TestInviteeWriteUsesPreparedIdentityAndAccount(t *testing.T) {
+	ctx := context.Background()
+	intent := kaname.InviteDecisionIntent{
+		CandidateUserID: "usr_candidate",
+		AccountID:       "acc_invitation",
+		Email:           "new@example.invalid",
+		InvitedBy:       "usr_inviter",
+	}
+	candidate := domain.User{
+		ID: intent.CandidateUserID, AccountID: intent.AccountID, Email: intent.Email,
+		InvitedBy: intent.InvitedBy, InviteStatus: domain.InviteStatusPending,
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(*domain.User)
+	}{
+		{"другая личность", func(u *domain.User) { u.ID = "usr_other" }},
+		{"другой аккаунт", func(u *domain.User) { u.AccountID = "acc_other" }},
+		{"другая почта", func(u *domain.User) { u.Email = "other@example.invalid" }},
+		{"другой приглашающий", func(u *domain.User) { u.InvitedBy = "usr_other" }},
+		{"иной статус", func(u *domain.User) { u.InviteStatus = domain.InviteStatusActive }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := inviteMutationFacade{intent: intent, insertPending: func(context.Context, domain.User, time.Time) (domain.User, bool, error) {
+				t.Fatal("запись вне подготовленного приглашения не дошла бы до writer")
+				return domain.User{}, false, nil
+			}}
+			request := candidate
+			tc.change(&request)
+			_, _, err := w.InsertPendingInvitee(ctx, request, time.Time{})
+			require.ErrorIs(t, err, kaname.ErrInvalidAuthorityFencePlan)
+			_, _, err = w.InsertPendingInvitee(ctx, candidate, time.Time{})
+			require.ErrorIs(t, err, kaname.ErrInvalidAuthorityFencePlan)
+		})
+	}
+	for _, tc := range []struct {
+		name        string
+		plan        inviteIdentityPlan
+		returnedID  domain.UserID
+		inserted    bool
+		wantRestage bool
+	}{
+		{"новая личность", inviteIdentityPlan{recipient: candidate.ID}, candidate.ID, true, false},
+		{"существующая глобальная личность", inviteIdentityPlan{recipient: "usr_existing", existing: true}, "usr_existing", false, false},
+		{"идентичность изменилась", inviteIdentityPlan{recipient: candidate.ID}, "usr_other", true, true},
+		{"глобальная строка появилась", inviteIdentityPlan{recipient: candidate.ID}, candidate.ID, false, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			deadline := time.Unix(1800000000, 0)
+			w := inviteMutationFacade{intent: intent, identity: tc.plan, insertPending: func(_ context.Context, in domain.User, expiry time.Time) (domain.User, bool, error) {
+				require.Equal(t, candidate, in)
+				require.Equal(t, deadline, expiry)
+				return domain.User{ID: tc.returnedID}, tc.inserted, nil
+			}}
+			user, inserted, err := w.InsertPendingInvitee(ctx, candidate, deadline)
+			if tc.wantRestage {
+				require.ErrorIs(t, err, kaname.ErrAuthorityClassificationChanged)
+				require.ErrorIs(t, w.inviteeErr, kaname.ErrAuthorityClassificationChanged)
+				require.Empty(t, user.ID)
+				require.False(t, inserted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.returnedID, user.ID)
+			require.Equal(t, tc.inserted, inserted)
+		})
+	}
+}
 func TestInviteDecisionRootsDeclareOptionalCapabilityBeforeDiscovery(t *testing.T) {
 	actor := domain.Subject{Type: domain.SubjectTypeUser, ID: "usr_actor"}
 	q := newNativePolicyQuestions()

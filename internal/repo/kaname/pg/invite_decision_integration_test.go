@@ -235,7 +235,7 @@ func inviteRunnerIntent(f inviteDecisionFixture, email domain.Email) userapp.Inv
 	return userapp.InviteDecisionIntent{Actor: domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(f.actor)}, CandidateUserID: domain.UserID(ids.NewID(domain.PrefixUser)), AccountID: domain.AccountID(f.r.a), Email: email, InvitedBy: domain.UserID(f.actor), GrantedBy: domain.UserID(f.actor)}
 }
 func inviteRunnerInsert(ctx context.Context, w userapp.InviteMutationWriter, p userapp.PreparedInvite, in userapp.InviteDecisionIntent) error {
-	u, _, err := w.UsersW().InsertPending(ctx, domain.User{ID: in.CandidateUserID, AccountID: in.AccountID, Email: in.Email, InviteStatus: domain.InviteStatusPending, InvitedBy: in.InvitedBy}, p.DecisionAt().Add(time.Hour))
+	u, _, err := w.InsertPendingInvitee(ctx, domain.User{ID: in.CandidateUserID, AccountID: in.AccountID, Email: in.Email, InviteStatus: domain.InviteStatusPending, InvitedBy: in.InvitedBy}, p.DecisionAt().Add(time.Hour))
 	if err != nil {
 		return err
 	}

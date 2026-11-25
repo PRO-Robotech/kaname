@@ -32,14 +32,20 @@ type PreparedInvite interface {
 	DecisionAt() time.Time
 }
 
-// Порт тела не раскрывает Commit/Rollback, pgx.Tx или semantic checker.
-type InviteMutationWriter interface {
-	UsersW() person.WriterIface
+// Чтение результата и сопутствующие записи приглашения.
+type InviteMutationEffects interface {
 	Users() person.ReaderIface
 	AccessBindingsW() ab.WriterIface
 	EmitReconcileEvent(context.Context, string, string, string) error
 	EmitFGARelationWrite(context.Context, []outboxtypes.RelationTuple) error
 	EmitInviteMail(context.Context, outboxtypes.InviteMailIntent) (bool, error)
+}
+
+// Порт тела позволяет завести только личность и членство подготовленного
+// приглашения. Остальные операции записи личности остаются у владельца транзакции.
+type InviteMutationWriter interface {
+	InviteMutationEffects
+	InsertPendingInvitee(context.Context, domain.User, time.Time) (domain.User, bool, error)
 }
 type InviteDecisionRunner interface {
 	RunInviteDecision(context.Context, InviteDecisionIntent, func(context.Context, InviteMutationWriter, PreparedInvite) error) error

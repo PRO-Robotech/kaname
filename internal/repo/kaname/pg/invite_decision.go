@@ -268,9 +268,20 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 	if plan != nil {
 		bindings = semantic.AccessBindingsW()
 	}
-	facade := &inviteMutationFacade{InviteMutationWriter: w, bindings: &inviteBindingWriter{WriterIface: bindings, prepared: prepared}}
+	facade := &inviteMutationFacade{
+		InviteMutationEffects: w,
+		bindings:              &inviteBindingWriter{WriterIface: bindings, prepared: prepared},
+		intent:                in,
+		identity:              identity,
+		insertPending:         w.UsersW().InsertPending,
+	}
 	if err = body(ctx, facade, prepared); err != nil {
 		return err
+	}
+	// Ошибка подготовленной записи запрещает commit всей попытки,
+	// даже если тело приглашения не вернуло её.
+	if facade.inviteeErr != nil {
+		return facade.inviteeErr
 	}
 	if err = ctx.Err(); err != nil {
 		return err
@@ -280,11 +291,39 @@ func (p *InviteDecisions) once(ctx context.Context, in kaname.InviteDecisionInte
 
 // Embedded порт намеренно узкий: lifecycle owner не становится частью callback.
 type inviteMutationFacade struct {
-	kaname.InviteMutationWriter
-	bindings ab.WriterIface
+	kaname.InviteMutationEffects
+	bindings      ab.WriterIface
+	intent        kaname.InviteDecisionIntent
+	identity      inviteIdentityPlan
+	insertPending func(context.Context, domain.User, time.Time) (domain.User, bool, error)
+	inviteeErr    error
 }
 
 func (w *inviteMutationFacade) AccessBindingsW() ab.WriterIface { return w.bindings }
+
+func (w *inviteMutationFacade) InsertPendingInvitee(ctx context.Context, candidate domain.User, expiresAt time.Time) (domain.User, bool, error) {
+	if w.inviteeErr != nil {
+		return domain.User{}, false, w.inviteeErr
+	}
+	if candidate.ID != w.intent.CandidateUserID || candidate.AccountID != w.intent.AccountID ||
+		candidate.Email != w.intent.Email || candidate.InvitedBy != w.intent.InvitedBy ||
+		candidate.InviteStatus != domain.InviteStatusPending {
+		w.inviteeErr = kaname.ErrInvalidAuthorityFencePlan
+		return domain.User{}, false, w.inviteeErr
+	}
+	// Арбитр по почте вправе вернуть уже известную глобальную личность.
+	// Она должна совпасть с protected reread до выдачи и вставки членства.
+	user, inserted, err := w.insertPending(ctx, candidate, expiresAt)
+	if err != nil {
+		w.inviteeErr = err
+		return domain.User{}, false, err
+	}
+	if user.ID != w.identity.recipient || inserted == w.identity.existing {
+		w.inviteeErr = kaname.ErrAuthorityClassificationChanged
+		return domain.User{}, false, w.inviteeErr
+	}
+	return user, inserted, nil
+}
 
 type inviteBindingWriter struct {
 	ab.WriterIface
