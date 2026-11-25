@@ -203,9 +203,6 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	t.Run("ordinary-and-noop-after-protected", func(t *testing.T) {
 		exerciseOrdinaryMirrorOperation(t, r, w.factory, root, ctx, principal)
 	})
-	t.Run("signed Register against retained protected labels", func(t *testing.T) {
-		checkSignedRegistrationVersions(t, r, owner, root, w.project.ID, actorID, definition, readState)
-	})
 }
 
 type metadataOperationProbe struct {

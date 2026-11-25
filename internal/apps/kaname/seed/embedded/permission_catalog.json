@@ -3390,6 +3390,28 @@
     "required_acr_min": "1"
   },
   {
+    "fqn": "kaname.cloud.iam.v1.ResourceMetadataService/Get",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
+    "fqn": "kaname.cloud.iam.v1.ResourceMetadataService/Update",
+    "permission": "\u003cexempt\u003e",
+    "required_relation": "",
+    "scope_extractor": {
+      "object_type": "",
+      "from_request_field": ""
+    },
+    "required_acr_min": "1",
+    "exempt_reason": "HANDLER_DECIDES"
+  },
+  {
     "fqn": "kaname.cloud.iam.v1.RoleService/Create",
     "permission": "iam.roles.create",
     "required_relation": "editor",

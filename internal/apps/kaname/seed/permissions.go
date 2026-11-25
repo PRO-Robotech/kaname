@@ -43,15 +43,15 @@
 //
 // ─── СОСТАВ КАТАЛОГА ────────────────────────────────────────────────────────
 //
-// ЗАПИСЕЙ КАТАЛОГА: 367
+// ЗАПИСЕЙ КАТАЛОГА: 369
 // ЗАПИСЕЙ БЕЗ ПРАВА: 0
-// ЗАПИСЕЙ БЕЗ ОТНОШЕНИЯ: 64
+// ЗАПИСЕЙ БЕЗ ОТНОШЕНИЯ: 66
 //
 // Три числа, каждое из embed-файла, каждое своим маркером и каждое сверяется тем
 // же гейтом. Аннотации наполнены: записи без права нет ни одной, поэтому
 // `PermissionsForRole("system.viewer")` разворачивается в права
 // читающего класса, а не в пустой список. Право записывается тремя сегментами
-// (`<домен>.<ресурс>.<глагол>`). В 32 записях вместо права указан явный
+// (`<домен>.<ресурс>.<глагол>`). В 34 записях вместо права указан явный
 // литерал изъятия `catalogderive.ExemptPermission`.
 //
 // Прежняя редакция описывала обратное состояние — «бо́льшая часть записей с двумя
@@ -97,6 +97,7 @@ type PermissionEntry struct {
 		FromRequestField string `json:"from_request_field"`
 	} `json:"scope_extractor"`
 	RequiredACRMin string `json:"required_acr_min,omitempty"`
+	ExemptReason   string `json:"exempt_reason,omitempty"`
 
 	// ScopeFiltered — the method is authorized over the DATA by its owning
 	// service: the edge runs no per-RPC check and passes the call through, so
