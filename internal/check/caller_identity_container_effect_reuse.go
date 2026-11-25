@@ -201,7 +201,17 @@ func (g *callerGraph) callerContainerObjects(src valueSrc, key callerResolveKey,
 	if !g.lifetimeScanning || g.semanticOverflow || c == nil || c.graph != g || id == 0 || !callerFreshReplayContext(g.ctx) || g.objectMemoEpoch != g.bindingEpoch || g.initialObjectMemo == nil {
 		return g.callerObjects(src, seen)
 	}
-	if _, complete := g.initialObjectMemo[id]; complete || g.ctx != nil && g.ctx.Err() != nil {
+	if answer, complete := g.initialObjectMemo[id]; complete {
+		if g.objectMemo == nil || key != callerResolveKeyFor(src, true) {
+			return g.callerObjects(src, seen)
+		}
+		g.taintCallerTraces()
+		if g.ctx != nil && g.ctx.Err() != nil {
+			return nil, true
+		}
+		return g.callerInitialObjectExecutionHit(answer, seen)
+	}
+	if g.ctx != nil && g.ctx.Err() != nil {
 		return g.callerObjects(src, seen)
 	}
 	table := &c.containerOwners

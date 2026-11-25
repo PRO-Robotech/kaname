@@ -158,15 +158,8 @@ func (g *callerGraph) callerObjectsTracked(src valueSrc, seen map[callerObjectSo
 	}
 	key := g.internObjectSource(src)
 	if answer, ok := memo[key]; ok {
-		g.work.ObjectHits++
-		if initial {
-			// Начальные источники не доказывают сохранность за пределами lifetime-обхода.
-			g.noteCallerInitialBoundary()
-		}
-		if g.semanticOverflow {
-			return nil, true, false
-		}
-		return answer.objects, answer.unknown, false
+		objects, unknown := g.callerObjectMemoAnswer(answer, initial)
+		return objects, unknown, false
 	}
 	epoch, cuts, initialSkips := g.bindingEpoch, g.resolveCuts, g.initialSkips
 	completed := g.completedInitialSkips
@@ -207,6 +200,18 @@ func (g *callerGraph) callerObjectsTracked(src valueSrc, seen map[callerObjectSo
 		}
 	}
 	return objects, unknown, owned
+}
+
+func (g *callerGraph) callerObjectMemoAnswer(answer callerObjectAnswer, initial bool) (map[callerObjectKey]bool, bool) {
+	g.work.ObjectHits++
+	if initial {
+		// Начальные источники не доказывают сохранность за пределами lifetime-обхода.
+		g.noteCallerInitialBoundary()
+	}
+	if g.semanticOverflow {
+		return nil, true
+	}
+	return answer.objects, answer.unknown
 }
 
 // Непрозрачная ветка владеет своим аккумулятором и копирует заимствованные

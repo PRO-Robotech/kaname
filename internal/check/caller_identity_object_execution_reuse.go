@@ -461,6 +461,18 @@ func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim boo
 	return node
 }
 
+// Вызывающий уже проверил точный источник, эпоху и начальный режим.
+// Prepare закрывает прежние traces и освобождает старые summaries, не меняя memo.
+func (g *callerGraph) callerInitialObjectExecutionHit(answer callerObjectAnswer, seen map[callerObjectSourceID]bool) (map[callerObjectKey]bool, bool) {
+	g.work.ObjectExecutionFallbacks++
+	g.prepareCallerTrace(seen)
+	g.work.ObjectQueries++
+	if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
+		return nil, true
+	}
+	return g.callerObjectMemoAnswer(answer, true)
+}
+
 func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectSourceID]bool) (map[callerObjectKey]bool, bool) {
 	entryContext := g.ctx
 	var entryScope *callerObjectExecutionScope
@@ -487,15 +499,8 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 	if id == 0 || g.objectMemo == nil || g.objectMemoEpoch != g.bindingEpoch || g.initialObjectMemo == nil {
 		return original()
 	}
-	if _, complete := g.initialObjectMemo[id]; complete {
-		// Точный обычный memo уже существует. Допущенный Err не вызывает код
-		// пользователя, а prepare не меняет memo: Tracked либо отменится на
-		// прежнем checkpoint, либо вернёт тот же hit с одной initial boundary.
-		// Сохраняем taint/retirement, но не резервируем неиспользуемый trace.
-		g.work.ObjectExecutionFallbacks++
-		g.prepareCallerTrace(seen)
-		objects, unknown, _ := g.callerObjectsTracked(src, seen, nil)
-		return objects, unknown
+	if answer, complete := g.initialObjectMemo[id]; complete {
+		return g.callerInitialObjectExecutionHit(answer, seen)
 	}
 	if !g.callerExecutionScopeTracked() {
 		return original()

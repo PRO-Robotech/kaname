@@ -632,3 +632,32 @@ func TestCallerIdentityContainerInputAdmissionIsolationAndContext(t *testing.T) 
 		t.Fatal("выбор admission изменил результат или отметки полного обхода")
 	}
 }
+
+func TestCallerIdentityContainerCompleteMemoUsesExactSource(t *testing.T) {
+	g, src, base, _ := callerExecutionSnapshotFixture(t)
+	key := callerResolveKeyFor(src, true)
+	other := callerResolveKeyFor(base, true)
+	answer := callerObjectAnswer{objects: map[callerObjectKey]bool{{}: true}, unknown: true}
+	g.initialObjectMemo[g.internObjectSource(src)] = answer
+	g.initialObjectMemo[g.internObjectSource(base)] = callerObjectAnswer{}
+
+	for _, tc := range []struct {
+		use callerContainerObjectUse
+		key callerResolveKey
+	}{
+		{callerContainerInput, key},
+		{callerWriteOwner, key},
+		{callerWriteOwner, other},
+	} {
+		before, marks := g.work, callerReuseMarks(g)
+		objects, unknown := g.callerContainerObjects(src, tc.key, tc.use)
+		if !maps.Equal(objects, answer.objects) || unknown != answer.unknown {
+			t.Fatalf("ответ полного memo изменился для use=%v", tc.use)
+		}
+		if g.work.ObjectQueries != before.ObjectQueries+1 || g.work.ObjectHits != before.ObjectHits+1 ||
+			g.work.ObjectExecutionFallbacks != before.ObjectExecutionFallbacks+1 ||
+			g.work.ObjectRawEvaluations != before.ObjectRawEvaluations || callerReuseDelta(g, marks) != [4]uint64{1, 1, 0, 0} {
+			t.Fatalf("учёт полной границы memo изменился для use=%v", tc.use)
+		}
+	}
+}
