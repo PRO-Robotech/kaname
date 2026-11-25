@@ -39,6 +39,7 @@ type CallerIdentityWork struct {
 	ContainerTypeCompatibleWrites, ContainerMatchedWrites                         int
 	ContainerTypePairQueries, ContainerUniqueTypePairs, ContainerTypePairOverflow int
 	ContainerCoordinateDrops                                                      int
+	ContainerInputAdmissionBypasses                                               int // Начальные обходы контейнера без внешнего execution-снимка.
 	ContainerOwnerAdmissionBypasses                                               int // Обходы владельца без попытки получить общий execution-снимок.
 	ObjectTraceQueries, ObjectTraceHits, ObjectTraceStores                        int
 	ObjectTraceSeenReads, ObjectTraceDependencySteps, ObjectTraceValidationSteps  int

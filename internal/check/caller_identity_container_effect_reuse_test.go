@@ -505,7 +505,7 @@ func TestCallerIdentityContainerOwnerAdmissionRebindAndFallback(t *testing.T) {
 	id := g.internObjectSource(field)
 	c := g.objectExecutions
 	slot := &c.containerOwners[uint64(id)%uint64(len(c.containerOwners))]
-	*slot = callerContainerOwnerAdmission{source: id, epoch: g.bindingEpoch, remaining: 8}
+	*slot = callerContainerAdmission{source: id, epoch: g.bindingEpoch, remaining: 8}
 	checkpoints := 0
 	g.ctx = &callerExecutionResetContext{Context: context.Background(), checkpoint: func() { checkpoints++ }}
 	var owner callerContainerObjectReuse
@@ -523,7 +523,7 @@ func TestCallerIdentityContainerOwnerAdmissionRebindAndFallback(t *testing.T) {
 	}
 	g.resetCallerObjectExecutions()
 	replacement := g.objectExecutions
-	if replacement == c || replacement.containerOwners[uint64(id)%uint64(len(replacement.containerOwners))] != (callerContainerOwnerAdmission{}) {
+	if replacement == c || replacement.containerOwners[uint64(id)%uint64(len(replacement.containerOwners))] != (callerContainerAdmission{}) {
 		t.Fatal("new root inherited owner admission history")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -533,5 +533,102 @@ func TestCallerIdentityContainerOwnerAdmissionRebindAndFallback(t *testing.T) {
 	got, unknown = owner.writeObjects(g, field, true)
 	if len(got) != 0 || !unknown || owner.ready || g.work.ContainerOwnerAdmissionBypasses != 0 {
 		t.Fatal("canceled owner did not take the ordinary conservative path")
+	}
+}
+
+func TestCallerIdentityContainerInputAdmissionMatchedWrites(t *testing.T) {
+	prepared, src, other, expected := callerRepeatedContainerOwners(t)
+	t.Cleanup(func() { callerGraphs.Delete(prepared.p) })
+	newGraph := func() *callerGraph {
+		g := callerGraphFor(prepared.p, nil)
+		g.ctx = context.Background()
+		g.lifetimeScanning = true
+		g.markCallerCalled(callerNode{fn: src.fk.fn, lit: src.fk.lit})
+		base := src
+		sel := src.expr.(*ast.SelectorExpr)
+		base.expr = sel.X
+		i, ok := g.enterCallerFieldQuery(base, fieldPath(src.pkg.info.Selections[sel]))
+		if !ok {
+			t.Fatal("не создан запрос поля владельца")
+		}
+		t.Cleanup(func() { g.leaveCallerFieldQuery(i) })
+		g.containerScanning = map[callerResolveKey]bool{}
+		callerPrimeObjectExecution(t, g, src)
+		return g
+	}
+	fast, original := newGraph(), newGraph()
+	for i := range 12 {
+		guard := other
+		guard.tuple = 100 + i
+		key := callerResolveKeyFor(guard, true)
+		for _, g := range []*callerGraph{fast, original} {
+			g.containerScanning[key] = true
+			g.fieldQueries[0].unknown = i%2 == 1
+		}
+		// Контроль сохраняет прежний fresh-вход для первого запроса каждого
+		// сканирования. Его статистика владельцев и кеши продолжают работать.
+		clear(original.objectExecutions.containerInputs[:])
+		before, sm, om := fast.work, callerReuseMarks(fast), callerReuseMarks(original)
+		got, u := fast.callerContainerSources(src, nil, map[callerFieldKey]bool{})
+		want, v := original.callerContainerSources(src, nil, map[callerFieldKey]bool{})
+		delta := callerReuseDelta(fast, sm)
+		if !slices.Equal(got, expected) || !slices.Equal(got, want) || u != v || u != fast.fieldQueries[0].unknown || delta != callerReuseDelta(original, om) || delta[0] <= delta[1] || fast.work.ContainerMatchedWrites-before.ContainerMatchedWrites != len(expected) {
+			t.Fatalf("шаг %d: изменились записи, UNKNOWN или семантические границы", i)
+		}
+		bypassed := fast.work.ContainerInputAdmissionBypasses - before.ContainerInputAdmissionBypasses
+		if bypassed != 0 && bypassed != 1 || (bypassed == 1) != (i >= 3 && i < 11) || original.work.ContainerInputAdmissionBypasses != 0 {
+			t.Fatalf("шаг %d: обходов без fresh admission %d", i, bypassed)
+		}
+		delete(fast.containerScanning, key)
+		delete(original.containerScanning, key)
+	}
+}
+
+func TestCallerIdentityContainerInputAdmissionIsolationAndContext(t *testing.T) {
+	g, field, _, _ := callerExecutionSnapshotFixture(t)
+	want := callerPrimeObjectExecution(t, g, field)
+	key := callerResolveKeyFor(field, true)
+	id := g.objectSourceIDs[key]
+	c := g.objectExecutions
+	index := uint64(id) % uint64(len(c.containerInputs))
+	primed := callerContainerAdmission{source: id, epoch: g.bindingEpoch, remaining: 8}
+	c.containerOwners[index] = primed
+	got, u := g.callerContainerObjects(field, key, callerContainerInput)
+	if u || !maps.Equal(got, want) || g.work.ContainerInputAdmissionBypasses != 0 || c.containerOwners[index] != primed {
+		t.Fatal("начальное чтение унаследовало выбор владельца записи")
+	}
+	c.containerInputs[index] = primed
+	calls := 0
+	g.ctx = &callerExecutionResetContext{Context: context.Background(), checkpoint: func() { calls++ }}
+	got, u = g.callerContainerObjects(field, key, callerContainerInput)
+	if u || !maps.Equal(got, want) || calls == 0 || c.containerInputs[index] != primed || g.work.ContainerInputAdmissionBypasses != 0 {
+		t.Fatal("непрозрачный контекст пропустил обычный путь")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	g.ctx = ctx
+	got, u = g.callerContainerObjects(field, key, callerContainerInput)
+	if !u || len(got) != 0 || c.containerInputs[index] != primed || g.work.ContainerInputAdmissionBypasses != 0 {
+		t.Fatal("отменённое чтение не сохранило отказ")
+	}
+	g.ctx = context.Background()
+	g.lifetimeScanning = false
+	// Прогретый полный memo не вызывает вложенных начальных проходов.
+	g.objectMemo[id] = callerObjectAnswer{objects: want}
+	g.callerContainerObjects(field, key, callerContainerInput)
+	if c.containerInputs[index] != primed || g.work.ContainerInputAdmissionBypasses != 0 {
+		t.Fatal("полный lifetime-барьер использовал выбор начального обхода")
+	}
+	g.lifetimeScanning = true
+	before, marks := g.work, callerReuseMarks(g)
+	got, u = g.callerContainerObjects(field, key, callerContainerInput)
+	effects := callerReuseDelta(g, marks)
+	if u || !maps.Equal(got, want) || c.containerOwners[index] != primed || g.work.ContainerInputAdmissionBypasses != before.ContainerInputAdmissionBypasses+1 || g.work.ObjectExecutionQueries != before.ObjectExecutionQueries || g.work.ObjectRawEvaluations <= before.ObjectRawEvaluations {
+		t.Fatal("начальное чтение не выполнило полный обход без внешнего execution-снимка")
+	}
+	marks = callerReuseMarks(g)
+	other, unknown := g.callerObjects(field, map[callerObjectSourceID]bool{})
+	if !maps.Equal(got, other) || u != unknown || callerReuseDelta(g, marks) != effects || effects[0] <= effects[1] {
+		t.Fatal("выбор admission изменил результат или отметки полного обхода")
 	}
 }

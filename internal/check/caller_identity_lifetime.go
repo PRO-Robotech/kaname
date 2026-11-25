@@ -923,7 +923,7 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 	if memo := g.containerInactive; memo != nil && memo.ctx != ctx {
 		g.containerInactive = nil
 	}
-	objects, u := g.callerObjects(src, map[callerObjectSourceID]bool{})
+	objects, u := g.callerContainerObjects(src, key, callerContainerInput)
 	unknown = u
 	candidates, indexed := g.callerContainerWriteCandidates(typ)
 	g.work.ContainerOriginalWrites += len(g.lifetimeWrites)
