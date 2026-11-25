@@ -126,6 +126,12 @@ func TestCallerIdentityLocalAppendBuilderBoundary(t *testing.T) {
 		{"loop", `func build()[]any{var out []any;for i:=0;i<3;i++{out=append(out,source.Value())};return out}`, true},
 		{"spread_other", `func build()[]any{var out []any;out=append(out,source.Value().([]any)...);return out}`, true},
 		{"return_variadic_value", `func collect(xs ...any)[]any{return xs};func build()[]any{var out []any;out=append(out,source.Value());return collect(out...)}`, true},
+		{"fixed_and_spread", `func collect(label string,xs ...any)[]any{return xs};func build()[]any{var out []any;out=append(out,source.Value());kept:=collect("x",out...);return kept}`, true},
+		{"fixed_slice", `func bind(xs []any)[]any{return xs};func build()[]any{var out []any;out=append(out,source.Value());kept:=bind(out);return kept}`, true},
+		{"conditional_len_join", `func join(xs []string,sep string)string{return sep};func build()string{var out []string;out=append(out,source.Value().(string));if len(out)==0 || cap(out)==0{return ""};return join(out,",")}`, true},
+		{"typed_call_rebind", `func replace(xs []any)[]any{return source.Value().([]any)};func build()[]any{var out []any;out=append(out,source.Value());out=replace(out);return out}`, false},
+		{"typed_call_capture", `func build()[]any{var out []any;out=append(out,source.Value());return (func(xs []any)[]any{out=source.Value().([]any);return xs})(out)}`, false},
+		{"variadic_boxing", `func collect(xs ...any){};func build()[]any{var out []any;out=append(out,source.Value());collect(out);return out}`, false},
 		{"return_variadic_capture", `func build()[]any{var out []any;out=append(out,source.Value());return (func(xs ...any)[]any{out=source.Value().([]any);return xs})(out...)}`, false},
 		{"initial_backing", `func build()[]any{out:=make([]any,0,4);out=append(out,source.Value());return out}`, false},
 		{"rebind", `func build()[]any{var out []any;out=source.Value().([]any);out=append(out,source.Value());return out}`, false},
@@ -199,6 +205,7 @@ func TestCallerIdentityLocalAppendContentsRemainVisible(t *testing.T) {
 	for _, tc := range []struct{ name, expression, prefix string }{
 		{"returned_builder", `build(anchor)`, ``},
 		{"returned_variadic_builder", `buildVariadic(anchor)`, ``},
+		{"fixed_argument_alias", `buildFixed(anchor)`, ``},
 		{"direct_nil", `append([]*Box(nil),anchor)`, ``},
 		{"base_alias", `append([]*Box{anchor},nil)`, ``},
 		{"spread", `append([]*Box(nil),[]*Box{anchor}...)`, ``},
@@ -212,7 +219,7 @@ func TestCallerIdentityLocalAppendContentsRemainVisible(t *testing.T) {
 		{"unsafe_integer", `Carrier{Value:source.Value().(uintptr)}`, ``},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			program := callerSoundnessProgram(t, `type Carrier struct{Value any};func build(v *Box)[]*Box{var out []*Box;out=append(out,v);return out};func pass(xs ...*Box)[]*Box{return xs};func buildVariadic(v *Box)[]*Box{var out []*Box;out=append(out,v);return pass(out...)}`, `anchor:=&Box{};`+tc.prefix+`candidate:=`+tc.expression+`;_=anchor;_=candidate`, `&Handler{}`)
+			program := callerSoundnessProgram(t, `type Carrier struct{Value any};func build(v *Box)[]*Box{var out []*Box;out=append(out,v);return out};func bind(xs []*Box)[]*Box{return xs};func buildFixed(v *Box)[]*Box{var out []*Box;out=append(out,v);held:=bind(out);return held};func pass(xs ...*Box)[]*Box{return xs};func buildVariadic(v *Box)[]*Box{var out []*Box;out=append(out,v);return pass(out...)}`, `anchor:=&Box{};`+tc.prefix+`candidate:=`+tc.expression+`;_=anchor;_=candidate`, `&Handler{}`)
 			g, query, wanted, _, _ := callerLocalAppendFixture(t, program)
 			probe := callerLifetimeProbe{g: g, want: wanted, seen: map[callerResolveKey]bool{}, objects: map[callerObjectKey]bool{}}
 			if !probe.contains(query) {
@@ -281,6 +288,7 @@ func TestCallerIdentityLocalAppendCopyAndUnsafe(t *testing.T) {
 	}{
 		{"unsafe_content", ``, true},
 		{"unsafe_owner_escape", `_=unsafe.Pointer(&out);`, false},
+		{"unsafe_slice_data", `_=unsafe.SliceData(out);`, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fset := token.NewFileSet()

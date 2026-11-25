@@ -9,9 +9,10 @@ import (
 	"go/types"
 )
 
-// Нулевой локальный срез, доступный только self-append и возврату
-// по значению, получает backing исключительно от append. Эта память не является памятью другого
-// точного literal/make. Доказываем только несовпадение владельцев записи:
+// Нулевой локальный срез с присваиваниями только из self-append получает
+// backing исключительно от append. Копия заголовка передаёт доступ к тем же
+// элементам. Это выделение отлично от другого точного literal/make.
+// Доказываем только несовпадение владельцев записи:
 // элементы, возвращённые алиасы и неизвестное происхождение самого среза
 // остаются в обычном обходе. Положительное совпадение owners проверяет caller.
 func (p *callerLifetimeProbe) separateLocalAppendBacking(write callerLifetimeWrite, object callerObjectKey) bool {
@@ -92,18 +93,33 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 	allowed := map[*ast.Ident]bool{}
 	declared, appended, complete := false, false, true
 	steps := 0
+	visit := func(node ast.Node) bool {
+		steps++
+		if steps > callerLifetimeStepLimit || g.ctx != nil && g.ctx.Err() != nil {
+			return false
+		}
+		id, ok := node.(*ast.Ident)
+		return !ok || sp.info.Uses[id] != variable || allowed[id]
+	}
 	ast.Inspect(body.node, func(node ast.Node) bool {
 		if node == nil || !complete {
 			return false
 		}
-		steps++
-		if steps > callerLifetimeStepLimit || g.ctx != nil && g.ctx.Err() != nil {
+		// Предок разрешает ровно свои позиции до посещения идентификаторов.
+		// Каждое тело, включая вложенные замыкания, расходует общий лимит.
+		if !visit(node) {
 			complete = false
 			return false
 		}
 		switch n := node.(type) {
 		case *ast.FuncLit:
-			// Полный проход ниже увидит захват без разрешённой позиции.
+			// Внутри замыкания даже чтение по значению считается захватом.
+			for child := range ast.Preorder(n) {
+				if child != n && !visit(child) {
+					complete = false
+					break
+				}
+			}
 			return false
 		case *ast.ValueSpec:
 			for _, id := range n.Names {
@@ -136,27 +152,37 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 				break
 			}
 			allowed[lhs], allowed[first], appended = true, true, true
+		case *ast.CallExpr:
+			for i, arg := range n.Args {
+				id, ok := ast.Unparen(arg).(*ast.Ident)
+				if !ok || sp.info.Uses[id] != variable {
+					continue
+				}
+				callee := sp.info.Types[n.Fun]
+				if callee.IsBuiltin() {
+					// Остальные builtins (включая unsafe) сохраняют прежний отказ.
+					// Позиции self-append уже разрешены присваиванием выше.
+					fun, ok := ast.Unparen(n.Fun).(*ast.Ident)
+					if ok && len(n.Args) == 1 && (fun.Name == "len" || fun.Name == "cap") {
+						allowed[id] = true
+					}
+					continue
+				}
+				if !callee.IsValue() || callee.Type == nil {
+					continue
+				}
+				sig, ok := callee.Type.Underlying().(*types.Signature)
+				if !ok || i >= sig.Params().Len() || !types.Identical(sig.Params().At(i).Type(), variable.Type()) {
+					continue
+				}
+				// Вариативный хвост получает сам срез только при f(..., out...).
+				if sig.Variadic() && i == sig.Params().Len()-1 && !n.Ellipsis.IsValid() {
+					continue
+				}
+				allowed[id] = true
+			}
 		case *ast.ReturnStmt:
 			for _, result := range n.Results {
-				if call, ok := ast.Unparen(result).(*ast.CallExpr); ok {
-					// При return f(out...) передаётся копия заголовка, поэтому
-					// вызов не заменит локальное выделение. Остальной обход
-					// сохраняет содержимое, эффекты вызова и его результат.
-					// Любой захват out, включая замыкание f, обнаружит Uses.
-					if !call.Ellipsis.IsValid() || len(call.Args) != 1 {
-						continue
-					}
-					calleeType := sp.info.TypeOf(call.Fun)
-					if calleeType == nil {
-						continue
-					}
-					signature, ok := calleeType.Underlying().(*types.Signature)
-					if !ok || !signature.Variadic() || signature.Params().Len() != 1 ||
-						!types.Identical(sp.info.TypeOf(call.Args[0]), signature.Params().At(0).Type()) {
-						continue
-					}
-					result = call.Args[0]
-				}
 				if id, ok := ast.Unparen(result).(*ast.Ident); ok && sp.info.Uses[id] == variable {
 					allowed[id] = true
 				}
@@ -164,21 +190,5 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 		}
 		return true
 	})
-	if !complete || !declared || !appended {
-		return false
-	}
-	// Объявление найдено внутри этого тела. Область локальной переменной
-	// заканчивается там же, поэтому все её употребления находятся здесь,
-	// включая захваты вложенных замыканий. Учитываем полный обход тела
-	// в том же лимите, не начисляя работу за остальной пакет.
-	for node := range ast.Preorder(body.node) {
-		steps++
-		if steps > callerLifetimeStepLimit || g.ctx != nil && g.ctx.Err() != nil {
-			return false
-		}
-		if id, ok := node.(*ast.Ident); ok && sp.info.Uses[id] == variable && !allowed[id] {
-			return false
-		}
-	}
-	return true
+	return complete && declared && appended
 }
