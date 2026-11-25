@@ -55,7 +55,7 @@ type revokeAllDoorOwnKind interface {
 // perJTIDoorOwnKind — дверь отзыва одного носителя; вид записи у неё свой
 // всегда.
 type perJTIDoorOwnKind interface {
-	RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error
+	RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) (domain.SessionRevocation, error)
 }
 
 func TestRevokeAllDoorLaysItsOwnRecordKindNotTheCallersOne(t *testing.T) {

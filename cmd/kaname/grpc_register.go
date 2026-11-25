@@ -210,7 +210,8 @@ func registerInternalServices(srv grpc.ServiceRegistrar, svcs *services, pool *p
 	// signs in through (IAM-INT-1). Internal-only (ban #6): NEVER registered on
 	// the external listener. Gateway-fronted admin surface — the caller policy
 	// admits only the api-gateway SA, the read floor covers Get/List, and the
-	// catalog carries the step-up floor acr=2 on the three mutations.
+	// catalog carries the step-up floor acr=2 on the three mutations. Each
+	// mutation checks the forwarded principal's system_admin at the singleton.
 	if svcs != nil && svcs.interactiveClientHandler != nil {
 		iamv1.RegisterInternalInteractiveClientServiceServer(srv, svcs.interactiveClientHandler)
 	}

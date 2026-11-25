@@ -68,34 +68,38 @@ func (s *SessionRevocationsAdapter) Revoke(ctx context.Context, rev domain.Sessi
 	return err
 }
 
-// RevokeTx — atomic single-jti revocation + durable audit_outbox emit in ONE tx
-// (запрет #10). The pool-scoped Revoke path has no caller-tx, so
-// to make the iam.session.revoked compliance row commit-together-or-rollback-
-// together with the revocation we open one tx here, run the SAME ON CONFLICT
-// upsert (revocation behaviour unchanged), insert the audit row, and commit.
+// RevokeTx фиксирует отзыв и запись аудита в одной транзакции.
+// Вызывающему возвращается фактическая строка после commit, включая срок
+// более раннего отзыва, если он дольше нового.
 //
 // The audit payload carries only non-secret identifiers (actor / subject /
 // reason / token_jti — the jti is the id of the revoked token, NOT the token).
-func (s *SessionRevocationsAdapter) RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error {
+func (s *SessionRevocationsAdapter) RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) (domain.SessionRevocation, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return err
+		return domain.SessionRevocation{}, err
 	}
 	defer func() { _ = tx.Rollback(ctx) }() // no-op after Commit
-	if _, err := s.repo.RevokeWithAdminTx(ctx, tx, rev, revokedBy); err != nil {
-		return err
+	recorded, err := s.repo.RevokeWithAdminTx(ctx, tx, rev, revokedBy)
+	if err != nil {
+		return domain.SessionRevocation{}, err
 	}
+	// Событие описывает эту попытку: её актор и причина остаются парой,
+	// даже когда в строке сохранился отзыв с более поздним моментом.
 	payload := map[string]any{
 		"actor":        string(revokedBy),
 		"subject_type": "user",
-		"subject_id":   string(rev.UserID),
+		"subject_id":   string(recorded.UserID),
 		"reason":       rev.Reason,
-		"token_jti":    rev.TokenJTI,
+		"token_jti":    recorded.TokenJTI,
 	}
 	if err := s.emitAuditTx(ctx, tx, sessionAuditEventRevoked, payload); err != nil {
-		return err
+		return domain.SessionRevocation{}, err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return domain.SessionRevocation{}, err
+	}
+	return recorded, nil
 }
 
 // RevokeAllUserTokens — записать per-user revoke-all cutoff (monotonic upsert)

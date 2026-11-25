@@ -12,6 +12,7 @@ import (
 	"context"
 
 	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
+	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -24,11 +25,12 @@ type Handler struct {
 	create *CreateUseCase
 	update *UpdateUseCase
 	del    *DeleteUseCase
+	admin  authzguard.RelationChecker
 }
 
 // NewHandler assembles the Handler. Composition root: cmd/kaname/wiring.go.
-func NewHandler(g *GetUseCase, l *ListUseCase, c *CreateUseCase, u *UpdateUseCase, d *DeleteUseCase) *Handler {
-	return &Handler{get: g, list: l, create: c, update: u, del: d}
+func NewHandler(g *GetUseCase, l *ListUseCase, c *CreateUseCase, u *UpdateUseCase, d *DeleteUseCase, admin authzguard.RelationChecker) *Handler {
+	return &Handler{get: g, list: l, create: c, update: u, del: d, admin: admin}
 }
 
 // Get — sync read of one client.
@@ -58,15 +60,24 @@ func (h *Handler) List(ctx context.Context, req *iamv1.ListInteractiveClientsReq
 
 // Create — async; returns the Operation envelope.
 func (h *Handler) Create(ctx context.Context, req *iamv1.CreateInteractiveClientRequest) (*operationpb.Operation, error) {
+	if err := requireMutationAuthority(ctx, h.admin); err != nil {
+		return nil, err
+	}
 	return h.create.Execute(ctx, req)
 }
 
 // Update — async; returns the Operation envelope.
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateInteractiveClientRequest) (*operationpb.Operation, error) {
+	if err := requireMutationAuthority(ctx, h.admin); err != nil {
+		return nil, err
+	}
 	return h.update.Execute(ctx, req)
 }
 
 // Delete — async; returns the Operation envelope.
 func (h *Handler) Delete(ctx context.Context, req *iamv1.DeleteInteractiveClientRequest) (*operationpb.Operation, error) {
+	if err := requireMutationAuthority(ctx, h.admin); err != nil {
+		return nil, err
+	}
 	return h.del.Execute(ctx, req.GetInteractiveClientId())
 }

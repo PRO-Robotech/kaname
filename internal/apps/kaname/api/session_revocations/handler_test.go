@@ -47,10 +47,11 @@ import (
 // The port is the tx-scoped *Tx variants (revocation + audit row committed
 // atomically); each owns its audit taxonomy value, so none is passed.
 type fakeRevoker struct {
-	got     domain.SessionRevocation
-	gotBy   domain.UserID
-	err     error
-	callCnt int
+	got         domain.SessionRevocation
+	gotBy       domain.UserID
+	err         error
+	callCnt     int
+	recordedTTL time.Time
 
 	allCnt    int
 	allUser   domain.UserID
@@ -60,11 +61,14 @@ type fakeRevoker struct {
 	allErr    error
 }
 
-func (f *fakeRevoker) RevokeTx(_ context.Context, rev domain.SessionRevocation, by domain.UserID) error {
+func (f *fakeRevoker) RevokeTx(_ context.Context, rev domain.SessionRevocation, by domain.UserID) (domain.SessionRevocation, error) {
 	f.callCnt++
 	f.got = rev
 	f.gotBy = by
-	return f.err
+	if !f.recordedTTL.IsZero() {
+		rev.TTLExpiresAt = f.recordedTTL
+	}
+	return rev, f.err
 }
 
 func (f *fakeRevoker) RevokeAllUserTokensTx(_ context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error {
@@ -380,6 +384,27 @@ func TestRevoke_TerminalTransitionCarriesMetadataAndResponse(t *testing.T) {
 	require.NoError(t, ops.doneResp.UnmarshalTo(doneResp))
 	assert.Equal(t, "jti-123", doneResp.GetTokenJti())
 	assert.Equal(t, "usr_alice", doneResp.GetUserId())
+}
+
+func TestRevoke_TerminalResponseUsesStoredExpiration(t *testing.T) {
+	requested := time.Now().UTC().Add(time.Hour).Truncate(time.Second)
+	recorded := requested.Add(time.Hour)
+	w := &fakeRevoker{recordedTTL: recorded}
+	h, ops := newHandlerWithOps(w, &fakeReader{})
+	op, err := h.Revoke(context.Background(), &iamv1.RevokeRequest{
+		TokenJti:     "jti-123",
+		UserId:       "usr_alice",
+		TtlExpiresAt: timestamppb.New(requested),
+	})
+	require.NoError(t, err)
+	require.Equal(t, requested, w.got.TTLExpiresAt)
+
+	for _, response := range []*anypb.Any{op.GetResponse(), ops.doneResp} {
+		actual := &iamv1.SessionRevocation{}
+		require.NotNil(t, response)
+		require.NoError(t, response.UnmarshalTo(actual))
+		require.Equal(t, recorded, actual.GetTtlExpiresAt().AsTime())
+	}
 }
 
 // A failing write must mark the already-persisted operation terminally with the

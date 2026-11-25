@@ -88,15 +88,19 @@ func TestSessionAudit_5_2_03_RevokeJtiEmits(t *testing.T) {
 	admin := mustSeedUser(t, ctx, pool, "ssn03adm")
 	target := mustSeedUser(t, ctx, pool, "ssn03tgt")
 	jti := "jti-5203-" + string(target)
+	var dbNow time.Time
+	require.NoError(t, pool.QueryRow(ctx, `SELECT now()`).Scan(&dbNow))
 
 	rev := domain.SessionRevocation{
 		TokenJTI:     jti,
-		RevokedAt:    time.Now().UTC(),
+		RevokedAt:    dbNow,
 		Reason:       "compromised",
 		UserID:       target,
-		TTLExpiresAt: time.Now().UTC().Add(24 * time.Hour),
+		TTLExpiresAt: dbNow.Add(24 * time.Hour),
 	}
-	require.NoError(t, adapter.RevokeTx(ctx, rev, admin))
+	recorded, err := adapter.RevokeTx(ctx, rev, admin)
+	require.NoError(t, err)
+	require.Equal(t, jti, recorded.TokenJTI)
 
 	require.Equal(t, 1, countAuditByEventAndSubject(ctx, t, pool, "iam.session.revoked", string(target)),
 		"single-jti revoke must emit exactly one iam.session.revoked row")
@@ -116,6 +120,32 @@ func TestSessionAudit_5_2_03_RevokeJtiEmits(t *testing.T) {
 	revoked, err := adapter.IsRevoked(ctx, jti)
 	require.NoError(t, err)
 	require.True(t, revoked, "the session_revocations row must be committed alongside the audit row")
+
+	// Запоздавший повтор может продлить срок, но в окне ListRecent должен
+	// оставаться последний по времени отзыв со своими причиной и актором.
+	replayActor := mustSeedUser(t, ctx, pool, "ssn03retry")
+	replay := rev
+	replay.RevokedAt = recorded.RevokedAt.Add(-2 * time.Hour)
+	replay.Reason = "earlier attempt"
+	replay.TTLExpiresAt = recorded.TTLExpiresAt.Add(time.Hour)
+	effective, err := adapter.RevokeTx(ctx, replay, replayActor)
+	require.NoError(t, err)
+	require.Equal(t, recorded.RevokedAt, effective.RevokedAt)
+	require.Equal(t, recorded.Reason, effective.Reason)
+	require.Equal(t, replay.TTLExpiresAt, effective.TTLExpiresAt)
+
+	recent, err := kanamepg.NewSessionRevocationRepo(pool).ListRecent(ctx, time.Hour)
+	require.NoError(t, err)
+	require.Contains(t, recent, effective)
+	var storedActor, replayReason string
+	require.NoError(t, pool.QueryRow(ctx,
+		`SELECT revoked_by_user_id FROM kaname.session_revocations WHERE token_jti = $1`, jti).Scan(&storedActor))
+	require.Equal(t, string(admin), storedActor)
+	require.NoError(t, pool.QueryRow(ctx, `
+		SELECT event_payload->>'reason' FROM kaname.audit_outbox
+		 WHERE event_type = 'iam.session.revoked' AND event_payload->>'token_jti' = $1
+		   AND event_payload->>'actor' = $2`, jti, string(replayActor)).Scan(&replayReason))
+	require.Equal(t, replay.Reason, replayReason)
 }
 
 // ── 5.2-04 RevokeAllUserTokensTx emits iam.session.all_revoked ─────────────────
@@ -185,7 +215,7 @@ func TestSessionAudit_5_2_35_RollbackNoOrphan(t *testing.T) {
 		UserID:       target,
 		TTLExpiresAt: time.Now().UTC().Add(24 * time.Hour),
 	}
-	err = adapter.RevokeTx(cancelled, rev, admin)
+	_, err = adapter.RevokeTx(cancelled, rev, admin)
 	require.Error(t, err, "a cancelled tx must surface an error, not a silent commit")
 
 	require.Equal(t, 0, countAuditByEventAndSubject(ctx, t, pool, "iam.session.revoked", string(target)),
@@ -212,13 +242,14 @@ func TestSessionAudit_5_2_36_NoSecretsInPayload(t *testing.T) {
 	target := mustSeedUser(t, ctx, pool, "ssn36tgt")
 	jti := "jti-5236-" + string(target)
 
-	require.NoError(t, adapter.RevokeTx(ctx, domain.SessionRevocation{
+	_, err = adapter.RevokeTx(ctx, domain.SessionRevocation{
 		TokenJTI:     jti,
 		RevokedAt:    time.Now().UTC(),
 		Reason:       "compromised",
 		UserID:       target,
 		TTLExpiresAt: time.Now().UTC().Add(24 * time.Hour),
-	}, admin))
+	}, admin)
+	require.NoError(t, err)
 
 	_, _, payloadRaw := readOneAudit(ctx, t, pool, "iam.session.revoked", string(target))
 	// Disallowed secret-bearing keys/markers must not appear.
@@ -255,7 +286,7 @@ func TestSessionAudit_5_2_42_ConcurrentRevokeAuditCount(t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(i int) {
 			defer wg.Done()
-			errs[i] = adapter.RevokeTx(ctx, domain.SessionRevocation{
+			_, errs[i] = adapter.RevokeTx(ctx, domain.SessionRevocation{
 				TokenJTI:     jti, // SAME jti — ON CONFLICT DO UPDATE upsert path
 				RevokedAt:    time.Now().UTC(),
 				Reason:       fmt.Sprintf("compromised-%d", i),

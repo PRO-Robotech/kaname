@@ -103,7 +103,7 @@ const MaxRevocationTTL = DefaultRevocationTTL + tokenpolicy.ClockSkew
 // без исхода снятия. Посадка снята (kaname#363), и параметр снят вслед за ней
 // (kaname#380): запись принудительного выхода кладёт транзакция снятия.
 type sessionRevocationWriter interface {
-	RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) error
+	RevokeTx(ctx context.Context, rev domain.SessionRevocation, revokedBy domain.UserID) (domain.SessionRevocation, error)
 	RevokeAllUserTokensTx(ctx context.Context, userID domain.UserID, revokeBefore time.Time, reason string, revokedBy domain.UserID) error
 }
 
@@ -224,7 +224,8 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 
 	var rev *domain.SessionRevocation
 	if in.TokenJTI != "" {
-		// Присланная величина ПРИНИМАЕТСЯ ИЛИ ОТВЕРГАЕТСЯ — третьего исхода нет.
+		// Первая запись использует допустимый срок из запроса. Повторная
+		// запись сохраняет максимум текущего и запрошенного сроков в БД.
 		//
 		// Здесь стояло `if t.After(now) { ttl = t }`: момент в прошлом молча
 		// выбрасывался, подставлялось умолчание, и вызывающий получал успех,
@@ -288,9 +289,11 @@ func (uc *RevokeUseCase) Execute(ctx context.Context, in RevokeInput) (*operatio
 
 	// Per-jti revoke — single-token logout path.
 	if rev != nil {
-		if err := uc.writer.RevokeTx(ctx, *rev, revokedBy); err != nil {
+		recorded, err := uc.writer.RevokeTx(ctx, *rev, revokedBy)
+		if err != nil {
 			return nil, uc.failOperation(ctx, op.ID, err)
 		}
+		rev = &recorded
 		revokedCount++
 	}
 

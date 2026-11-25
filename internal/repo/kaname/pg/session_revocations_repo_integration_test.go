@@ -104,17 +104,34 @@ func TestSessionRevocations_Hook_Idempotent_DoubleRevoke(t *testing.T) {
 	rev := domain.SessionRevocation{
 		TokenJTI: jti, Reason: "v1", UserID: uid, TTLExpiresAt: time.Now().Add(1 * time.Hour),
 	}
-	_, err = repo.RevokeWithAdmin(ctx, rev, "")
+	first, err := repo.RevokeWithAdmin(ctx, rev, "")
 	require.NoError(t, err)
+	require.WithinDuration(t, rev.TTLExpiresAt, first.TTLExpiresAt, time.Microsecond)
 
 	rev.Reason = "v2"
-	_, err = repo.RevokeWithAdmin(ctx, rev, "")
+	rev.TTLExpiresAt = first.TTLExpiresAt.Add(-20 * time.Minute)
+	repeated, err := repo.RevokeWithAdmin(ctx, rev, "")
 	require.NoError(t, err, "ON CONFLICT DO UPDATE — idempotent")
+	require.Equal(t, first.TTLExpiresAt, repeated.TTLExpiresAt)
+	require.Equal(t, rev.Reason, repeated.Reason)
 
-	var reason string
+	rev.TTLExpiresAt = first.TTLExpiresAt.Add(time.Hour)
+	extended, err := repo.RevokeWithAdmin(ctx, rev, "")
+	require.NoError(t, err)
+	require.Equal(t, rev.TTLExpiresAt, extended.TTLExpiresAt)
+
+	other := rev
+	other.UserID = mustSeedUser(t, ctx, pool, "idem-other")
+	other.TTLExpiresAt = rev.TTLExpiresAt.Add(time.Hour)
+	_, err = repo.RevokeWithAdmin(ctx, other, "")
+	require.Error(t, err)
+
+	var owner string
+	var ttl time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT reason FROM session_revocations WHERE token_jti = $1`, jti).Scan(&reason))
-	assert.Equal(t, "v2", reason, "second call UPDATE-ит reason")
+		`SELECT user_id, ttl_expires_at FROM session_revocations WHERE token_jti = $1`, jti).Scan(&owner, &ttl))
+	require.Equal(t, string(uid), owner)
+	require.Equal(t, extended.TTLExpiresAt, ttl)
 }
 
 func TestSessionRevocations_Hook_ConcurrentRevoke_NoRace(t *testing.T) {
@@ -132,22 +149,29 @@ func TestSessionRevocations_Hook_ConcurrentRevoke_NoRace(t *testing.T) {
 
 	const N = 50
 	jti := "RACE-" + ids.NewID(domain.PrefixUser)
+	firstTTL := time.Now().UTC().Truncate(time.Second).Add(time.Hour)
+	errs := make([]error, N)
 	var wg sync.WaitGroup
 	wg.Add(N)
 	for i := 0; i < N; i++ {
 		go func() {
 			defer wg.Done()
-			_, _ = repo.RevokeWithAdmin(ctx, domain.SessionRevocation{
+			_, errs[i] = repo.RevokeWithAdmin(ctx, domain.SessionRevocation{
 				TokenJTI: jti, Reason: "concurrent", UserID: uid,
-				TTLExpiresAt: time.Now().Add(1 * time.Hour),
+				TTLExpiresAt: firstTTL.Add(time.Duration(i) * time.Minute),
 			}, "")
 		}()
 	}
 	wg.Wait()
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
 
-	// Только одна row в БД (PK constraint).
+	// Одна строка с самым поздним сроком при любом порядке записи.
 	var count int
+	var ttl time.Time
 	require.NoError(t, pool.QueryRow(ctx,
-		`SELECT count(*) FROM session_revocations WHERE token_jti = $1`, jti).Scan(&count))
-	assert.Equal(t, 1, count)
+		`SELECT count(*), max(ttl_expires_at) FROM session_revocations WHERE token_jti = $1`, jti).Scan(&count, &ttl))
+	require.Equal(t, 1, count)
+	require.WithinDuration(t, firstTTL.Add((N-1)*time.Minute), ttl, 0)
 }

@@ -1003,6 +1003,7 @@ func buildServices(pool, slavePool *pgxpool.Pool, opsRepo operations.FullRepo,
 		interactiveCreate,
 		interactiveclientapp.NewUpdateUseCase(interactiveRepo, opsRepo, logger),
 		interactiveclientapp.NewDeleteUseCase(interactiveRepo, interactiveProvider, opsRepo, logger),
+		relationStore,
 	)
 
 	// ── InternalOperationsService — административная лента операций всего кластера ────────────────

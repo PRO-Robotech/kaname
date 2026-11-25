@@ -34,7 +34,23 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 )
+
+func TestInteractiveClientRegistrationIsInternal(t *testing.T) {
+	const service = "kaname.cloud.iam.v1.InternalInteractiveClientService"
+	svcs := &services{interactiveClientHandler: &interactiveclient.Handler{}}
+	public := grpc.NewServer()
+	t.Cleanup(public.Stop)
+	registerPublicServices(public, svcs, nil)
+	require.NotContains(t, public.GetServiceInfo(), service)
+
+	internal := grpc.NewServer()
+	t.Cleanup(internal.Stop)
+	registerInternalServices(internal, svcs, nil, config.Config{}, nil)
+	require.Contains(t, internal.GetServiceInfo(), service)
+}
 
 // ownClientRegistryDouble — собственный реестр клиентов, отвечающий контрактом
 // настоящего: снятие проверочного значения записывается и возвращает тот же

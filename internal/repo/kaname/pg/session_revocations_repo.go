@@ -19,16 +19,21 @@ import (
 )
 
 // revokeWithAdminUpsert — the canonical session_revocations upsert SQL, shared
-// by the pool-scoped RevokeWithAdmin and the tx-scoped RevokeWithAdminTx. Both
-// preserve the ON CONFLICT (token_jti) DO UPDATE idempotent contract.
+// by the pool-scoped RevokeWithAdmin and the tx-scoped RevokeWithAdminTx.
+// При повторе одной сессии момент отзыва и его срок сохраняют свои максимумы.
+// Причина и актор описывают отзыв с последним моментом; равенство допускает
+// уточнение тем же порядком, что и у пользовательской отсечки.
 const revokeWithAdminUpsert = `
 	INSERT INTO session_revocations (token_jti, revoked_at, reason, user_id, ttl_expires_at, revoked_by_user_id)
 	VALUES ($1, COALESCE($2, now()), $3, $4, $5, NULLIF($6, ''))
 	ON CONFLICT (token_jti) DO UPDATE
-	    SET revoked_at = EXCLUDED.revoked_at,
-	        reason = EXCLUDED.reason,
-	        ttl_expires_at = EXCLUDED.ttl_expires_at,
-	        revoked_by_user_id = EXCLUDED.revoked_by_user_id
+	    SET revoked_at = GREATEST(session_revocations.revoked_at, EXCLUDED.revoked_at),
+	        reason = CASE WHEN EXCLUDED.revoked_at >= session_revocations.revoked_at
+	                      THEN EXCLUDED.reason ELSE session_revocations.reason END,
+	        ttl_expires_at = GREATEST(session_revocations.ttl_expires_at, EXCLUDED.ttl_expires_at),
+	        revoked_by_user_id = CASE WHEN EXCLUDED.revoked_at >= session_revocations.revoked_at
+	                                  THEN EXCLUDED.revoked_by_user_id ELSE session_revocations.revoked_by_user_id END
+	WHERE session_revocations.user_id = EXCLUDED.user_id
 	RETURNING token_jti, revoked_at, reason, user_id, ttl_expires_at`
 
 // RevokeWithAdmin — INSERT с поддержкой revoked_by_user_id (pool-scoped).
@@ -43,7 +48,7 @@ func (r *SessionRevocationRepo) RevokeWithAdmin(ctx context.Context, s domain.Se
 // RevokeWithAdminTx — tx-scoped variant of RevokeWithAdmin. Runs the identical
 // upsert on the caller-supplied tx so the revocation can commit atomically with
 // an audit_outbox row (запрет #10). Same idempotent ON CONFLICT
-// contract; revocation behaviour is unchanged, only the tx ownership differs.
+// contract; both entry points return the effective stored record.
 func (r *SessionRevocationRepo) RevokeWithAdminTx(ctx context.Context, tx pgx.Tx, s domain.SessionRevocation, revokedBy domain.UserID) (domain.SessionRevocation, error) {
 	return scanRevokeWithAdmin(tx.QueryRow(ctx, revokeWithAdminUpsert,
 		s.TokenJTI, nullableTime(s.RevokedAt), s.Reason,

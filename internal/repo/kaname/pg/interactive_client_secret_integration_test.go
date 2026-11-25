@@ -52,13 +52,17 @@ import (
 	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	interactiveclient "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/ceremonyport"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	"github.com/PRO-Robotech/kaname/internal/passwordverify"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/iampgtest"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/logbuf"
 )
@@ -92,7 +96,7 @@ func newICSecretWorld(t *testing.T) *icSecretWorld {
 	if testing.Short() {
 		t.Skip("skipping integration test (requires Docker)")
 	}
-	ctx := operations.WithPrincipal(context.Background(), operations.SystemPrincipal())
+	ctx := operations.WithPrincipal(context.Background(), operations.Principal{Type: "service_account", ID: bootstrap_token.DeriveIdentity().SvaID})
 	pool, err := coredb.NewPool(ctx, iampgtest.NewTestPostgres(t))
 	require.NoError(t, err)
 	t.Cleanup(pool.Close)
@@ -135,6 +139,7 @@ func (w *icSecretWorld) handlerOver(store icClientStore) *interactiveclient.Hand
 		interactiveclient.NewCreateUseCase(store, w.provider, w.ops, []string{"https://api.kacho.local"}, w.logger),
 		interactiveclient.NewUpdateUseCase(store, w.ops, w.logger),
 		interactiveclient.NewDeleteUseCase(store, w.provider, w.ops, w.logger),
+		authzcascade.WrapAdmitted(relverdict.NewAsker(w.pool), personmarks.New(w.pool)),
 	)
 }
 

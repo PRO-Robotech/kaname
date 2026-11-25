@@ -45,11 +45,15 @@ import (
 	"github.com/PRO-Robotech/corelib/operations"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/bootstrap_token"
 	interactiveclientapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/interactive_client"
+	"github.com/PRO-Robotech/kaname/internal/authzcascade"
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	"github.com/PRO-Robotech/kaname/internal/handler/ceremonyhttp"
 	"github.com/PRO-Robotech/kaname/internal/handler/clienttokenhttp"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/personmarks"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 )
 
 // icSecretR — адрес возврата R приёмки (тот же, что REDIRECT набора края
@@ -73,9 +77,10 @@ func (w *ceremonyWorld) createClient(name string) *ceremonyClient {
 		interactiveclientapp.NewCreateUseCase(repo, provider, ops, []string{"https://api.kacho.local"}, logger),
 		interactiveclientapp.NewUpdateUseCase(repo, ops, logger),
 		interactiveclientapp.NewDeleteUseCase(repo, provider, ops, logger),
+		authzcascade.WrapAdmitted(relverdict.NewAsker(w.pool), personmarks.New(w.pool)),
 	)
 
-	ctx := operations.WithPrincipal(w.ctx, operations.SystemPrincipal())
+	ctx := operations.WithPrincipal(w.ctx, operations.Principal{Type: "service_account", ID: bootstrap_token.DeriveIdentity().SvaID})
 	op, err := handler.Create(ctx, &iamv1.CreateInteractiveClientRequest{Name: name, RedirectUris: []string{icSecretR}})
 	if err != nil {
 		w.fixture("заведение клиента %s глаголом Create: %v", name, err)

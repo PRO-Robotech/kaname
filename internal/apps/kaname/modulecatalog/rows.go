@@ -88,6 +88,8 @@ type Declared struct {
 	// Verbs — пары «ресурс × действие» ОБЕИХ половин словаря: сначала
 	// пообъектные ресурса (отсортированно), затем ярусные.
 	Verbs []catalog.VerbRow
+	// TierOnlyVerbs — автоматически выведенные ярусные строки из Verbs.
+	TierOnlyVerbs []catalog.VerbRow `json:"-"`
 	// InternalExcluded — действий ВНУТРЕННЕЙ плоскости, не давших строки.
 	//
 	// Число печатается рядом с выведенным, а не подразумевается: без него
@@ -159,7 +161,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		}
 		if child := r.ChildRegistration; child != nil {
 			row.ChildRegistration = &catalog.ChildRegistrationRule{
-				Verb: canonicalVerb(child.Verb), ParentSegments: child.ParentSegments, MaxChildren: child.MaxChildren,
+				Verb: CanonicalVerbToken(child.Verb), ParentSegments: child.ParentSegments, MaxChildren: child.MaxChildren,
 				MaxCreates: child.MaxCreates, WindowSeconds: child.WindowSeconds,
 			}
 		}
@@ -191,7 +193,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 				out.InternalExcluded++
 				continue
 			}
-			token := canonicalVerb(v.Name)
+			token := CanonicalVerbToken(v.Name)
 			if token == "" {
 				return Declared{}, fmt.Errorf("%w: %s.%s", ErrVerbNameEmpty, m.Module, r.Name)
 			}
@@ -214,7 +216,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		// ярусная строка класса им уступает (первичный ключ у тройки один).
 		container := make(map[string]bool, len(r.ContainerVerbs))
 		for _, cv := range r.ContainerVerbs {
-			token := canonicalVerb(cv.Name)
+			token := CanonicalVerbToken(cv.Name)
 			if token == "" {
 				return Declared{}, fmt.Errorf("%w: %s.%s (контейнерное действие)", ErrVerbNameEmpty, m.Module, r.Name)
 			}
@@ -230,7 +232,7 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 		}
 		// kaname#1034: metadata пары не входят в tokens/пообъектный словарь.
 		for _, verb := range r.GrantVerbs {
-			token := canonicalVerb(verb)
+			token := CanonicalVerbToken(verb)
 			if _, dup := declaredBy[token]; dup || container[token] {
 				return Declared{}, fmt.Errorf("%w: grant verb %s.%s.%s", ErrVerbTokenCollision, m.Module, r.Name, token)
 			}
@@ -253,9 +255,9 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 			if container[class] {
 				continue
 			}
-			out.Verbs = append(out.Verbs, catalog.VerbRow{
-				Module: m.Module, Resource: r.Name, Verb: class,
-			})
+			row := catalog.VerbRow{Module: m.Module, Resource: r.Name, Verb: class}
+			out.Verbs = append(out.Verbs, row)
+			out.TierOnlyVerbs = append(out.TierOnlyVerbs, row)
 		}
 	}
 	if m.Module == apply.Module {
@@ -275,4 +277,5 @@ func RowsOf(m *manifest.Manifest) (Declared, error) {
 // оно здесь ровно один раз: второе место разошлось бы с первым молча — и
 // разошлось бы там, где расхождение невидимо, потому что на 107 действиях из 109
 // обе формы совпадают.
-func canonicalVerb(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
+// CanonicalVerbToken приводит имя глагола к форме, используемой в строках каталога.
+func CanonicalVerbToken(name string) string { return strings.ToLower(strings.TrimSpace(name)) }
