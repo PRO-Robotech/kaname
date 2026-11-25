@@ -796,7 +796,7 @@ func TestRoleSelectorMoveBindingNewKeepsRecipientsAndRejectsChangedCensus(t *tes
 				// Вложенный до чтения потомков выбирает только контейнер своей области.
 				if item.Side == "new" && newAccount == r.a {
 					require.Equal(t, "pending", item.Children)
-					require.Equal(t, []string{nativeChildren[0].ObjectID}, item.RawChildCandidateIDs)
+					require.Equal(t, []string{project}, item.RawChildCandidateIDs)
 				} else {
 					require.Equal(t, "empty", item.Children)
 					require.Nil(t, item.RawChildCandidateIDs)
