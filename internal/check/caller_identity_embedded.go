@@ -271,7 +271,9 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 		st, ok := typ.Underlying().(*types.Struct)
 		if !ok {
 			switch typ.Underlying().(type) {
-			case *types.Slice, *types.Array:
+			case *types.Slice, *types.Array, *types.Map:
+				// Ищем поле в значениях литерала. Записи после создания
+				// контейнера и время жизни проверяет внешний обход.
 				for _, elt := range x.Elts {
 					if kv, ok := elt.(*ast.KeyValueExpr); ok {
 						elt = kv.Value
