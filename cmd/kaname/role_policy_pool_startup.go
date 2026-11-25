@@ -10,6 +10,7 @@ import (
 
 	coredb "github.com/PRO-Robotech/corelib/db"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/config"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -68,6 +69,22 @@ func prepareRolePolicyPool(ctx context.Context, cfg config.Config, primary *pgxp
 	}()
 	if err := pool.Ping(ctx); err != nil {
 		return nil, nil, fmt.Errorf("role-writer pool ping: %w", err)
+	}
+	if publication := profile.publication; publication != nil {
+		// Проверяем отдельный LOGIN на той же редакции до запуска workers.
+		// Следующие редакции построят свой контракт на этом же ограниченном пуле.
+		pinned, err := authzsnapshot.WithContext(ctx, publication.snapshot)
+		if err != nil {
+			return nil, nil, err
+		}
+		writers := newPublishedWriterGenerations(primary, publication.writers.repo, publication.store)
+		writers.rolePool = pool
+		if _, _, err := writers.resolve(pinned); err != nil {
+			return nil, nil, fmt.Errorf("published role-writer dependency: %w", err)
+		}
+		publication.writers = writers
+		success = true
+		return pool, nil, nil
 	}
 	repository := kanamepg.New(pool, nil)
 	contract, err := kanamepg.NewFullWriterContract(ctx, repository, profile.bundle)

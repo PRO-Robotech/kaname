@@ -12,12 +12,15 @@ import (
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
-// RolePolicyWriters открывает только role-порты отдельного app LOGIN.
+// RolePolicyWriters открывает role-порты назначенного app LOGIN.
+// Порт User.Update требует отдельной установки владельцем БД.
 // Не встраиваем GrantPolicyWriters: group/binding-порты не должны попасть
 // в общий wiring вместе с этой зависимостью. Это выбор соединения, не allow.
 type RolePolicyWriters struct {
-	shared *Repository
-	policy *GrantPolicyWriters
+	shared      *Repository
+	policy      *GrantPolicyWriters
+	runtimeOID  uint32
+	runtimeName string
 }
 
 // NewRolePolicyWriters принимает два заранее подготовленных FULL repository.
@@ -51,29 +54,26 @@ func NewRolePolicyWriters(ctx context.Context, shared, role *Repository, bundle 
 	if err != nil {
 		return nil, err
 	}
-	// Два pool не доказывают разные identities: сверяем реальные LOGIN.
-	// Имена используются только для сравнения и не попадают в ошибки.
-	var sharedLogin, roleLogin string
-	if err := shared.master.QueryRow(ctx, `SELECT session_user::text`).Scan(&sharedLogin); err != nil {
-		return nil, err
-	}
-	if err := role.master.QueryRow(ctx, `SELECT session_user::text`).Scan(&roleLogin); err != nil {
-		return nil, err
-	}
-	if sharedLogin == "" || roleLogin == "" || sharedLogin == roleLogin {
-		return nil, fmt.Errorf("role policy requires a separate application LOGIN")
+	// Получаем координаты с ordinary соединения. Владелец БД подтверждает
+	// эту пару на соединении назначенного LOGIN в той же проверке.
+	var runtimeOID uint32
+	var runtimeName string
+	if err := shared.master.QueryRow(ctx, `SELECT r.oid, r.rolname::text
+		FROM pg_catalog.pg_roles r WHERE r.rolname=session_user AND current_user=session_user`).Scan(&runtimeOID, &runtimeName); err != nil {
+		return nil, fmt.Errorf("verify primary application LOGIN: %w", err)
 	}
 	var enrolled bool
-	if err := role.master.QueryRow(ctx, `SELECT kaname.authority_role_actor_login_ready_v1()`).Scan(&enrolled); err != nil {
+	if err := role.master.QueryRow(ctx, `SELECT current_user=session_user
+		AND kaname.authority_role_actor_pair_ready_v1($1::oid,$2::text)`, runtimeOID, runtimeName).Scan(&enrolled); err != nil {
 		return nil, fmt.Errorf("verify role writer enrollment: %w", err)
 	}
 	if !enrolled {
-		return nil, fmt.Errorf("role policy requires an enrolled application LOGIN")
+		return nil, fmt.Errorf("role policy requires the enrolled pair of application LOGINs")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return &RolePolicyWriters{shared: shared, policy: policy}, nil
+	return &RolePolicyWriters{shared: shared, policy: policy, runtimeOID: runtimeOID, runtimeName: runtimeName}, nil
 }
 
 // ValidateFor не читает БД повторно: проверяет принадлежность уже проверенной

@@ -17,6 +17,11 @@ import (
 
 // Все порты поколения используют один tagged repository и один semantic bundle.
 // Withdrawal строится из того же membership, что обслуживает групповые мутации.
+type publishedRoleWriters interface {
+	kaname.RoleAuthorityWriterFactory
+	kaname.RoleMutationWriterFactory
+}
+
 type publishedPolicyParticipants struct {
 	membership *kanamepg.GroupMembershipParticipant
 	stages     *kanamepg.BindingStageParticipant
@@ -54,7 +59,7 @@ func (r *publishedWriterGenerations) RoleAuthorityWriter(ctx context.Context, ro
 	if err != nil {
 		return nil, err
 	}
-	return generation.policy.writers.RoleAuthorityWriter(pinned, role, create, actor)
+	return generation.roles.RoleAuthorityWriter(pinned, role, create, actor)
 }
 
 func (r *publishedWriterGenerations) RoleMutationWriter(ctx context.Context, request kaname.RoleMutationRequest, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
@@ -62,7 +67,7 @@ func (r *publishedWriterGenerations) RoleMutationWriter(ctx context.Context, req
 	if err != nil {
 		return nil, err
 	}
-	return generation.policy.writers.RoleMutationWriter(pinned, request, actor)
+	return generation.roles.RoleMutationWriter(pinned, request, actor)
 }
 
 func (r *publishedWriterGenerations) GroupAdditionAuthorityWriter(ctx context.Context, member domain.GroupMember, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {

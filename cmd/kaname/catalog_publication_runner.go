@@ -26,9 +26,10 @@ import (
 // publishedWriterGenerations выбирает неделимое поколение до входа в операцию.
 // Выбранные участники остаются неизменными до commit или rollback.
 type publishedWriterGenerations struct {
-	pool  *pgxpool.Pool
-	repo  *kanamepg.Repository
-	store *authzsnapshot.Store
+	pool     *pgxpool.Pool
+	rolePool *pgxpool.Pool
+	repo     *kanamepg.Repository
+	store    *authzsnapshot.Store
 
 	mu           sync.Mutex
 	current      *publishedWriterGeneration
@@ -46,6 +47,7 @@ type publishedWriterGeneration struct {
 	policy        *publishedPolicyParticipants
 	metadata      *kanamepg.MetadataMutationWriters
 	metadataPorts publishedMetadataPorts
+	roles         publishedRoleWriters
 	state         *kanamepg.ServiceAccountStateWriters
 	crud          *kanamepg.CRUDWriters
 	admission     *kanamepg.HumanAdmissionParticipant
@@ -150,6 +152,22 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	if err != nil {
 		return nil, err
 	}
+	var roles publishedRoleWriters = policy.writers
+	if r.rolePool != nil {
+		roleRepo := kanamepg.New(r.rolePool, nil)
+		roleContract, err := kanamepg.NewPublishedFullWriterContract(ctx, roleRepo, publication)
+		if err != nil {
+			return nil, err
+		}
+		roleRepo, err = roleRepo.WithFullWriterContract(roleContract)
+		if err != nil {
+			return nil, err
+		}
+		roleWriters, err := kanamepg.NewRolePolicyWriters(ctx, repo, roleRepo, publication.Bundle)
+		if err != nil {
+			return nil, err
+		}
+	}
 	metadataPorts, err := metadata.WithInstalledAccessLabels(ctx)
 	if err != nil {
 		return nil, err
@@ -183,7 +201,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	generation := &publishedWriterGeneration{
 		snapshot: snapshot, contract: contract, repo: repo, bundle: publication.Bundle,
 		catalog: catalog, cluster: cluster, invites: invites, policy: policy,
-		metadata: metadata, metadataPorts: metadataPorts, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
+		metadata: metadata, metadataPorts: metadataPorts, roles: roles, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
 	}
 	r.current = generation
 	return generation, nil
