@@ -204,7 +204,7 @@ func (g *callerGraph) callerLifetimeUnknown(src valueSrc, fields ...*types.Var) 
 			}
 			// Выражение функции несёт связанного получателя или замыкание;
 			// проверка лишь аргументов пропускает мутацию получателя без аргументов.
-			if probe.contains(valueSrc{pkg: site.pkg, fk: site.fk, expr: site.call.Fun, tuple: -1}) {
+			if probe.opaqueCalleeContains(site) {
 				return true
 			}
 			for _, arg := range site.call.Args {
@@ -434,6 +434,70 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 			}
 		}
 		delete(p.objects, object)
+	}
+	return false
+}
+
+func (p *callerLifetimeProbe) opaqueCalleeContains(site callSrc) bool {
+	src := valueSrc{pkg: site.pkg, fk: site.fk, expr: site.call.Fun, tuple: -1}
+	if sel, ok := ast.Unparen(src.expr).(*ast.SelectorExpr); ok {
+		s := src.pkg.info.Selections[sel]
+		if s != nil && s.Kind() == types.MethodVal && !s.Indirect() && len(s.Index()) == 1 {
+			lit, layout := callerUnaddressableStructLiteral(src.pkg, sel.X)
+			sig, _ := s.Obj().Type().(*types.Signature)
+			if layout != nil && sig != nil && sig.Recv() != nil && types.Identical(src.pkg.info.TypeOf(sel.X), sig.Recv().Type()) {
+				return p.containsDirectReceiverValue(src, lit, layout)
+			}
+		}
+	}
+	return p.contains(src)
+}
+
+func callerUnaddressableStructLiteral(sp *surfaceSrcPkg, expr ast.Expr) (*ast.CompositeLit, *types.Struct) {
+	lit, ok := ast.Unparen(expr).(*ast.CompositeLit)
+	if !ok {
+		return nil, nil
+	}
+	value := sp.info.Types[lit]
+	if value.Type == nil || value.Addressable() {
+		return nil, nil
+	}
+	layout, _ := value.Type.Underlying().(*types.Struct)
+	return lit, layout
+}
+
+// Прямой T{...}.M копирует временное значение. Другие записи не могут
+// получить адрес этой ячейки. Через её поля по-прежнему доступны общие
+// срезы, указатели, замыкания и прочие значения из инициализаторов.
+func (p *callerLifetimeProbe) containsDirectReceiverValue(src valueSrc, lit *ast.CompositeLit, layout *types.Struct) bool {
+	p.steps++
+	p.g.work.LifetimeProbeSteps++
+	if p.steps > callerLifetimeStepLimit || p.g.semanticOverflow || p.g.ctx != nil && p.g.ctx.Err() != nil ||
+		(p.want.pkg == src.pkg && p.want.expr == lit) {
+		return true
+	}
+	for i, elt := range lit.Elts {
+		var field *types.Var
+		if kv, keyed := elt.(*ast.KeyValueExpr); keyed {
+			if name, ok := kv.Key.(*ast.Ident); ok {
+				field, _ = src.pkg.info.Uses[name].(*types.Var)
+			}
+			elt = kv.Value
+		} else if i < layout.NumFields() {
+			field = layout.Field(i)
+		}
+		next := src
+		next.expr, next.tuple = elt, -1
+		// Дочерний struct копируется той же инициализацией. Для интерфейса
+		// и для каждого другого выражения остаётся штатный обход.
+		nested, shape := callerUnaddressableStructLiteral(src.pkg, elt)
+		if shape != nil && field != nil && field.IsField() && types.Identical(field.Type(), src.pkg.info.TypeOf(elt)) {
+			if p.containsDirectReceiverValue(next, nested, shape) {
+				return true
+			}
+		} else if p.contains(next) {
+			return true
+		}
 	}
 	return false
 }
