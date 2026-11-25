@@ -31,6 +31,7 @@ import (
 func newAuthorityBundleCmd(opts *rootOptions) *cobra.Command {
 	root := &cobra.Command{Use: "authority-bundle", Short: "Явное управление согласованным bundle и drain", Args: cobraargs.OnlyKnownCommands,
 		RunE: func(*cobra.Command, []string) error { return migratorcli.ErrNoCommand }}
+	root.AddCommand(newAddAccessLabelCmd(opts), newIssueInitialAccessLabelApplyCmd(opts))
 	for _, action := range []string{"bootstrap", "stage", "activate", "verify", "stage-full", "activate-full", "verify-full", "close"} {
 		var dir string
 		var imageOnly bool
