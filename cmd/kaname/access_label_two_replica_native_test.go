@@ -145,7 +145,8 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
       AND fga_user=$3 AND relation='v_get' AND object='account:'||$2)`, []string{losing, keeping}, root, "user:"+string(reader.user)).Scan(&members, &holders)
 		return e == nil && members == 2 && holders == 2
 	}, 45*time.Second, 50*time.Millisecond)
-	sequence := runAccessLabelTwoReplicaSequence(t, ctx, a, b, f.given.pool, f.operator.Bearer(), credential.Bearer(), root, string(reader.user), losing, keeping, continuing)
+	sequence := runAccessLabelTwoReplicaSequence(t, ctx, a, b, f.given.pool, f.operator.Bearer(), credential.Bearer(), root, string(reader.user), losing, keeping,
+		continuing, func(stage, operationID string) { recordNativeAccessLabelMutationFailure(t, f, stage, operationID) })
 	sequence.Baseline.ActiveMembers, sequence.Baseline.LedgerHolders = members, holders
 	after, headAfter := nativeAccessLabelMigrationRows(t, f)
 	require.Equal(t, headBefore, headAfter)

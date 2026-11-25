@@ -54,14 +54,14 @@ type nativeAccessLabelSequenceObservation struct {
 func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 	writerA, readerB *installruntime.Wire, ownerObserver *pgxpool.Pool,
 	writerBearer, readerBearer, rootID, readerID, losingBinding, keepingBinding string,
-	assertSameProcesses func()) nativeAccessLabelSequenceObservation {
+	assertSameProcesses func(), recordFailure func(string, string)) nativeAccessLabelSequenceObservation {
 	var observations nativeAccessLabelSequenceObservation
 	t.Helper()
 	require.NotNil(t, assertSameProcesses)
 	subject := "user:" + readerID
 	path := "/iam/v1/accounts/" + url.PathEscape(rootID)
 	const factRelation = "viewer"
-	check := func(stage string, pending bool) nativeAccessLabelDecision {
+	check := func(callCtx context.Context, stage string, pending bool) nativeAccessLabelDecision {
 		var observed nativeAccessLabelDecision
 		t.Helper()
 		assertSameProcesses()
@@ -77,7 +77,7 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 				Allowed bool `json:"allowed"`
 				Code    int  `json:"code"`
 			}
-			code, err := readerB.JSON(ctx, http.MethodPost, "/iam/v1/authorize:check", readerBearer, request, &result)
+			code, err := readerB.JSON(callCtx, http.MethodPost, "/iam/v1/authorize:check", readerBearer, request, &result)
 			require.NoError(t, err)
 			if pending && code == http.StatusServiceUnavailable {
 				require.Equal(t, int(codes.Unavailable), result.Code, "%s: Authorize.Check, requiredRelation=%q", stage, relation)
@@ -98,7 +98,7 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		var result struct {
 			Code int `json:"code"`
 		}
-		code, err := readerB.JSON(ctx, http.MethodGet, path, readerBearer, nil, &result)
+		code, err := readerB.JSON(callCtx, http.MethodGet, path, readerBearer, nil, &result)
 		require.NoError(t, err)
 		switch {
 		case !pending:
@@ -106,28 +106,34 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		case code == http.StatusServiceUnavailable:
 			require.Equal(t, int(codes.Unavailable), result.Code, "%s: Account.Get", stage)
 		default:
-			require.Equal(t, http.StatusForbidden, code, "%s: Account.Get", stage)
+			require.Equal(t, http.StatusNotFound, code, "%s: Account.Get", stage)
+			require.Equal(t, int(codes.NotFound), result.Code, "%s: Account.Get", stage)
 		}
 		observed.GetStatus = code
 		return observed
 	}
-	update := func(labels map[string]string) {
+	startUpdate := func(callCtx context.Context, labels map[string]string) installruntime.Operation {
 		t.Helper()
 		var operation installruntime.Operation
-		code, err := writerA.JSON(ctx, http.MethodPatch, path, writerBearer, map[string]any{
+		code, err := writerA.JSON(callCtx, http.MethodPatch, path, writerBearer, map[string]any{
 			"accountId": rootID, "accessLabels": labels, "updateMask": "accessLabels",
 		}, &operation)
 		require.NoError(t, err)
 		require.Equal(t, http.StatusOK, code)
-		operation, err = writerA.AwaitOperation(ctx, writerBearer, operation)
+		require.NotEmpty(t, operation.ID)
+		return operation
+	}
+	finishUpdate := func(callCtx context.Context, operation installruntime.Operation) {
+		t.Helper()
+		operation, err := writerA.AwaitOperation(callCtx, writerBearer, operation)
 		require.NoError(t, err)
 		require.True(t, operation.Done)
 		require.Nil(t, operation.Error)
 		assertSameProcesses()
 	}
-	observations.Baseline.nativeAccessLabelDecision = check("baseline", false)
-	update(map[string]string{"team": "after", "keep": "yes"})
-	check("retained-after-update", false)
+	observations.Baseline.nativeAccessLabelDecision = check(ctx, "baseline", false)
+	finishUpdate(ctx, startUpdate(ctx, map[string]string{"team": "after", "keep": "yes"}))
+	check(ctx, "retained-after-update", false)
 	// Дожидаемся первого пересчёта, чтобы его рабочий процесс уже освободил
 	// блокировки источников, когда начнём удерживать строку старого факта.
 	require.Eventually(t, func() bool {
@@ -143,23 +149,71 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		observations.Retained.KeepingHolderPresent = keepingPresent
 		return err == nil && !losingPresent && keepingPresent
 	}, 45*time.Second, 50*time.Millisecond)
-	observations.Retained.nativeAccessLabelDecision = check("retained", false)
+	observations.Retained.nativeAccessLabelDecision = check(ctx, "retained", false)
 
-	// Свёртка хранит ярус viewer. Глагол v_get вычисляется по живой выдаче.
-	// KEY SHARE задерживает удаление исходной строки viewer, а метаданные
-	// успевают зафиксировать новую генерацию для того же факта.
-	barrier, err := ownerObserver.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
-	require.NoError(t, err)
-	defer func() {
+	pendingCtx, cancelPending := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelPending()
+	rollback := func(tx pgx.Tx) {
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_ = barrier.Rollback(cleanup)
+		_ = tx.Rollback(cleanup)
+	}
+	var pendingOperation installruntime.Operation
+	defer func() {
+		if t.Failed() && pendingOperation.ID != "" {
+			recordFailure("pending", pendingOperation.ID)
+		}
 	}()
-	_, err = barrier.Exec(ctx, `SET LOCAL lock_timeout='2s'; SET LOCAL idle_in_transaction_session_timeout='30s'`)
+
+	// Сначала пропускаем настоящий Update через захват общей блокировки
+	// производителя. Блокировка таблицы задерживает только его физическую
+	// запись. Пока Update ждёт её, рабочий пересчёт не может занять очередь
+	// раньше производителя и удержать общую блокировку.
+	staging, err := ownerObserver.BeginTx(pendingCtx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	require.NoError(t, err)
+	defer rollback(staging)
+	_, err = staging.Exec(pendingCtx, `SET LOCAL lock_timeout='2s'; SET LOCAL idle_in_transaction_session_timeout='0';
+		LOCK TABLE ONLY kaname.accounts IN SHARE MODE`)
+	require.NoError(t, err)
+	var stagingPID int32
+	require.NoError(t, staging.QueryRow(pendingCtx, `SELECT pg_backend_pid()`).Scan(&stagingPID))
+	pendingOperation = startUpdate(pendingCtx, map[string]string{"team": "after", "keep": "no"})
+	require.False(t, pendingOperation.Done)
+	require.Eventually(t, func() bool {
+		var waiting bool
+		err := ownerObserver.QueryRow(pendingCtx, `SELECT count(*)=1
+			FROM pg_catalog.pg_locks AS account_lock
+			JOIN pg_catalog.pg_locks AS producer_lock USING(pid,database)
+			JOIN pg_catalog.pg_stat_activity AS session ON session.pid=account_lock.pid
+			WHERE account_lock.relation='kaname.accounts'::regclass
+			AND account_lock.locktype='relation' AND account_lock.mode='RowExclusiveLock' AND NOT account_lock.granted
+			AND producer_lock.relation='kaname.authority_producer_population_latch'::regclass
+			AND producer_lock.locktype='relation' AND producer_lock.mode='ShareLock' AND producer_lock.granted
+			AND $1=ANY(pg_catalog.pg_blocking_pids(account_lock.pid))
+			AND session.application_name='writer-a' AND session.state='active' AND session.wait_event_type='Lock'
+			AND session.query='SELECT kaname.authority_metadata_access_label_retention_inputs_v1($1::jsonb,$2,$3,$4,$5)'
+			AND EXISTS(SELECT FROM ONLY kaname.operations WHERE id=$2 AND NOT done)`,
+			stagingPID, pendingOperation.ID).Scan(&waiting)
+		return err == nil && waiting
+	}, 15*time.Second, 40*time.Millisecond, "Update должен ждать физической записи после захвата блокировки производителя")
+
+	// Удерживаем поколение и материальный viewer только после доказанной
+	// остановки производителя. Два захвата нужны для разных путей пересчёта.
+	barrier, err := ownerObserver.BeginTx(pendingCtx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	require.NoError(t, err)
+	defer rollback(barrier)
+	// Время жизни барьера задаёт pendingCtx. Отдельный таймер бездействия
+	// PostgreSQL мог снять защитную блокировку посреди штатной операции.
+	_, err = barrier.Exec(pendingCtx, `SET LOCAL lock_timeout='2s'; SET LOCAL idle_in_transaction_session_timeout='0'`)
+	require.NoError(t, err)
+	var generationLocked bool
+	require.NoError(t, barrier.QueryRow(pendingCtx, `SELECT pg_try_advisory_xact_lock(
+		1262569306,hashtext(jsonb_build_array('iam.account'::text,$1::text)::text COLLATE "C"))`,
+		rootID).Scan(&generationLocked))
+	require.True(t, generationLocked, "пересчёт не должен получить поколение раньше удержанного производителя")
 	var factXmin, factCTID string
 	var initiallyFresh, retainedHolder bool
-	require.NoError(t, barrier.QueryRow(ctx, `SELECT f.xmin::text,f.ctid::text,
+	require.NoError(t, barrier.QueryRow(pendingCtx, `SELECT f.xmin::text,f.ctid::text,
   kaname.authority_access_label_fact_fresh_v1(f.object_type,f.object_id,f.relation,f.subject),
   EXISTS (SELECT FROM ONLY kaname.access_binding_emitted_tuples et
     WHERE et.binding_id=$4 AND et.member_object_type='iam.account' AND et.member_object_id=f.object_id
@@ -170,9 +224,10 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		"должен существовать физический факт viewer")
 	require.True(t, initiallyFresh)
 	require.True(t, retainedHolder, "оставшаяся выдача должна держать этот факт viewer")
-	update(map[string]string{"team": "after", "keep": "no"})
+	require.NoError(t, staging.Rollback(pendingCtx))
+	finishUpdate(pendingCtx, pendingOperation)
 	var physical, dirty, fresh bool
-	require.NoError(t, barrier.QueryRow(ctx, `SELECT
+	require.NoError(t, barrier.QueryRow(pendingCtx, `SELECT
   EXISTS(SELECT FROM ONLY kaname.relation_fact f WHERE f.object_type='account' AND f.object_id=$1
    AND f.relation=$3 AND f.subject=$2 AND f.xmin::text=$4 AND f.ctid::text=$5),
   EXISTS(SELECT 1 FROM kaname.authority_access_label_dirty_fact d
@@ -184,10 +239,10 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 	require.True(t, dirty, "the exact committed metadata generation is pending")
 	require.False(t, fresh)
 	// Только при подтверждённой незавершённой проекции допустимо Unavailable.
-	observations.Pending.nativeAccessLabelDecision = check("pending", true)
+	observations.Pending.nativeAccessLabelDecision = check(pendingCtx, "pending", true)
 	observations.Pending.FactRelation = factRelation
 	observations.Pending.PhysicalFactPresent, observations.Pending.DirtyFactPresent, observations.Pending.FactFresh = physical, dirty, fresh
-	require.NoError(t, barrier.Rollback(ctx))
+	require.NoError(t, barrier.Rollback(pendingCtx))
 	assertSameProcesses()
 	return observations
 }
