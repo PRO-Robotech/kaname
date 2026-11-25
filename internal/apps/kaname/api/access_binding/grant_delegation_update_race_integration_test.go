@@ -11,6 +11,7 @@ import (
 
 	operationpb "github.com/PRO-Robotech/corelib/api/corelib/operation"
 	"github.com/PRO-Robotech/corelib/operations"
+	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -345,6 +346,16 @@ func TestGrantDelegation_GDU15_GrantAndRevokeOrdering(t *testing.T) {
 		id := requireGranted(t, u.tryGrant(asSA(u.ctx, u.svaIss), old), "старая комбинация до PATCH")
 		u.requireDelegatedBinding(id, u.d, "старое разрешено")
 		requireDenied(t, u.tryGrant(asSA(u.ctx, u.svaIss), u.grant("role", true)), "новая роль до фиксации")
+		// У старой выдачи материализация продолжает работать после Operation.done.
+		// Только проверяемый Create входит в Writer через этот именованный пул.
+		const grantApp = "gdu15-old-grant"
+		cfg := u.pool.Config()
+		cfg.ConnConfig.RuntimeParams["application_name"] = grantApp
+		grantPool, err := pgxpool.NewWithConfig(u.ctx, cfg)
+		require.NoError(t, err)
+		t.Cleanup(grantPool.Close)
+		create, _, _ := u.newGrantVerbsOn(kanamepg.New(grantPool, nil), u.ops)
+		grant := accessbindingapp.NewHandler(create, nil, nil, nil, nil, nil, nil)
 		gate := &gduCommitGateRepo{Repository: u.repo, entered: make(chan struct{}), release: make(chan struct{})}
 		u.updateRepo = gate
 		u.buildHandlers()
@@ -366,9 +377,9 @@ func TestGrantDelegation_GDU15_GrantAndRevokeOrdering(t *testing.T) {
 		requireDenied(t, u.tryGrant(asSA(u.ctx, u.svaIss), u.grant("role", true)), "до реального Commit новая роль ещё запрещена")
 		old.Subjects = []*iamv1.Subject{svaSubject(u.svaA3)}
 		holderPID := gdCompatOwner(u.gdWorld)
-		grantOp, err := u.abx.Create(asSA(u.ctx, u.svaIss), old)
+		grantOp, err := grant.Create(asSA(u.ctx, u.svaIss), old)
 		require.NoError(t, err)
-		gdAwaitCompatWaiter(u.gdWorld, holderPID, "")
+		gdAwaitCompatWaiter(u.gdWorld, holderPID, grantApp)
 		close(gate.release)
 		u.finish(op)
 		done := awaitOp(t, u.ctx, u.ops, grantOp.GetId())

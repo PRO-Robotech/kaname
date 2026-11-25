@@ -13,6 +13,13 @@ import (
 // DoWithInstallationWriteTxVoid сохраняет прежнее отображение отказов репозитория.
 // Отсутствие typed factory закрывает вход; ошибочный Commit не повторяет тело.
 func DoWithInstallationWriteTxVoid(ctx context.Context, repo kaname.Repository, kind kaname.AuthorityOperation, fn func(context.Context, kaname.Writer) error) error {
+	return DoWithObservedInstallationWriteTxVoid(ctx, repo, kind, fn, nil)
+}
+
+// DoWithObservedInstallationWriteTxVoid передаёт наблюдателю первичную ошибку, сохранённую до RPC-преобразования.
+// Наблюдатель может использовать её тип для диагностики. Текст может содержать данные хранилища.
+func DoWithObservedInstallationWriteTxVoid(ctx context.Context, repo kaname.Repository, kind kaname.AuthorityOperation, fn func(context.Context, kaname.Writer) error, observeFailure func(error)) error {
+	var primaryErr error
 	err := func() (err error) {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -28,6 +35,7 @@ func DoWithInstallationWriteTxVoid(ctx context.Context, repo kaname.Repository, 
 		committed := false
 		defer func() {
 			if !committed {
+				primaryErr = err
 				err = errors.Join(err, w.Rollback(ctx))
 			}
 		}()
@@ -41,7 +49,14 @@ func DoWithInstallationWriteTxVoid(ctx context.Context, repo kaname.Repository, 
 		return nil
 	}()
 	if err != nil {
-		return MapRepoErrAt(ctx, err)
+		mappedErr := MapRepoErrAt(ctx, err)
+		if observeFailure != nil {
+			if primaryErr == nil {
+				primaryErr = err
+			}
+			observeFailure(primaryErr)
+		}
+		return mappedErr
 	}
 	return nil
 }

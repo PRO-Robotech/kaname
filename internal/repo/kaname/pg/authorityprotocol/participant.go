@@ -18,13 +18,16 @@ import (
 // semantic/native proof. Вызвавший владеет успешной TX и завершает её сам.
 func OpenParticipant(ctx context.Context, pool *pgxpool.Pool, kind kaname.AuthorityOperation) (pgx.Tx, error) {
 	if err := ctx.Err(); err != nil {
+		observeParticipantOpen(ctx, "open-input", err)
 		return nil, err
 	}
 	if pool == nil {
+		observeParticipantOpen(ctx, "open-input", kaname.ErrInvalidAuthorityFencePlan)
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	if profile, present := contractFromContext(ctx); present {
 		if !profile.UsesPool(pool) {
+			observeParticipantOpen(ctx, "open-input", kaname.ErrInvalidAuthorityFencePlan)
 			return nil, kaname.ErrInvalidAuthorityFencePlan
 		}
 		return openParticipantProfile(ctx, pool.BeginTx, kind, profile)
@@ -37,6 +40,7 @@ func openParticipant(ctx context.Context, begin func(context.Context, pgx.TxOpti
 }
 func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx.TxOptions) (pgx.Tx, error), kind kaname.AuthorityOperation, profile *FullContract) (pgx.Tx, error) {
 	if err := ctx.Err(); err != nil {
+		observeParticipantOpen(ctx, "open-input", err)
 		return nil, err
 	}
 	// Только actual installation/maintenance families. Resource имеет свой
@@ -45,32 +49,40 @@ func openParticipantProfile(ctx context.Context, begin func(context.Context, pgx
 	case kaname.AuthorityCatalog, kaname.AuthorityRole, kaname.AuthorityBinding,
 		kaname.AuthorityIdentity, kaname.AuthorityCluster:
 	default:
+		observeParticipantOpen(ctx, "open-input", kaname.ErrInvalidAuthorityFencePlan)
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	tx, err := begin(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
+		observeParticipantOpen(ctx, "open-begin", err)
 		return nil, err
 	}
 	var abi int
 	wantABI := 2
+	stage := "open-enter-v2"
 	if profile == nil {
 		err = tx.QueryRow(ctx, `SELECT kaname.authority_installation_enter_v2($1)`, string(kind)).Scan(&abi)
 	} else {
 		wantABI = 3
+		stage = "open-enter-v3"
 		err = tx.QueryRow(ctx, `SELECT kaname.authority_installation_enter_v3($1,$2,$3,$4)`, string(kind), profile.model, profile.catalog, profile.projector).Scan(&abi)
 	}
 	if err == nil && abi != wantABI {
+		stage = "open-abi-mismatch"
 		err = kaname.ErrSemanticIdentityUnavailable
 	}
 	if err == nil && profile != nil {
+		stage = "open-confirm-publication"
 		err = profile.ConfirmPublication(ctx, tx)
 	}
 	if err == nil {
+		stage = "open-context"
 		err = ctx.Err()
 	}
 	if err == nil {
 		return tx, nil
 	}
+	observeParticipantOpen(ctx, stage, err)
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	rollbackErr := tx.Rollback(cleanup)
 	cancel()

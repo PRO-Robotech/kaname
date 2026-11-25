@@ -33,6 +33,7 @@ import (
 	accessbindingapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding"
 	gdapp "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/grant_delegation"
 	"github.com/PRO-Robotech/kaname/internal/catalog"
+	kanamerepo "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
 )
 
@@ -62,9 +63,9 @@ func gdWireSubject(w *gdWorld, reg grpc.ServiceRegistrar) {
 
 // gdWireGrantPath — четвёртый путь права выдавать в глаголы выдачи мира Д (Р2):
 // тот же путь, что корень службы даёт `Create`, `Revoke` и `Delete` выдачи.
-func gdWireGrantPath(w *gdWorld, c *accessbindingapp.CreateAccessBindingUseCase,
+func gdWireGrantPath(w *gdWorld, repo kanamerepo.Repository, c *accessbindingapp.CreateAccessBindingUseCase,
 	r *accessbindingapp.RevokeAccessBindingUseCase, d *accessbindingapp.DeleteAccessBindingUseCase) {
-	p := accessbindingapp.NewDelegatedGrantPath(w.repo, w.door)
+	p := accessbindingapp.NewDelegatedGrantPath(repo, w.door)
 	c.WithDelegatedGrantPath(p)
 	r.WithDelegatedGrantPath(p)
 	d.WithDelegatedGrantPath(p)

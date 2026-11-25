@@ -109,11 +109,12 @@ type RoleVerbReseedCensus struct {
 	Reseeded int
 	// Pairs — пар, объявленных правилами закоммиченных ролей.
 	Pairs int
-	// Failed — ролей, чья транзакция откачена.
+	// Failed — ролей, чей окончательный пересчёт завершился отказом.
 	Failed int
-	// Только этап и класс первого отказа транзакции роли. При нуле отказов оба пусты.
+	// Только первый окончательный отказ роли. Подробности отмены есть лишь при SQLSTATE 57014.
 	FirstFailureStage string
 	FirstFailureClass string
+	FirstQueryCancel  kanamerepo.InstallationQueryCancel
 }
 
 // Structural — полоса, на которой повтор даст то же самое: роли есть, пересеяна
@@ -159,15 +160,25 @@ func ReseedSystemRoleVerbs(
 	if err != nil {
 		return census, errors.Join(err, ctx.Err())
 	}
-	census.Examined = len(roles)
+	return reseedListedRoleVerbs(ctx, repo, cat, obs, roles)
+}
 
+func reseedListedRoleVerbs(ctx context.Context, repo kanamerepo.Repository, cat *catalog.Facts, obs RoleVerbReseedObserver, roles []systemRoleRules) (RoleVerbReseedCensus, error) {
+	census := RoleVerbReseedCensus{Examined: len(roles)}
 	var failures []error
-	for i, rr := range roles {
+	for i := 0; i < len(roles); i++ {
+		rr := roles[i]
 		if err := ctx.Err(); err != nil {
 			return census, errors.Join(append(failures, err)...)
 		}
 		pairs, failure, rerr := replaceRoleVerbsInOwnTx(ctx, repo, cat, rr.id)
 		if rerr != nil {
+			if i < census.Examined && failure.retryAdmission && ctx.Err() == nil {
+				// Роль не дошла до записи. Одна новая транзакция после первого
+				// прохода заново проверит допуск и прочитает правила под блокировкой.
+				roles = append(roles, rr)
+				continue
+			}
 			// Фиксируем исход работы до вызова наблюдателя: отмена после
 			// последней законченной роли уже не прерывает обход.
 			interrupted := ctx.Err()
@@ -175,6 +186,7 @@ func ReseedSystemRoleVerbs(
 			if census.Failed == 0 {
 				census.FirstFailureStage = failure.stage
 				census.FirstFailureClass = failure.class
+				census.FirstQueryCancel = failure.cancel
 			}
 			census.Failed++
 			failures = append(failures, rerr)
@@ -205,14 +217,16 @@ func ReseedSystemRoleVerbs(
 }
 
 type roleVerbFailure struct {
-	stage, class string
+	stage, class   string
+	cancel         kanamerepo.InstallationQueryCancel
+	retryAdmission bool
 }
 
 // Обёртка транзакции может превратить оба вида конфликта в один Aborted.
-// До отображения различаем их только по типизированной причине тела транзакции.
-func roleVerbFailureClass(bodyErr, mappedErr error) string {
+// До RPC-преобразования различаем их по типизированной первичной причине.
+func roleVerbFailureClass(primaryErr, mappedErr error) string {
 	var db interface{ SQLState() string }
-	if errors.As(bodyErr, &db) {
+	if errors.As(primaryErr, &db) {
 		switch db.SQLState() {
 		case "40P01":
 			return "deadlock"
@@ -234,7 +248,7 @@ func roleVerbFailureClass(bodyErr, mappedErr error) string {
 // вправе увидеть пустой промежуток, потому что в этом окне всякий вердикт по роли
 // отказывает, и отказывает молча.
 //
-// Транзакцию открывает и закрывает `shared.DoWithInstallationWriteTxVoid` — та же форма, что
+// Транзакцию открывает и закрывает `shared.DoWithObservedInstallationWriteTxVoid` — та же форма, что
 // у соседнего досева этого пакета: одна транзакция на вызов, значит «на роль» —
 // это вызов в цикле по ролям, а не отдельный механизм.
 //
@@ -258,12 +272,15 @@ func replaceRoleVerbsInOwnTx(
 ) (int, roleVerbFailure, error) {
 	pairs := 0
 	stage := "open"
-	var bodyErr error
-	if err := shared.DoWithInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
+	var primaryErr error
+	var openFailure kanamerepo.InstallationOpenFailure
+	ctx = kanamerepo.WithInstallationOpenObserver(ctx, func(failure kanamerepo.InstallationOpenFailure) {
+		openFailure = failure
+	})
+	if err := shared.DoWithObservedInstallationWriteTxVoid(ctx, repo, kanamerepo.AuthorityRole,
 		func(ctx context.Context, w kanamerepo.Writer) (err error) {
-			// Сохраняем результат до отображения и отдельно учитываем отказ фиксации.
+			// Если тело завершилось успешно, следующим шагом будет Commit.
 			defer func() {
-				bodyErr = err
 				if err == nil {
 					stage = "commit"
 				}
@@ -282,8 +299,19 @@ func replaceRoleVerbsInOwnTx(
 			pairs = len(verbs)
 			stage = "regrain-selectors"
 			return w.RolesW().RegrainSelectorVerbs(ctx, domain.RoleID(roleID), sels)
-		}); err != nil {
-		return 0, roleVerbFailure{stage, roleVerbFailureClass(bodyErr, err)}, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
+		}, func(err error) { primaryErr = err }); err != nil {
+		failure := roleVerbFailure{stage: stage, class: roleVerbFailureClass(primaryErr, err)}
+		if stage == "open" && openFailure.Stage != "" {
+			failure = roleVerbFailure{stage: openFailure.Stage, class: openFailure.Class, cancel: openFailure.Cancel}
+			if openFailure.Stage == "open-enter-v2" && openFailure.Class == "sql-query-canceled" &&
+				openFailure.Cancel == (kanamerepo.InstallationQueryCancel{Reason: "statement-timeout", Context: "active", Site: "consumer-admission"}) {
+				var backend interface{ SQLState() string }
+				var cleanup interface{ PreparedCleanupFailed() bool }
+				failure.retryAdmission = errors.As(primaryErr, &backend) && backend.SQLState() == "57014" &&
+					(!errors.As(primaryErr, &cleanup) || !cleanup.PreparedCleanupFailed())
+			}
+		}
+		return 0, failure, fmt.Errorf("пересчёт проекции роли %s: %w", roleID, err)
 	}
 	return pairs, roleVerbFailure{}, nil
 }

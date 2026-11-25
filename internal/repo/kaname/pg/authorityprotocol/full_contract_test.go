@@ -10,6 +10,7 @@ import (
 
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -46,7 +47,7 @@ func (tx *fullInstallationTx) QueryRow(_ context.Context, query string, args ...
 }
 
 func TestFullInstallationEntryPinsIdentityAndRejectsOldABIReceipt(t *testing.T) {
-	readErr := errors.New("publication journal cannot be read")
+	readErr := &pgconn.PgError{Code: "42P01", Message: "publication journal cannot be read"}
 	for _, tc := range []struct {
 		name       string
 		abi        int
@@ -54,13 +55,17 @@ func TestFullInstallationEntryPinsIdentityAndRejectsOldABIReceipt(t *testing.T) 
 		confirmed  bool
 		readErr    error
 		expected   error
+		observed   kaname.InstallationOpenFailure
 		queryCount int
 	}{
-		{name: "old ABI", abi: 2, expected: kaname.ErrSemanticIdentityUnavailable, queryCount: 1},
+		{name: "old ABI", abi: 2, expected: kaname.ErrSemanticIdentityUnavailable, queryCount: 1,
+			observed: kaname.InstallationOpenFailure{Stage: "open-abi-mismatch", Class: "semantic-identity"}},
 		{name: "empty journal", abi: 3, confirmed: true, queryCount: 2},
 		{name: "pinned revision", abi: 3, revision: 17, confirmed: true, queryCount: 2},
-		{name: "changed revision", abi: 3, revision: 17, expected: kaname.ErrSourceUnconfirmed, queryCount: 2},
-		{name: "journal unavailable", abi: 3, revision: 17, readErr: readErr, expected: readErr, queryCount: 2},
+		{name: "changed revision", abi: 3, revision: 17, expected: kaname.ErrSourceUnconfirmed, queryCount: 2,
+			observed: kaname.InstallationOpenFailure{Stage: "open-confirm-publication", Class: "source-unconfirmed"}},
+		{name: "journal unavailable", abi: 3, revision: 17, readErr: readErr, expected: readErr, queryCount: 2,
+			observed: kaname.InstallationOpenFailure{Stage: "open-confirm-publication", Class: "sql-undefined-table"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx := &fullInstallationTx{
@@ -77,7 +82,18 @@ func TestFullInstallationEntryPinsIdentityAndRejectsOldABIReceipt(t *testing.T) 
 				}
 				return tx, nil
 			}
-			got, err := openParticipantProfile(context.Background(), begin, kaname.AuthorityRole, contract)
+			var observations []kaname.InstallationOpenFailure
+			ctx := kaname.WithInstallationOpenObserver(context.Background(), func(failure kaname.InstallationOpenFailure) {
+				observations = append(observations, failure)
+			})
+			got, err := openParticipantProfile(ctx, begin, kaname.AuthorityRole, contract)
+			if tc.expected != nil {
+				if len(observations) != 1 || observations[0] != tc.observed {
+					t.Fatalf("rejected publication observations: %+v", observations)
+				}
+			} else if len(observations) != 0 {
+				t.Fatalf("successful publication observations: %+v", observations)
+			}
 			if len(tx.queries) != tc.queryCount {
 				t.Fatalf("entry and confirmation queries: %+v", tx.queries)
 			}

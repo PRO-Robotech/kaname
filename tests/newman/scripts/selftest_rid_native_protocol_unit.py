@@ -238,10 +238,10 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             path.write_text("".join(rows) + scan_suffix)
             return h.test_diagnostics(path, root, predicates), leaf
 
-    def diagnose_role_markers(self, suite, outputs, *, trace, end="fail", active=True, suffix=""):
+    def diagnose_role_markers(self, suite, outputs, *, trace, case=None, end="fail", active=True, suffix=""):
         h = self.hosted
         root, predicates, _ = h.CASES[suite]
-        leaf = root + "/" + sorted(h.RID_MATRIX_NESTED[root])[0]
+        leaf = root + "/" + (case if case is not None else sorted(h.RID_MATRIX_NESTED[root])[0])
         rows = [{"Action": "run", "Test": root}]
         if active:
             rows.append({"Action": "run", "Test": leaf})
@@ -298,6 +298,81 @@ class HostedDiffDiagnosticsControls(unittest.TestCase):
             self.assertNotIn("roleReadiness", result)
             self.assertNotIn("fixture-secret", json.dumps(result))
         self.assertNotIn("roleReadiness", diagnose([record, record]))
+        for stage, cause in (("open-begin", "connection-open"), ("open-enter-v2", "sql-lock-unavailable"),
+                             ("open-enter-v3", "sql-query-canceled"), ("open-abi-mismatch", "semantic-identity"),
+                             ("open-input", "invalid-fence"), ("open-context", "Canceled"),
+                             ("open-confirm-publication", "source-unconfirmed"),
+                             ("open-confirm-publication", "sql-undefined-table")):
+            with self.subTest(stage=stage, cause=cause):
+                classified = record.replace("replace-verbs", stage).replace("deadlock", cause)
+                census = diagnose([classified])["roleReadiness"]["verbCensus"]
+                self.assertEqual((census["firstFailureStage"], census["firstFailureClass"]), (stage, cause))
+        canceled = record.replace("stage=replace-verbs class=deadlock", "stage=open-enter-v2 class=sql-query-canceled").rstrip("\n")
+        for reason, ctx, site in (("statement-timeout", "active", "global-coordinator"),
+                                  ("user-request", "deadline", "consumer-admission"),
+                                  ("other", "canceled", "unclassified")):
+            with self.subTest(reason=reason, ctx=ctx, site=site):
+                marker = f"{canceled} cancel={reason} context={ctx} site={site}\n"
+                census = diagnose([marker])["roleReadiness"]["verbCensus"]
+                self.assertEqual(census["firstFailureClass"], "sql-query-canceled")
+                self.assertEqual(census["firstQueryCancel"], {"reason": reason, "context": ctx, "site": site})
+        marker = canceled + " cancel=other context=active site=unclassified\n"
+        for original, invalid in (("open-enter-v2", "commit"), ("sql-query-canceled", "deadlock"),
+                                  ("cancel=other", "cancel=fixture-secret"), ("context=active", "context=fixture-secret"),
+                                  ("site=unclassified", "site=fixture-secret"), (" context=active", "")):
+            observed = diagnose([marker.replace(original, invalid)])
+            self.assertNotIn("roleReadiness", observed)
+            self.assertNotIn("fixture-secret", json.dumps(observed))
+        open_record = record.replace("replace-verbs", "open-enter-v3")
+        for unsafe_class in ("57014", "sql-secret-detail", "sql-query-canceled secret=value"):
+            result = diagnose([open_record.replace("deadlock", unsafe_class)])
+            self.assertNotIn("roleReadiness", result)
+            self.assertNotIn(unsafe_class, json.dumps(result))
+
+    def test_consumer_admission_observation_is_closed_and_matches_exact_failure(self):
+        source = "cmd/kaname/installation_whole_delivery_native_test.go"
+        prefix = (
+            "    installation_whole_delivery_native_test.go:1: RID_ROLE_READINESS reason=deadline"
+            " verbs=failed refs=ready phase=initial-delivery examined=56 reseeded=54 failed=2"
+            " completed=true stage=open-enter-v2 class=sql-query-canceled"
+            " cancel=statement-timeout context=active site=consumer-admission"
+        )
+
+        def diagnose(marker, **options):
+            return self.diagnose_role_markers("registry-installation-rid11", [marker + "\n"], trace=source, **options)
+
+        valid = prefix + " blocker=fixture waits=1 transaction-age=30s-to-60s"
+        cases = (
+            "every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/census/S2/ACTIVE/negative",
+            "every_accepted_result-table_input_authn_authority_backend_row_on_absent_and_ACTIVE_pair/authority/S1/ACTIVE/negative",
+            "each_fact-only_legal_twin_succeeds_and_converges;_missing_S1_A_before_writes/revoked-key/S1/ACTIVE/lawful-control",
+        )
+        for case in cases:
+            with self.subTest(case=case):
+                self.assertEqual(diagnose(valid, case=case)["roleReadiness"]["consumerAdmission"],
+                                 {"blocker": "fixture", "waits": 1, "transactionAge": "30s-to-60s"})
+                self.assertNotIn("roleReadiness", diagnose(valid, case=case, end="pass"))
+        empty = prefix + " blocker=unknown waits=0 transaction-age=unknown"
+        self.assertEqual(diagnose(empty)["roleReadiness"]["consumerAdmission"],
+                         {"blocker": "unknown", "waits": 0, "transactionAge": "unknown"})
+        self.assertNotIn("consumerAdmission", diagnose(prefix)["roleReadiness"])
+
+        invalid = (
+            ("blocker=fixture", "blocker=fixture-secret"),
+            ("waits=1", "waits=65"),
+            ("waits=1", "waits=0"),
+            ("transaction-age=30s-to-60s", "transaction-age=fixture-secret"),
+            ("phase=initial-delivery", "phase=restored-base"),
+            ("stage=open-enter-v2", "stage=open-enter-v3"),
+            ("cancel=statement-timeout", "cancel=user-request"),
+            ("context=active", "context=deadline"),
+            ("site=consumer-admission", "site=global-coordinator"),
+        )
+        for before, after in invalid:
+            with self.subTest(before=before):
+                observed = diagnose(valid.replace(before, after))
+                self.assertNotIn("roleReadiness", observed)
+                self.assertNotIn("fixture-secret", json.dumps(observed))
 
     def test_role_delta_on_matched_roles_projection_rejects_other_content(self):
         source = "cmd/kaname/installation_newman_retirement_test.go"
