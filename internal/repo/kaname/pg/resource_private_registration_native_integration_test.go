@@ -19,6 +19,7 @@ import (
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
 	"github.com/PRO-Robotech/kaname/internal/testsupport/registrationscene"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -86,7 +87,18 @@ func TestResourcePrivateRegisterActualEntry(t *testing.T) {
 		require.Contains(t, sqlErr.Message, "permission denied for function")
 		require.ErrorAs(t, r.admin.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
 		require.Equal(t, "42501", sqlErr.Code)
-		require.Contains(t, sqlErr.Message, "signed resource frame")
+		require.Equal(t, "authority transaction attestation required", sqlErr.Message)
+
+		tx, err := r.admin.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+		require.NoError(t, err)
+		lifecycleRollback(t, tx)
+		r.enter(t, tx, r.intent(r.a), "participant")
+		var kind string
+		require.NoError(t, tx.QueryRow(ctx, `SELECT kaname.authority_protocol_attestation()->>'kind'`).Scan(&kind))
+		require.Equal(t, string(kaname.AuthorityGroup), kind)
+		require.ErrorAs(t, tx.QueryRow(ctx, query).Scan(new(json.RawMessage)), &sqlErr)
+		require.Equal(t, "42501", sqlErr.Code)
+		require.Equal(t, "generation participant requires signed resource frame", sqlErr.Message)
 	})
 	t.Run("genuine private Register commits all effects", func(t *testing.T) {
 		input := makeIntent(0, "private-registration-positive")
