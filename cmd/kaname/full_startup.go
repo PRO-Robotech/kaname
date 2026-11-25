@@ -120,10 +120,16 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 		return nil, fmt.Errorf("authority-protocol role dependency is ambiguous")
 	}
 	var roleWriters *kanamepg.RolePolicyWriters
+	var userLabels kaname.UserAccessLabelsWriter
 	if len(roleDependencies) == 1 {
 		roleWriters = roleDependencies[0]
 		if err := roleWriters.ValidateFor(repo, profile.bundle); err != nil {
 			return nil, fmt.Errorf("authority-protocol role dependency: %w", err)
+		}
+		var err error
+		userLabels, err = roleWriters.InstalledUserAccessLabels(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("authority-protocol user access labels installation: %w", err)
 		}
 	}
 	if svcs.accessBindingHandler == nil || svcs.roleHandler == nil || svcs.groupHandler == nil ||
@@ -229,6 +235,12 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, fmt.Errorf("metadata access label installation: %w", err)
 	}
+	if userLabels != nil {
+		if svcs.userHandler == nil {
+			return nil, fmt.Errorf("authority-protocol user handler is absent")
+		}
+		svcs.userHandler.WithUserAccessLabelsWriter(userLabels)
+	}
 	// Правка метаданных и CRUD используют разные программы записи.
 	svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadataPorts)
 	svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadataPorts)
@@ -319,6 +331,12 @@ func wirePublishedFullStartupServices(ctx context.Context, publication *publishe
 	svcs.grantDelegationRevoke.WithRevokeAuthorityWriter(writers)
 	svcs.childRegistrationHandler = childregistrationapp.NewHandler(internaliamapp.NewUserChildRegistration(writers))
 	svcs.internalIAMHandler.WithChildParentClose(writers)
+	if generation.userLabels != nil {
+		if svcs.userHandler == nil {
+			return nil, fmt.Errorf("published user handler is absent")
+		}
+		svcs.userHandler.WithUserAccessLabelsWriter(writers)
+	}
 	return &fullStartupParticipants{objects: objects, bindings: writers}, nil
 }
 

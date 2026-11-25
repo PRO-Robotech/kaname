@@ -5,9 +5,12 @@ package main
 
 import (
 	"context"
+	"errors"
 
 	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/kaname/internal/authzsnapshot"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 )
 
@@ -82,6 +85,39 @@ func (r publishedServiceAccountAccessLabels) ServiceAccountAccessLabelsWriter(ct
 		return nil, kaname.ErrSemanticIdentityUnavailable
 	}
 	return writer.ServiceAccountAccessLabelsWriter(pinned, value, mask, actor)
+}
+
+func (r *publishedWriterGenerations) userLabelsForRequest(ctx context.Context) (context.Context, kaname.UserAccessLabelsWriter, error) {
+	if err := ctx.Err(); err != nil {
+		return ctx, nil, err
+	}
+	if _, ok := authzsnapshot.FromContext(ctx); !ok {
+		return ctx, nil, errors.Join(iamerr.ErrUnavailable, authzsnapshot.ErrUnconfirmed)
+	}
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return pinned, nil, err
+	}
+	if generation.userLabels == nil {
+		return pinned, nil, iamerr.ErrUnavailable
+	}
+	return pinned, generation.userLabels, nil
+}
+
+func (r *publishedWriterGenerations) CreateUserAccessLabelsOperation(ctx context.Context, pending operations.Operation) error {
+	pinned, writer, err := r.userLabelsForRequest(ctx)
+	if err != nil {
+		return err
+	}
+	return writer.CreateUserAccessLabelsOperation(pinned, pending)
+}
+
+func (r *publishedWriterGenerations) UpdateUserAccessLabels(ctx context.Context, id domain.UserID, labels, accessLabels domain.Labels, actor domain.Subject, pending operations.Operation) (operations.Operation, bool, error) {
+	pinned, writer, err := r.userLabelsForRequest(ctx)
+	if err != nil {
+		return operations.Operation{}, false, err
+	}
+	return writer.UpdateUserAccessLabels(pinned, id, labels, accessLabels, actor, pending)
 }
 
 func (r *publishedWriterGenerations) InstalledResourceMetadataUpdate(ctx context.Context) (kaname.ResourceMetadataUpdateWriter, error) {

@@ -48,6 +48,7 @@ type publishedWriterGeneration struct {
 	metadata      *kanamepg.MetadataMutationWriters
 	metadataPorts publishedMetadataPorts
 	roles         publishedRoleWriters
+	userLabels    kaname.UserAccessLabelsWriter
 	state         *kanamepg.ServiceAccountStateWriters
 	crud          *kanamepg.CRUDWriters
 	admission     *kanamepg.HumanAdmissionParticipant
@@ -153,6 +154,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 		return nil, err
 	}
 	var roles publishedRoleWriters = policy.writers
+	var userLabels kaname.UserAccessLabelsWriter
 	if r.rolePool != nil {
 		roleRepo := kanamepg.New(r.rolePool, nil)
 		roleContract, err := kanamepg.NewPublishedFullWriterContract(ctx, roleRepo, publication)
@@ -168,6 +170,10 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 			return nil, err
 		}
 		roles = roleWriters
+		userLabels, err = roleWriters.InstalledUserAccessLabels(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	metadataPorts, err := metadata.WithInstalledAccessLabels(ctx)
 	if err != nil {
@@ -202,7 +208,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	generation := &publishedWriterGeneration{
 		snapshot: snapshot, contract: contract, repo: repo, bundle: publication.Bundle,
 		catalog: catalog, cluster: cluster, invites: invites, policy: policy,
-		metadata: metadata, metadataPorts: metadataPorts, roles: roles, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
+		metadata: metadata, metadataPorts: metadataPorts, roles: roles, userLabels: userLabels, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
 	}
 	r.current = generation
 	return generation, nil
