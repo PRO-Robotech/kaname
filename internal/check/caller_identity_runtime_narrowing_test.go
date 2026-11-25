@@ -5,7 +5,6 @@ package check_test
 
 import (
 	"bytes"
-	"context"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -55,9 +54,12 @@ func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) 
 
 	callerRunNamed(t, root, "./internal/authzguard", callerAdmissionTest)
 	callerRunNamed(t, root, "./internal/restfront", callerNarrowingControl)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	ctx, cancel := callerFullTreeTestContext(t)
 	defer cancel()
+	t.Log("Check с записью: обход начат")
+	started := time.Now()
 	lawful, err := check.CheckNarrowingWitnessForTest(ctx, root, liveCallerDeclarations())
+	t.Logf("Check с записью: обход занял %s", time.Since(started))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +81,10 @@ func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) 
 		t.Fatalf("законный близнец не обнаружил %s в %s", handler, where)
 	}
 	slices.Sort(want)
+	t.Log("Check без записи: обход начат")
+	started = time.Now()
 	negative, err := check.CheckNarrowingWitnessForTest(ctx, missing, liveCallerDeclarations())
+	t.Logf("Check без записи: обход занял %s", time.Since(started))
 	if err != nil {
 		t.Fatal(err)
 	}
