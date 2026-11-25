@@ -97,7 +97,7 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, domain.ResourceMetadata{
 		ResourceType: dotted, ResourceID: id,
-		Labels: map[string]string{"owner": ordinary["owner"]}, AccessLabels: map[string]string{"team": access["team"]},
+		Labels: map[string]string{"owner": string(ordinary["owner"])}, AccessLabels: map[string]string{"team": string(access["team"])},
 	}, actual)
 	var initial, final struct {
 		Mirror           [][]json.RawMessage
