@@ -27,6 +27,7 @@ func (g *callerGraph) collectCallerLifetime() {
 		source := func(expr ast.Expr) valueSrc {
 			return valueSrc{pkg: body.sp, fk: callerKey(node), expr: expr, tuple: -1}
 		}
+		g.indexUnpublishedMapWrites(body, source)
 		ast.Inspect(body.node, func(n ast.Node) bool {
 			if _, nested := n.(*ast.FuncLit); nested {
 				return false
@@ -504,8 +505,14 @@ func (p *callerLifetimeProbe) containsDirectReceiverValue(src valueSrc, lit *ast
 
 func (p *callerLifetimeProbe) objectWrites(object callerObjectKey) bool {
 	var adjacentOwners callerContainerObjectReuse
+	sliceAllocation := callerLiteralSliceAllocation(object)
 	for _, write := range p.g.lifetimeWrites {
 		if !p.g.callerLifetimeEffectPossible(write.owner) {
+			adjacentOwners = callerContainerObjectReuse{}
+			continue
+		}
+		if sliceAllocation && p.separateUnpublishedMapWrite(write) {
+			p.g.work.UnpublishedMapWriteSkips++
 			adjacentOwners = callerContainerObjectReuse{}
 			continue
 		}

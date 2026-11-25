@@ -82,6 +82,7 @@ type callerGraph struct {
 	projectedStoreCells   map[*ast.SelectorExpr]map[*types.Var]bool // Только неизменяемые источники адреса записи.
 	localAppendBuilders   map[*types.Var]bool                       // Полные лексические доказательства; не ответы resolver.
 	closedMapHandles      map[*types.Var]callerObjectKey            // Точный initializer либо отсутствие полного source proof.
+	unpublishedMapWrites  map[callerLifetimeWrite]*types.Var        // Записи в ещё не опубликованную локальную карту.
 	lifetimeWrites        []callerLifetimeWrite
 	lifetimeWriteIndex    *callerLifetimeWriteIndex
 	containerInactive     *callerContainerInactiveMemo
