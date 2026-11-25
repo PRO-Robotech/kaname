@@ -399,11 +399,12 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 		bytes += len(data)
 		return nil
 	}
-	projectUnderAccount := false
+	projectUnderAccount, protectedProjectUnderAccount := false, false
 	types := map[string]bool{}
 	for _, sel := range bs.Selectors {
 		if sel.Container != nil && sel.Container.Type == domain.ScopeTypeAccountDotted && slices.Contains(sel.ObjectTypes, domain.ScopeTypeProjectDotted) {
 			projectUnderAccount = true
+			protectedProjectUnderAccount = protectedProjectUnderAccount || sel.Arm == domain.ArmAccessLabels
 		}
 		for _, typ := range sel.ObjectTypes {
 			types[typ] = true
@@ -472,7 +473,8 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 					}
 				}
 				var input reconcile.CapturedObjectDiff
-				if projectUnderAccount && present && typ == domain.ScopeTypeProjectDotted {
+				projectCoordinate := projectUnderAccount && present && typ == domain.ScopeTypeProjectDotted
+				if projectCoordinate && bindingCanSelectNativeOwner(bs, obj) {
 					graph, err := parents.captureProjectObjectGraph(ctx, oid)
 					if err != nil {
 						return nil, err
@@ -480,11 +482,19 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 					if err = retainBindingProjectOwner(obj, &graph); err != nil {
 						return nil, err
 					}
+					if protectedProjectUnderAccount && len(graph.Ancestors) != 0 {
+						if err = parents.confirmBindingProjectOwnerEdge(ctx, obj, graph); err != nil {
+							return nil, err
+						}
+					}
 					input, e = p.engine.CaptureStagedProjectCoordinate(ctx, coordinateStore, bs, obj, graph)
 				} else {
-					ancestors, err := store.AncestorObjects(ctx, typ, oid)
-					if err != nil {
-						return nil, err
+					var ancestors []domain.MirrorObject
+					if !projectCoordinate {
+						ancestors, e = store.AncestorObjects(ctx, typ, oid)
+						if e != nil {
+							return nil, e
+						}
 					}
 					input, e = p.engine.CaptureStagedBindingCoordinate(ctx, coordinateStore, bs, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, obj, present, ancestors)
 				}
@@ -603,18 +613,93 @@ func bindingCoordinatePage(ctx context.Context, tx pgx.Tx, bs reconcile.BindingS
 	return ids, rows.Err()
 }
 
+// В пообъектной выдаче целью вложенной ветви служит выбранный аккаунт.
+func bindingCanSelectNativeOwner(bs reconcile.BindingScope, project domain.MirrorObject) bool {
+	if len(project.ParentAccountIDs) != 1 {
+		return false
+	}
+	owner := project.ParentAccountIDs[0]
+	if bs.Scope.Type != "cluster" && (bs.Scope.Type != "account" || bs.Scope.ID != owner) {
+		return false
+	}
+	return len(bs.Target.Resources) == 0 || bs.Target.Contains(domain.ScopeTypeAccountDotted, owner)
+}
+
+// Для защищённой ветви проверяем исходные строки: свёртка ancestors теряет
+// глубину, повторы аккаунта и рёбра прочих типов. Это тот же RR capture.
+func (p *resourceParentCapture) confirmBindingProjectOwnerEdge(ctx context.Context, project domain.MirrorObject, graph resourceeffect.ProjectGraphProjection) error {
+	child, err := p.catalog(ctx, domain.ScopeTypeProjectDotted)
+	if err != nil {
+		return err
+	}
+	parent, err := p.catalog(ctx, domain.ScopeTypeAccountDotted)
+	if err != nil {
+		return err
+	}
+	childModel, childOK := child.selected()
+	parentModel, parentOK := parent.selected()
+	if !childOK || !childModel.live || childModel.identity.Dotted != domain.ScopeTypeProjectDotted ||
+		!parentOK || !parentModel.live || parentModel.identity.Dotted != domain.ScopeTypeAccountDotted {
+		return kaname.ErrSourceUnconfirmed
+	}
+	rows, err := p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceParentEdges, typ: childModel.identity.ObjectType, id: project.ObjectID})
+	if err != nil {
+		return err
+	}
+	if err = p.source.budget.Charge(len(rows), 0); err != nil {
+		return err
+	}
+	return verifyBindingProjectOwnerEdge(project, graph, childModel.identity.ObjectType, parentModel.identity.ObjectType, rows)
+}
+
+func verifyBindingProjectOwnerEdge(project domain.MirrorObject, graph resourceeffect.ProjectGraphProjection, childModel, parentModel string, rows []resourceSourceRow) error {
+	if len(project.ParentAccountIDs) != 1 || len(graph.Ancestors) != 1 ||
+		graph.Ancestors[0].ObjectType != domain.ScopeTypeAccountDotted || graph.Ancestors[0].ObjectID != project.ParentAccountIDs[0] {
+		return kaname.ErrSourceUnconfirmed
+	}
+	// Обычное согласование допускает посторонние рёбра. Право на нативные
+	// метки подтверждает единственное прямое ребро именно его владельца.
+	ownerEdges := 0
+	for _, row := range rows {
+		var edge struct {
+			ObjectType string `json:"object_type"`
+			ObjectID   string `json:"object_id"`
+			ParentType string `json:"parent_type"`
+			ParentID   string `json:"parent_id"`
+			Depth      int    `json:"depth"`
+		}
+		if json.Unmarshal(row.value, &edge) != nil || edge.ObjectType != childModel || edge.ObjectID != project.ObjectID {
+			return kaname.ErrSourceUnconfirmed
+		}
+		if edge.ParentType != parentModel || edge.ParentID != project.ParentAccountIDs[0] {
+			continue
+		}
+		if edge.Depth != 1 {
+			return kaname.ErrSourceUnconfirmed
+		}
+		ownerEdges++
+	}
+	if ownerEdges != 1 {
+		return kaname.ErrSourceUnconfirmed
+	}
+	return nil
+}
+
 // Вложенная выдача на нативный проект требует совпадения владельца в
 // собственной строке, в зеркале и в типизированном наборе рёбер проекта.
 func retainBindingProjectOwner(project domain.MirrorObject, graph *resourceeffect.ProjectGraphProjection) error {
 	if graph.Object == nil {
 		return nil
 	}
-	if len(project.ParentAccountIDs) != 1 || !slices.Equal(graph.Object.ParentAccountIDs, project.ParentAccountIDs) {
+	if len(project.ParentAccountIDs) != 1 {
 		return kaname.ErrSourceUnconfirmed
 	}
 	graph.Ancestors = slices.DeleteFunc(graph.Ancestors, func(a domain.MirrorObject) bool {
 		return a.ObjectType != domain.ScopeTypeAccountDotted || a.ObjectID != project.ParentAccountIDs[0]
 	})
+	if len(graph.Ancestors) > 0 && !slices.Equal(graph.Object.ParentAccountIDs, project.ParentAccountIDs) {
+		return kaname.ErrSourceUnconfirmed
+	}
 	return nil
 }
 

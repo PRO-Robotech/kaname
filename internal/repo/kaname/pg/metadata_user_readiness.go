@@ -24,10 +24,10 @@ WITH root AS (
          '9886259fc2bb278e7bae5123f5df0ae56ddf4f1bb8220ad8e2edb03e71a98ddd',
          'pg_catalog.bool', NULL::text[], true, 's'),
         ('kaname._authority_metadata_user_exports_v1(oid,boolean)',
-         '7e2713d6c7e64c7e52c385a366c8d2463cfd514fc6710fa8f007d8d605589858',
+         'd2067328045b913de7a59d7012f3a43115bbb2546880a786fa44c22aa0e9130e',
          'pg_catalog.regprocedure[]', ARRAY['p_executor','p_installed'], false, 's'),
         ('kaname.authority_metadata_user_install_v1(regrole,regrole,boolean)',
-         'a0d2827d9e324f24bef752754a4b6e39c75da8ee4cea01f4e4cfeb3e6260d895',
+         'cc500d3cb15257e541a264b87f0cd8e82df5eddb2de254f76bce8a5e4aa7c05d',
          'pg_catalog.void', ARRAY['p_runtime','p_executor','p_enable'], false, 'v')
 ), verified AS (
     SELECT p.oid
