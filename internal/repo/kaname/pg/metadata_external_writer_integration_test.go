@@ -4,7 +4,18 @@
 package pg_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"github.com/PRO-Robotech/corelib/grpcsrv"
+	"github.com/PRO-Robotech/corelib/operations"
+	"github.com/PRO-Robotech/corelib/operations/operationspb"
+	resourceapi "github.com/PRO-Robotech/kaname/internal/apps/kaname/api/resource_metadata"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
+	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 	"testing"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
@@ -27,15 +38,13 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
  VALUES($1::uuid,'after')`, definition)
 	require.NoError(t, err)
 	seedMetadataActualApplySource(t, r, actorID, definition)
-	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.relation_fact(object_type,object_id,relation,subject)
- VALUES($1,$2,'v_update',$3)`, model, id, "user:"+actorID)
-	require.NoError(t, err)
 	require.NoError(t, owner.PrepareAuthorityBundle(r.ctx, r.bundle))
 	w := metadataFixtureModeWithRig(t, false, "prepared", r)
 	_, err = r.admin.Exec(r.ctx, `INSERT INTO kaname.resource_mirror
- (object_type,object_id,parent_account_id,parent_project_id)
- VALUES ($1,$2,$3,$4),('compute.instance',$2,$3,$4)`, dotted, id, r.a, string(w.project.ID))
+ (object_type,object_id,parent_account_id,parent_project_id,source_version)
+ VALUES ($1,$2,$3,$4,'2026-11-14T10:00:00Z'),('compute.instance',$2,$3,$4,DEFAULT)`, dotted, id, r.a, string(w.project.ID))
 	require.NoError(t, err)
+	seedExternalMetadataUpdateBinding(t, r, actorID, model, id, string(w.project.ID))
 	installExternalRegistrationReceiptProbe(t, r)
 	readState := func() json.RawMessage {
 		t.Helper()
@@ -70,15 +79,14 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	update := func() (domain.ResourceMetadata, error) {
 		return w.factory.UpdateExternalMetadataForTest(r.ctx, root, ordinary, access, []string{"labels", "access_labels"}, actor)
 	}
-	// Сначала у роли нет доступа к закрытой обёртке. Даём его только в
-	// тестовой БД, чтобы выполнить настоящий Go-путь без публичного API.
+	// Потеря EXECUTE прерывает запись. Штатная повторная установка восстанавливает фасад.
 	role := pgx.Identifier{r.role}.Sanitize()
-	_, err = r.admin.Exec(r.ctx, "GRANT UPDATE (labels) ON kaname.resource_mirror TO "+role)
+	_, err = r.admin.Exec(r.ctx, "REVOKE EXECUTE ON FUNCTION kaname.authority_metadata_mirror_apply_v1(text,text) FROM "+role)
 	require.NoError(t, err)
 	_, err = update()
 	require.ErrorIs(t, err, iamerr.ErrPermissionDenied)
 	require.JSONEq(t, string(before), string(readState()))
-	_, err = r.admin.Exec(r.ctx, "GRANT EXECUTE ON FUNCTION kaname.authority_metadata_mirror_write_v1(text,text) TO "+role)
+	_, err = r.admin.Exec(r.ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, r.role)
 	require.NoError(t, err)
 	// Ошибка последней записи должна откатить уже выполненные UPDATE и audit INSERT.
 	_, err = r.admin.Exec(r.ctx, `CREATE FUNCTION kaname.test_external_metadata_queue_failure() RETURNS trigger
@@ -93,12 +101,86 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	_, err = r.admin.Exec(r.ctx, `DROP TRIGGER test_external_metadata_queue_failure ON kaname.resource_reconcile_outbox;
  DROP FUNCTION kaname.test_external_metadata_queue_failure()`)
 	require.NoError(t, err)
-	actual, err := update()
+	// Проверки используют текущую LOGIN-роль и настоящую таблицу операций.
+	principal := operations.Principal{Type: "user", ID: actorID}
+	ctx := grpcsrv.WithTrustedACR(grpcsrv.WithTrustedPrincipal(operations.WithPrincipal(r.ctx, principal), principal, true), "1", true)
+	ops := operations.NewRepo(r.runtime, "kaname")
+	adapter := w.factory.ExternalMetadataOperationForTest()
+	inspect := &metadataOperationProbe{writer: adapter, ops: ops, mode: "cancel"}
+	uc, err := resourceapi.NewUpdateUseCase(inspect, ops)
 	require.NoError(t, err)
-	require.Equal(t, domain.ResourceMetadata{
-		ResourceType: dotted, ResourceID: id,
-		Labels: map[string]string{"owner": string(ordinary["owner"])}, AccessLabels: map[string]string{"team": string(access["team"])},
-	}, actual)
+	input := resourceapi.UpdateInput{ResourceType: dotted, ResourceID: id, Labels: ordinary, AccessLabels: access, UpdateMask: []string{"labels", "access_labels"}}
+	for _, rejected := range []context.Context{
+		operations.WithPrincipal(r.ctx, principal),
+		grpcsrv.WithTrustedACR(ctx, "", true),
+		operations.WithPrincipal(ctx, operations.Principal{Type: "user", ID: actorID + "-other"}),
+	} {
+		_, err = uc.Execute(rejected, input)
+		require.Equal(t, codes.PermissionDenied, status.Code(err))
+	}
+	require.Zero(t, inspect.calls)
+	_, err = uc.Execute(ctx, input)
+	require.Equal(t, codes.Canceled, status.Code(err))
+	require.JSONEq(t, string(before), string(readState()))
+	inspect.mode = "terminal-failure"
+	_, err = r.admin.Exec(ctx, `CREATE FUNCTION kaname.test_mirror_operation_fail() RETURNS trigger LANGUAGE plpgsql
+ AS $$ BEGIN RAISE EXCEPTION 'terminal operation failed'; END; $$;
+ CREATE TRIGGER test_mirror_operation_fail AFTER UPDATE ON kaname.operations FOR EACH ROW
+ WHEN (NEW.done AND NEW.response_type IS NOT NULL) EXECUTE FUNCTION kaname.test_mirror_operation_fail()`)
+	require.NoError(t, err)
+	_, err = uc.Execute(ctx, input)
+	require.Error(t, err)
+	failed, err := ops.GetOwned(ctx, inspect.id, operations.OwnerFromPrincipal(principal))
+	require.NoError(t, err)
+	require.True(t, failed.Done)
+	require.NotNil(t, failed.Error)
+	require.Nil(t, failed.Response)
+	require.JSONEq(t, string(before), string(readState()))
+	_, err = r.admin.Exec(ctx, `DROP TRIGGER test_mirror_operation_fail ON kaname.operations; DROP FUNCTION kaname.test_mirror_operation_fail()`)
+	require.NoError(t, err)
+	// Драйвер потерял подтверждение после настоящего commit: use case обязан
+	// восстановить сохранённый typed response. Второго вызова записи здесь нет.
+	// Sequence не откатывается вместе с транзакцией. Первая попытка
+	// срывается уже после записи зеркала; вторая фиксирует тот же op.ID.
+	_, err = r.admin.Exec(ctx, `CREATE SEQUENCE kaname.test_mirror_operation_attempt;
+ CREATE FUNCTION kaname.test_mirror_operation_retry() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+ BEGIN
+  IF nextval('kaname.test_mirror_operation_attempt'::regclass)=1 THEN
+   RAISE EXCEPTION 'test retry' USING ERRCODE='40001';
+  END IF;
+  RETURN NEW;
+ END; $$;
+ CREATE TRIGGER test_mirror_operation_retry AFTER UPDATE ON kaname.operations FOR EACH ROW
+ WHEN (NEW.done AND NEW.response_type IS NOT NULL) EXECUTE FUNCTION kaname.test_mirror_operation_retry()`)
+	require.NoError(t, err)
+	inspect.mode = "lost-ack"
+	done, err := uc.Execute(ctx, input)
+	require.NoError(t, err)
+	require.True(t, done.Done)
+	require.Equal(t, inspect.id, done.ID)
+	require.NotNil(t, inspect.direct)
+	require.True(t, proto.Equal(operationspb.ToProto(inspect.direct), operationspb.ToProto(done)))
+	require.Equal(t, 3, inspect.calls)
+	key, ok := kaname.MirrorMetadataOperationKey(root)
+	require.True(t, ok)
+	var attempts, opCount, successCount int
+	require.NoError(t, r.admin.QueryRow(ctx, `SELECT last_value,
+ (SELECT count(*) FROM ONLY kaname.operations WHERE resource_id=$1 AND principal_id=$2),
+ (SELECT count(*) FROM ONLY kaname.operations WHERE resource_id=$1 AND principal_id=$2 AND done AND response_type IS NOT NULL)
+ FROM kaname.test_mirror_operation_attempt`, key, principal.ID).Scan(&attempts, &opCount, &successCount))
+	require.Equal(t, 2, attempts)
+	require.Equal(t, 3, opCount)
+	require.Equal(t, 1, successCount)
+	var actual iamv1.ResourceMetadata
+	require.NoError(t, done.Response.UnmarshalTo(&actual))
+	require.Equal(t, dotted, actual.GetResourceType())
+	require.Equal(t, id, actual.GetResourceId())
+	require.Equal(t, map[string]string{"owner": "team-red"}, actual.GetLabels())
+	require.Equal(t, map[string]string{"team": "after"}, actual.GetAccessLabels())
+	var storedAccount string
+	require.NoError(t, r.runtime.QueryRow(ctx, `SELECT account_id FROM ONLY kaname.operations WHERE id=$1`, done.ID).Scan(&storedAccount))
+	require.Equal(t, r.a, storedAccount)
 	var initial, final struct {
 		Mirror           [][]json.RawMessage
 		Binding          json.RawMessage
@@ -118,4 +200,34 @@ func TestExternalMetadataOwnerWriteCompletesAtomically(t *testing.T) {
 	require.NoError(t, json.Unmarshal(final.Mirror[1][2], &stored))
 	require.Equal(t, actual.Labels, stored.Labels)
 	require.Equal(t, actual.AccessLabels, stored.AccessLabels)
+	t.Run("ordinary-and-noop-after-protected", func(t *testing.T) {
+		exerciseOrdinaryMirrorOperation(t, r, w.factory, root, ctx, principal)
+	})
+	t.Run("signed Register against retained protected labels", func(t *testing.T) {
+		checkSignedRegistrationVersions(t, r, owner, root, w.project.ID, actorID, definition, readState)
+	})
+}
+
+type metadataOperationProbe struct {
+	direct   *operations.Operation
+	writer   kaname.ResourceMetadataUpdateWriter
+	ops      operations.FullRepo
+	mode, id string
+	calls    int
+}
+
+func (p *metadataOperationProbe) UpdateResourceMetadata(ctx context.Context, root domain.ResourceRef, labels, access domain.Labels, mask []string, pending operations.Operation) (*operations.Operation, error) {
+	p.calls++
+	p.id = pending.ID
+	if p.mode == "cancel" {
+		if _, err := p.ops.CancelOwned(ctx, p.id, operations.OwnerFromPrincipal(pending.Principal)); err != nil {
+			return nil, err
+		}
+	}
+	done, err := p.writer.UpdateResourceMetadata(ctx, root, labels, access, mask, pending)
+	if err == nil && p.mode == "lost-ack" {
+		p.direct = done
+		return nil, errors.New("transport lost after commit")
+	}
+	return done, err
 }
