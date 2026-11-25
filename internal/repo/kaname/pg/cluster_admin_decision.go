@@ -32,6 +32,10 @@ func (p *ClusterAdminParticipant) validateDecisionModel() error {
 	if err != nil {
 		return err
 	}
+	return validateSystemAdminDecisionModel(model)
+}
+
+func validateSystemAdminDecisionModel(model *authzplan.Model) error {
 	typ := model.Type("cluster")
 	if typ == nil {
 		return kaname.ErrSourceUnconfirmed

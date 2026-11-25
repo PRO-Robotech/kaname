@@ -72,7 +72,16 @@ func (c *liveAdministrativeChecker) Check(ctx context.Context, subject, relation
 	return allowed, err
 }
 func newLiveAdministrativeChecker(w *authorityWriteTx, bundle *granteffect.Bundle) kaname.RelationChecker {
-	if w == nil || w.tx == nil || bundle.Validate() != nil {
+	return newAdministrativeSourceChecker(w, bundle, (*nativeAdministrativeSources).verify)
+}
+
+// Проверка происхождения получает ту же TX и тот же бюджет, что и native form.
+func newAdministrativeSourceChecker(
+	w *authorityWriteTx,
+	bundle *granteffect.Bundle,
+	verify func(*nativeAdministrativeSources, context.Context, relverdict.AdministrativeFact, *relverdict.AdministrativeReadBudget) (bool, error),
+) kaname.RelationChecker {
+	if w == nil || w.writeTx == nil || w.tx == nil || bundle.Validate() != nil || verify == nil {
 		return &liveAdministrativeChecker{}
 	}
 	var halves catalog.Halves
@@ -80,7 +89,9 @@ func newLiveAdministrativeChecker(w *authorityWriteTx, bundle *granteffect.Bundl
 		return &liveAdministrativeChecker{}
 	}
 	sources := &nativeAdministrativeSources{w: w, bundle: bundle, catalogRelations: mutationCatalogRelations(halves)}
-	form := relverdict.NewAdministrativeAsker(w.tx, bundle, func() time.Time { return w.fence.decisionAt }, sources.verify)
+	form := relverdict.NewAdministrativeAsker(w.tx, bundle, func() time.Time { return w.fence.decisionAt }, func(ctx context.Context, f relverdict.AdministrativeFact, budget *relverdict.AdministrativeReadBudget) (bool, error) {
+		return verify(sources, ctx, f, budget)
+	})
 	if w.nativeRead != nil {
 		form.BindReadBoundary(w.nativeRead, w.nativeRead.budget)
 	} else if w.producerBudget != nil {
