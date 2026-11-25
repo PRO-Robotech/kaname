@@ -351,6 +351,7 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 			assertActiveRows(t, newFP)
 			check(t, recipient, "v_get", "project:"+string(project.ID), true)
 			require.Equal(t, beforeRights, grantState(t, true))
+			checkBindingProjectCustody(t, r, binding.ID)
 		}
 	})
 }
