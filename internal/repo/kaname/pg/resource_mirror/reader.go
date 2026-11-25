@@ -403,6 +403,8 @@ func AncestorsSnapshot(ctx context.Context, q querier, objectType, objectID stri
 // (kaname#874): кандидаты вложенного правила, пообъектно. Обход — индексом рёбер
 // по предку (`resource_parent_edge_by_parent`), поэтому стоимость следует числу
 // потомков выбранных контейнеров, а не размеру таблицы рёбер.
+// Для проекта под аккаунтом зеркало подтверждает старые обычные метки и ребро.
+// Защищённые пары принадлежат собственной строке проекта в этом аккаунте.
 func DescendantsOf(ctx context.Context, q querier, types []string, containerType string, containerIDs []string) ([]MirrorRow, error) {
 	if len(types) == 0 || len(containerIDs) == 0 {
 		return nil, nil
@@ -410,7 +412,9 @@ func DescendantsOf(ctx context.Context, q querier, types []string, containerType
 	rows, err := q.Query(ctx,
 		`SELECT DISTINCT m.object_type, m.object_id, m.parent_project_id,
 		        COALESCE(NULLIF(m.parent_account_id, ''), pj.account_id, '') AS parent_account_id,
-		        m.labels,m.access_labels
+		        m.labels, CASE WHEN cc.dotted='iam.account' AND co.dotted='iam.project'
+					THEN COALESCE(native_project.access_labels,'{}'::jsonb)
+					ELSE m.access_labels END
 		   FROM kaname.catalog_resource cc
 		   JOIN kaname.resource_parent_edge pe
 		     ON pe.parent_type = cc.object_type AND pe.parent_id = ANY($3)
@@ -419,6 +423,13 @@ func DescendantsOf(ctx context.Context, q querier, types []string, containerType
 		   JOIN kaname.resource_mirror m
 		     ON m.object_type = co.dotted AND m.object_id = pe.object_id
 		   LEFT JOIN kaname.projects pj ON pj.id = m.parent_project_id
+		   LEFT JOIN ONLY kaname.projects native_project
+		     ON cc.dotted='iam.account' AND co.dotted='iam.project'
+		    AND native_project.id=m.object_id AND native_project.account_id=ANY($3)
+		    AND EXISTS (SELECT FROM ONLY kaname.resource_parent_edge owner_edge
+		         WHERE owner_edge.object_type=co.object_type AND owner_edge.object_id=m.object_id
+		           AND owner_edge.parent_type=cc.object_type AND owner_edge.parent_id=native_project.account_id)
+		    AND native_project.account_id=COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,'')
 		  WHERE cc.dotted = $2 AND cc.live
 		  ORDER BY m.object_type ASC, m.object_id ASC`,
 		types, containerType, containerIDs,
