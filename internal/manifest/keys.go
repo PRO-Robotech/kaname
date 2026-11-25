@@ -65,20 +65,18 @@ func (f keyFault) Error() string {
 // разных написания, схлопывающихся в один ключ карты: назвав только первое,
 // проверка сообщила бы ровно половину того, что автор потерял.
 func checkStringKeys(n *yaml.Node) []keyFault {
-	var faults []keyFault
-	collectKeyFaults(n, &faults)
-	return faults
+	return collectKeyFaults(n, nil)
 }
 
-func collectKeyFaults(n *yaml.Node, out *[]keyFault) {
+func collectKeyFaults(n *yaml.Node, out []keyFault) []keyFault {
 	if n == nil {
-		return
+		return out
 	}
 	if n.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key := n.Content[i]
 			if key.Tag != "!!str" {
-				*out = append(*out, keyFault{
+				out = append(out, keyFault{
 					Line:    key.Line,
 					Column:  key.Column,
 					Literal: keyLiteral(key),
@@ -88,8 +86,9 @@ func collectKeyFaults(n *yaml.Node, out *[]keyFault) {
 		}
 	}
 	for _, c := range n.Content {
-		collectKeyFaults(c, out)
+		out = collectKeyFaults(c, out)
 	}
+	return out
 }
 
 // keyLiteral — как ключ написан в документе. У составного ключа (отображение или

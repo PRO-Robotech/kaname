@@ -161,7 +161,7 @@ type ceremonyUnitKey struct{}
 // ceremonyUnit — открытая транзакция единицы работы и оборот, названный в ней
 // первым шагом и ждущий преемника.
 type ceremonyUnit struct {
-	tx pgx.Tx
+	tx *pgxpool.Tx
 	// request — единица запроса, чью транзакцию единица работы продолжает;
 	// nil — своя транзакция (оборот токена обновления).
 	request *ceremonyRequest
@@ -183,13 +183,13 @@ const issuanceSavepoint = "ceremony_issuance"
 // всё, что операция пишет и читает после него, идёт в ней (см. шапку).
 type ceremonyRequest struct {
 	mu sync.Mutex
-	tx pgx.Tx
+	tx *pgxpool.Tx
 	// done — транзакция закреплена единицей работы либо урегулирована.
 	done bool
 }
 
 // open — транзакция запроса, если она открыта и не закреплена.
-func (rq *ceremonyRequest) open() (pgx.Tx, bool) {
+func (rq *ceremonyRequest) open() (*pgxpool.Tx, bool) {
 	rq.mu.Lock()
 	defer rq.mu.Unlock()
 	return rq.tx, rq.tx != nil && !rq.done
@@ -201,7 +201,7 @@ func requestFrom(ctx context.Context) (*ceremonyRequest, bool) {
 }
 
 // requestTx — открытая транзакция запроса операции, которой принадлежит ctx.
-func requestTx(ctx context.Context) (pgx.Tx, bool) {
+func requestTx(ctx context.Context) (*pgxpool.Tx, bool) {
 	rq, ok := requestFrom(ctx)
 	if !ok {
 		return nil, false
