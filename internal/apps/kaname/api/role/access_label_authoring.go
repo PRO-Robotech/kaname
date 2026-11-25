@@ -44,7 +44,7 @@ func projectWriterRoleRules(ctx context.Context, w Writer, role domain.Role, fal
 	if required {
 		return catalog.GrantProjection{}, iamerr.Wrapf(iamerr.ErrUnavailable, "Prepared role projection unavailable")
 	}
-	facts, err := writerRoleFacts(w, fallback)
+	facts, err := writerRoleFacts(ctx, w, fallback)
 	if err != nil {
 		return catalog.GrantProjection{}, err
 	}

@@ -147,7 +147,7 @@ func (s rolePolicySelection) runPrepared(ctx context.Context, repo Repo, r domai
 		// Фабрика уже удерживает весь mutation footprint и взяла final DB clock.
 		// Сама роль и её проекции пока OLD: собственная запись не доказывает право.
 		if create || rules {
-			err = roleGrantPolicy.content(ctx, w, actor, r, create)
+			err = grantpolicy.RequireRole(ctx, w, actor, r, create)
 			// RequireRole должен завершить все страницы и все scopes прежде,
 			// чем owner SQL получит подтверждение полного content gate.
 			if err == nil {
