@@ -268,5 +268,9 @@ func initialRegistrationConstraintMatches(c Constraint, obj domain.MirrorObject)
 			obj.CreatedBy != domain.FGASubjectRef(string(c.Region.Creator.Subject.Type), string(c.Region.Creator.Subject.ID))) {
 		return false
 	}
-	return obj.MatchesLabels(c.Region.Labels) && obj.MatchesAccessLabels(c.Region.AccessLabels)
+	if !obj.MatchesLabels(c.Region.Labels) {
+		return false
+	}
+	// Пустая карта ограничения не задаёт защищённого селектора.
+	return len(c.Region.AccessLabels) == 0 || obj.MatchesAccessLabels(c.Region.AccessLabels)
 }
