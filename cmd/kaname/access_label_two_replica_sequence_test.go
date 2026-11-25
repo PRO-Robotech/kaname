@@ -13,12 +13,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
 )
 
 type nativeAccessLabelDecision struct {
-	VGet      bool `json:"v_get"`
-	EffGet    bool `json:"eff_get"`
-	GetStatus int  `json:"get_status"`
+	VGet             bool `json:"v_get"`
+	VGetStatus       int  `json:"v_get_status"`
+	CatalogGet       bool `json:"catalog_get"`
+	CatalogGetStatus int  `json:"catalog_get_status"`
+	GetStatus        int  `json:"get_status"`
 }
 type nativeAccessLabelBaseline struct {
 	nativeAccessLabelDecision
@@ -54,33 +57,49 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 	require.NotNil(t, assertSameProcesses)
 	subject := "user:" + readerID
 	path := "/iam/v1/accounts/" + url.PathEscape(rootID)
-	check := func(want bool) nativeAccessLabelDecision {
+	check := func(stage string, pending bool) nativeAccessLabelDecision {
 		var observed nativeAccessLabelDecision
 		t.Helper()
 		assertSameProcesses()
-		for _, relation := range []string{"v_get", "eff_get"} {
+		for _, explicit := range []bool{true, false} {
+			request := map[string]any{
+				"subject": subject, "resource": map[string]string{"type": "account", "id": rootID},
+				"action": "iam.account.get",
+			}
+			if explicit {
+				request["requiredRelation"] = "v_get"
+			}
 			var result struct {
 				Allowed bool `json:"allowed"`
+				Code    int  `json:"code"`
 			}
-			code, err := readerB.JSON(ctx, http.MethodPost, "/iam/v1/authorize:check", readerBearer, map[string]any{
-				"subject": subject, "resource": map[string]string{"type": "account", "id": rootID},
-				"action": "iam.account.get", "requiredRelation": relation,
-			}, &result)
+			code, err := readerB.JSON(ctx, http.MethodPost, "/iam/v1/authorize:check", readerBearer, request, &result)
 			require.NoError(t, err)
-			require.Equal(t, http.StatusOK, code)
-			require.Equal(t, want, result.Allowed, "replica B's real %s verdict", relation)
-			if relation == "v_get" {
-				observed.VGet = result.Allowed
+			if pending && code == http.StatusServiceUnavailable {
+				require.Equal(t, int(codes.Unavailable), result.Code, "%s: Authorize.Check, явное отношение=%t", stage, explicit)
+				require.False(t, result.Allowed)
 			} else {
-				observed.EffGet = result.Allowed
+				require.Equal(t, http.StatusOK, code, "%s: Authorize.Check, явное отношение=%t", stage, explicit)
+				require.Equal(t, !pending, result.Allowed, "%s: Authorize.Check, явное отношение=%t", stage, explicit)
+			}
+			if explicit {
+				observed.VGet, observed.VGetStatus = result.Allowed, code
+			} else {
+				observed.CatalogGet, observed.CatalogGetStatus = result.Allowed, code
 			}
 		}
-		code, err := readerB.JSON(ctx, http.MethodGet, path, readerBearer, nil, nil)
+		var result struct {
+			Code int `json:"code"`
+		}
+		code, err := readerB.JSON(ctx, http.MethodGet, path, readerBearer, nil, &result)
 		require.NoError(t, err)
-		if want {
-			require.Equal(t, http.StatusOK, code)
-		} else {
-			require.Equal(t, http.StatusForbidden, code)
+		switch {
+		case !pending:
+			require.Equal(t, http.StatusOK, code, "%s: Account.Get", stage)
+		case code == http.StatusServiceUnavailable:
+			require.Equal(t, int(codes.Unavailable), result.Code, "%s: Account.Get", stage)
+		default:
+			require.Equal(t, http.StatusForbidden, code, "%s: Account.Get", stage)
 		}
 		observed.GetStatus = code
 		return observed
@@ -99,9 +118,9 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		require.Nil(t, operation.Error)
 		assertSameProcesses()
 	}
-	observations.Baseline.nativeAccessLabelDecision = check(true)
+	observations.Baseline.nativeAccessLabelDecision = check("baseline", false)
 	update(map[string]string{"team": "after", "keep": "yes"})
-	check(true)
+	check("retained-after-update", false)
 	// Дожидаемся первого пересчёта, чтобы его рабочий процесс уже освободил
 	// блокировки источников, когда начнём удерживать строку старого факта.
 	require.Eventually(t, func() bool {
@@ -117,7 +136,7 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 		observations.Retained.KeepingHolderPresent = keepingPresent
 		return err == nil && !losingPresent && keepingPresent
 	}, 45*time.Second, 50*time.Millisecond)
-	observations.Retained.nativeAccessLabelDecision = check(true)
+	observations.Retained.nativeAccessLabelDecision = check("retained", false)
 
 	// KEY SHARE совместим с SHARE при повторной сверке метаданных и задерживает
 	// удаление факта. Второй процесс читает своим обычным ограниченным LOGIN.
@@ -146,8 +165,8 @@ func runAccessLabelTwoReplicaSequence(t *testing.T, ctx context.Context,
 	require.True(t, physical, "the stale physical fact is deliberately still present")
 	require.True(t, dirty, "the exact committed metadata generation is pending")
 	require.False(t, fresh)
-	// Второй процесс обязан отклонить первый запрос после подтверждённого отзыва.
-	observations.Pending.nativeAccessLabelDecision = check(false)
+	// Только при подтверждённой незавершённой проекции допустимо Unavailable.
+	observations.Pending.nativeAccessLabelDecision = check("pending", true)
 	observations.Pending.PhysicalFactPresent, observations.Pending.DirtyFactPresent, observations.Pending.FactFresh = physical, dirty, fresh
 	require.NoError(t, barrier.Rollback(ctx))
 	assertSameProcesses()

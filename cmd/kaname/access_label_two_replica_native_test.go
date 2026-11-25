@@ -151,7 +151,7 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 	require.Equal(t, headBefore, headAfter)
 	require.Equal(t, before, after, "no migration ledger write during setup/bootstrap/observations")
 	observations := nativeAccessLabelObservations{
-		SchemaVersion: 1, Scenario: "access-label-two-replicas", BinarySHA256: f.session.BinarySHA256,
+		SchemaVersion: 2, Scenario: "access-label-two-replicas", BinarySHA256: f.session.BinarySHA256,
 		MigratorSHA256:      nativeAccessLabelDigest(t, os.Getenv("KANAME_RID_MIGRATOR")),
 		MigrationHeadBefore: headBefore, MigrationHeadAfter: headAfter, MigrationRowsUnchanged: true,
 		Baseline: sequence.Baseline, Retained: sequence.Retained, Pending: sequence.Pending,
