@@ -229,7 +229,7 @@ BEGIN
   "    IF p_sets ? 'commands' THEN\n        RETURN kaname._authority_role_move_active_finish_v1(p_sets,p_rows,p_reads);\n    END IF;\n    RETURN kaname.authority_role_move_pending_finalize_v1"
  ]
 ]$edits$::jsonb),
-        ('_authority_role_move_active_write_record_v1(integer,integer)','3c4fcecb0239a76b812a8fc8e257bc1b89c2bd7ca95acd9ac7d8f808c604dca7','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385',$edits$[
+        ('_authority_role_move_active_write_record_v1(integer,integer)','27b1481cea9bf6b0745b4f42edaaef22b73eb0dc61d9d72cae248d2bbe3d353d','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39',$edits$[
  [
   "    cursor_row:=cursor_row||jsonb_build_object('last_consumed',3,'outbox',outbox_image,'viewer_new',viewer_new);",
   "    -- Команда 4 относится к тому же transaction, seal и program ordinal.\n    -- Удаляем единственный OLD по полной физической версии. В PK участника входит rule_fp.\n    IF commands#>>'{3,Kind}' IS DISTINCT FROM 'member_delete' OR commands#>>'{3,Binding}' IS DISTINCT FROM bid\n        OR commands#>>'{3,Member,ObjectType}' IS DISTINCT FROM 'iam.project' OR commands#>>'{3,Member,ObjectID}' IS DISTINCT FROM pid\n        OR commands#>>'{3,RuleFP}' IS DISTINCT FROM witness#>>'{member_old,2,rule_fp}'\n        OR commands#>>'{3,RuleFP}' IS NOT DISTINCT FROM witness->>'new_rule_fp' THEN\n        RAISE EXCEPTION 'active removal differs from sealed old fingerprint' USING ERRCODE='42501';END IF;\n    DELETE FROM ONLY kaname.access_binding_target_members m WHERE m.binding_id=bid AND m.role_id=rid\n        AND m.object_type='iam.project' AND m.object_id=pid AND m.rule_fp=commands#>>'{3,RuleFP}'\n        AND jsonb_build_array(m.xmin::text,m.ctid::text,to_jsonb(m))=witness->'member_old'\n        RETURNING jsonb_build_array(m.xmin::text,m.ctid::text,to_jsonb(m)) INTO actual;\n    IF NOT FOUND OR actual IS DISTINCT FROM witness->'member_old' THEN\n        RAISE EXCEPTION 'active removed member is stale' USING ERRCODE='40001';END IF;\n    cursor_row:=cursor_row||jsonb_build_object('last_consumed',4,'outbox',outbox_image,\n        'viewer_new',viewer_new,'deleted_member',actual);"
@@ -245,7 +245,7 @@ BEGIN
   "used_rows:=used_rows+88;used_reads:=used_reads+35"
  ]
 ]$edits$::jsonb),
-        ('_authority_crud_storage_v3()','ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865','f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a',$edits$[
+        ('_authority_crud_storage_v3()','e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f','d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac',$edits$[
  [
   "32d277a02b227a7966b8339fc9aebe5ac4139fb71b95cf2a8535d390a46bd1c1",
   "bfdb783a77f06fe508970896135bbb7adb05356df4c1b71a573249d8eca59854"
@@ -267,48 +267,48 @@ BEGIN
   "5bac298f5f76bc4e6e72c7f595d2958c6947787b2b3f71aebe16d79b916bc24a"
  ],
  [
-  "3c4fcecb0239a76b812a8fc8e257bc1b89c2bd7ca95acd9ac7d8f808c604dca7",
-  "b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385"
+  "27b1481cea9bf6b0745b4f42edaaef22b73eb0dc61d9d72cae248d2bbe3d353d",
+  "28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39"
  ],
  [
   "a27e1d7ff966b37e669c91266f18cce4df76004d3ee8ae027ce82d995c28efba",
   "746076caf4015fe2c2c982edce229ae89d6d58a00268ffc52865b4c03be25ae8"
  ],
  [
-  " ('_authority_role_move_active_write_record_v1(integer,integer)','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385',false,'v',true,'private'),\n",
-  " ('_authority_role_move_active_write_record_v1(integer,integer)','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385',false,'v',true,'private'),\n ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','6cd17d6bdd7e630c45a642ec8b0373df820ae30361d007eb35779cb861a01826',false,'v',true,'private'),\n ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','4959735c66dec9dc2cdc0a796ff5c1637ffd0b892a33a4942f24e3b39d905bcf',false,'v',true,'private'),\n ('_authority_role_move_active_member_insert_v1(integer,integer)','c05e1765ce725e7fa821bef8fd194c6f1e584ab176e86fd2fa640408b842bdba',false,'v',true,'private'),\n ('_authority_role_move_active_receipt_v1(integer,integer)','311e8cdc554273f0aa1ab78b54f9a3b0ee959eff1871f803101803d3171b4e9a',false,'v',true,'private'),\n ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','6a7a7a501eaa13f459bd1b31727c43b70c748689d7d87873f9b7c0b37449bb72',false,'v',true,'private'),\n"
+  " ('_authority_role_move_active_write_record_v1(integer,integer)','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39',false,'v',true,'private'),\n",
+  " ('_authority_role_move_active_write_record_v1(integer,integer)','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39',false,'v',true,'private'),\n ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','6cd17d6bdd7e630c45a642ec8b0373df820ae30361d007eb35779cb861a01826',false,'v',true,'private'),\n ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','4959735c66dec9dc2cdc0a796ff5c1637ffd0b892a33a4942f24e3b39d905bcf',false,'v',true,'private'),\n ('_authority_role_move_active_member_insert_v1(integer,integer)','c05e1765ce725e7fa821bef8fd194c6f1e584ab176e86fd2fa640408b842bdba',false,'v',true,'private'),\n ('_authority_role_move_active_receipt_v1(integer,integer)','311e8cdc554273f0aa1ab78b54f9a3b0ee959eff1871f803101803d3171b4e9a',false,'v',true,'private'),\n ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','6a7a7a501eaa13f459bd1b31727c43b70c748689d7d87873f9b7c0b37449bb72',false,'v',true,'private'),\n"
  ],
  [
   "  ('_authority_role_move_active_write_record_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n",
   "  ('_authority_role_move_active_write_record_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_coordinates','p_rows','p_reads']),\n  ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_input','p_rows','p_reads']),\n  ('_authority_role_move_active_member_insert_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_receipt_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_input','p_rows','p_reads']),\n"
  ]
 ]$edits$::jsonb),
-        ('_authority_full_contract_storage_v3()','b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0','60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38',$edits$[
+        ('_authority_full_contract_storage_v3()','677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131','ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b',$edits$[
  [
-  "ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865",
-  "f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a"
+  "e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f",
+  "d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_service_account_access_label_ready_v1()','8713cf96229ebffaeb9c2f52c6195a1388d812c9c44a6036458e7fa83989f9cb','3d7814d0c1f26f9450a4940c4600cbc2343b49a7c30890a4d0d0b508275c6bc6',$edits$[
+        ('authority_metadata_service_account_access_label_ready_v1()','ef3f0d3afdf5f9deaaaaf0fc08029a6329b43d1954e79d279ed2248c95236587','3dcd78286c42a56371a2111c13e3d78c618d5f092d57dfe2ed81449bdea05afa',$edits$[
  [
-  "ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865",
-  "f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a"
+  "e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f",
+  "d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac"
  ],
  [
-  "b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0",
-  "60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38"
+  "677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131",
+  "ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b"
  ]
 ]$edits$::jsonb),
-        ('_authority_metadata_user_exports_v1(oid,boolean)','6349cbdf933540d958c9749acbd701eb43f86a345a7170353398dbaab09f66e9','8fe5fcdf574f9d8a6054a4a4b35873d12a52cebdc89416fa66c40de9366fa279',$edits$[
+        ('_authority_metadata_user_exports_v1(oid,boolean)','d633306d362ebdeef19c87786ce6c194de52e5e8225ddc55395b6b3b8f68bcab','472060c1ff35f223c9b960cbefd4a35793af442ec2551582dd8617d9923127b4',$edits$[
  [
-  "b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0",
-  "60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38"
+  "677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131",
+  "ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','807f50e43d9803fbdba1b3e6e3d74b1a969d5fd2266f5ac37a4b118a4884d9af','48ba11aef3b11d0a92f3b8d8cc3bb2f116608440e314362b74815f3d5642f8a8',$edits$[
+        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','7f490f6bd3b4573ab4bdc228640d19b9e3515707636c634d727e1b2df9cfa22c','d3f1433033dc3c43fd8aa9bb3bf965cc6b888f7db2337fee156a580367d87405',$edits$[
  [
-  "6349cbdf933540d958c9749acbd701eb43f86a345a7170353398dbaab09f66e9",
-  "8fe5fcdf574f9d8a6054a4a4b35873d12a52cebdc89416fa66c40de9366fa279"
+  "d633306d362ebdeef19c87786ce6c194de52e5e8225ddc55395b6b3b8f68bcab",
+  "472060c1ff35f223c9b960cbefd4a35793af442ec2551582dd8617d9923127b4"
  ]
 ]$edits$::jsonb)
     ) AS x(signature,prior,installed,edits) LOOP
@@ -353,50 +353,50 @@ DO $storage$
 DECLARE item record;fn regprocedure;original text;body text;definition text;marker text;edit jsonb;
 BEGIN
     FOR item IN SELECT * FROM (VALUES
-        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','48ba11aef3b11d0a92f3b8d8cc3bb2f116608440e314362b74815f3d5642f8a8','807f50e43d9803fbdba1b3e6e3d74b1a969d5fd2266f5ac37a4b118a4884d9af',$edits$[
+        ('authority_metadata_user_install_v1(regrole,regrole,boolean)','d3f1433033dc3c43fd8aa9bb3bf965cc6b888f7db2337fee156a580367d87405','7f490f6bd3b4573ab4bdc228640d19b9e3515707636c634d727e1b2df9cfa22c',$edits$[
  [
-  "8fe5fcdf574f9d8a6054a4a4b35873d12a52cebdc89416fa66c40de9366fa279",
-  "6349cbdf933540d958c9749acbd701eb43f86a345a7170353398dbaab09f66e9"
+  "472060c1ff35f223c9b960cbefd4a35793af442ec2551582dd8617d9923127b4",
+  "d633306d362ebdeef19c87786ce6c194de52e5e8225ddc55395b6b3b8f68bcab"
  ]
 ]$edits$::jsonb),
-        ('_authority_metadata_user_exports_v1(oid,boolean)','8fe5fcdf574f9d8a6054a4a4b35873d12a52cebdc89416fa66c40de9366fa279','6349cbdf933540d958c9749acbd701eb43f86a345a7170353398dbaab09f66e9',$edits$[
+        ('_authority_metadata_user_exports_v1(oid,boolean)','472060c1ff35f223c9b960cbefd4a35793af442ec2551582dd8617d9923127b4','d633306d362ebdeef19c87786ce6c194de52e5e8225ddc55395b6b3b8f68bcab',$edits$[
  [
-  "60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38",
-  "b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0"
+  "ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b",
+  "677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131"
  ]
 ]$edits$::jsonb),
-        ('authority_metadata_service_account_access_label_ready_v1()','3d7814d0c1f26f9450a4940c4600cbc2343b49a7c30890a4d0d0b508275c6bc6','8713cf96229ebffaeb9c2f52c6195a1388d812c9c44a6036458e7fa83989f9cb',$edits$[
+        ('authority_metadata_service_account_access_label_ready_v1()','3dcd78286c42a56371a2111c13e3d78c618d5f092d57dfe2ed81449bdea05afa','ef3f0d3afdf5f9deaaaaf0fc08029a6329b43d1954e79d279ed2248c95236587',$edits$[
  [
-  "60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38",
-  "b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0"
+  "ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b",
+  "677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131"
  ],
  [
-  "f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a",
-  "ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865"
+  "d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac",
+  "e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f"
  ]
 ]$edits$::jsonb),
-        ('_authority_full_contract_storage_v3()','60aa34cc9aff7a11a0f5eebf452cff465070af40b4dadfd24a2ff169ffe99a38','b9c3e62c3ede0d7f8959a6a99b398a107ec79d74dcb2c03c1f615c2eec977aa0',$edits$[
+        ('_authority_full_contract_storage_v3()','ecb3b446e31adeb43418742d3a012ff321fc42ce39ae3b9cfc0efbca65479e7b','677ff8c9ba5c7dbaf62e23beb04ce5e30963333ef42035133aec77bb4234d131',$edits$[
  [
-  "f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a",
-  "ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865"
+  "d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac",
+  "e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f"
  ]
 ]$edits$::jsonb),
-        ('_authority_crud_storage_v3()','f220703120cc7ab9fefff2c082ad5c86c0fa090d4493c9518b711c7db805a60a','ee6eaad76bec695c718f708c734ed5d6ab4b10c3fc1a7a73055be7e93ccbf865',$edits$[
+        ('_authority_crud_storage_v3()','d22a84673647caece6ca57630ddae79bf7a9b73740996ed5885d8c88ce92b7ac','e6bc6d79e9b014a65ac66a7471dc10b25626e616b1348105e7f6f14191dfbc2f',$edits$[
  [
   "  ('_authority_role_move_active_write_record_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_coordinates','p_rows','p_reads']),\n  ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_input','p_rows','p_reads']),\n  ('_authority_role_move_active_member_insert_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_receipt_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n  ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','jsonb',3,ARRAY['p_input','p_rows','p_reads']),\n",
   "  ('_authority_role_move_active_write_record_v1(integer,integer)','jsonb',2,ARRAY['p_rows','p_reads']),\n"
  ],
  [
-  " ('_authority_role_move_active_write_record_v1(integer,integer)','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385',false,'v',true,'private'),\n ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','6cd17d6bdd7e630c45a642ec8b0373df820ae30361d007eb35779cb861a01826',false,'v',true,'private'),\n ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','4959735c66dec9dc2cdc0a796ff5c1637ffd0b892a33a4942f24e3b39d905bcf',false,'v',true,'private'),\n ('_authority_role_move_active_member_insert_v1(integer,integer)','c05e1765ce725e7fa821bef8fd194c6f1e584ab176e86fd2fa640408b842bdba',false,'v',true,'private'),\n ('_authority_role_move_active_receipt_v1(integer,integer)','311e8cdc554273f0aa1ab78b54f9a3b0ee959eff1871f803101803d3171b4e9a',false,'v',true,'private'),\n ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','6a7a7a501eaa13f459bd1b31727c43b70c748689d7d87873f9b7c0b37449bb72',false,'v',true,'private'),\n",
-  " ('_authority_role_move_active_write_record_v1(integer,integer)','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385',false,'v',true,'private'),\n"
+  " ('_authority_role_move_active_write_record_v1(integer,integer)','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39',false,'v',true,'private'),\n ('_authority_role_move_active_project_witness_v1(jsonb,integer,integer)','6cd17d6bdd7e630c45a642ec8b0373df820ae30361d007eb35779cb861a01826',false,'v',true,'private'),\n ('_authority_role_move_active_project_seal_v1(jsonb,integer,integer)','4959735c66dec9dc2cdc0a796ff5c1637ffd0b892a33a4942f24e3b39d905bcf',false,'v',true,'private'),\n ('_authority_role_move_active_member_insert_v1(integer,integer)','c05e1765ce725e7fa821bef8fd194c6f1e584ab176e86fd2fa640408b842bdba',false,'v',true,'private'),\n ('_authority_role_move_active_receipt_v1(integer,integer)','311e8cdc554273f0aa1ab78b54f9a3b0ee959eff1871f803101803d3171b4e9a',false,'v',true,'private'),\n ('_authority_role_move_active_finish_v1(jsonb,integer,integer)','6a7a7a501eaa13f459bd1b31727c43b70c748689d7d87873f9b7c0b37449bb72',false,'v',true,'private'),\n",
+  " ('_authority_role_move_active_write_record_v1(integer,integer)','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39',false,'v',true,'private'),\n"
  ],
  [
   "746076caf4015fe2c2c982edce229ae89d6d58a00268ffc52865b4c03be25ae8",
   "a27e1d7ff966b37e669c91266f18cce4df76004d3ee8ae027ce82d995c28efba"
  ],
  [
-  "b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385",
-  "3c4fcecb0239a76b812a8fc8e257bc1b89c2bd7ca95acd9ac7d8f808c604dca7"
+  "28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39",
+  "27b1481cea9bf6b0745b4f42edaaef22b73eb0dc61d9d72cae248d2bbe3d353d"
  ],
  [
   "5bac298f5f76bc4e6e72c7f595d2958c6947787b2b3f71aebe16d79b916bc24a",
@@ -429,7 +429,7 @@ BEGIN
   "p_rows-used_rows<84 OR p_reads-used_reads<33"
  ]
 ]$edits$::jsonb),
-        ('_authority_role_move_active_write_record_v1(integer,integer)','b5e2f0b1f58597ecb7633065ff005716adc556859e93ebde36415ea6b77d2385','3c4fcecb0239a76b812a8fc8e257bc1b89c2bd7ca95acd9ac7d8f808c604dca7',$edits$[
+        ('_authority_role_move_active_write_record_v1(integer,integer)','28b9bf7d1eb307e4315a7884c91a5d1f9795215ec514b9b4cf3149c9de767f39','27b1481cea9bf6b0745b4f42edaaef22b73eb0dc61d9d72cae248d2bbe3d353d',$edits$[
  [
   "    -- Команда 4 относится к тому же transaction, seal и program ordinal.\n    -- Удаляем единственный OLD по полной физической версии. В PK участника входит rule_fp.\n    IF commands#>>'{3,Kind}' IS DISTINCT FROM 'member_delete' OR commands#>>'{3,Binding}' IS DISTINCT FROM bid\n        OR commands#>>'{3,Member,ObjectType}' IS DISTINCT FROM 'iam.project' OR commands#>>'{3,Member,ObjectID}' IS DISTINCT FROM pid\n        OR commands#>>'{3,RuleFP}' IS DISTINCT FROM witness#>>'{member_old,2,rule_fp}'\n        OR commands#>>'{3,RuleFP}' IS NOT DISTINCT FROM witness->>'new_rule_fp' THEN\n        RAISE EXCEPTION 'active removal differs from sealed old fingerprint' USING ERRCODE='42501';END IF;\n    DELETE FROM ONLY kaname.access_binding_target_members m WHERE m.binding_id=bid AND m.role_id=rid\n        AND m.object_type='iam.project' AND m.object_id=pid AND m.rule_fp=commands#>>'{3,RuleFP}'\n        AND jsonb_build_array(m.xmin::text,m.ctid::text,to_jsonb(m))=witness->'member_old'\n        RETURNING jsonb_build_array(m.xmin::text,m.ctid::text,to_jsonb(m)) INTO actual;\n    IF NOT FOUND OR actual IS DISTINCT FROM witness->'member_old' THEN\n        RAISE EXCEPTION 'active removed member is stale' USING ERRCODE='40001';END IF;\n    cursor_row:=cursor_row||jsonb_build_object('last_consumed',4,'outbox',outbox_image,\n        'viewer_new',viewer_new,'deleted_member',actual);",
   "    cursor_row:=cursor_row||jsonb_build_object('last_consumed',3,'outbox',outbox_image,'viewer_new',viewer_new);"
