@@ -112,7 +112,7 @@ BEGIN
   "586423c5c0965e9cf8ab408894127527eb66edbfc1a454a0a056e9fb064a4749"
  ]
 ]$changes$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','43aed234949d072a3d7d26e01b45eb2ea5f244c832f92da78b6a217315a37d75','d52e5eaea50e84d85a750ac5f81c0162cf5e50f186be99b673f6c940e7e470ca',
+ ('authority_metadata_service_account_access_label_ready_v1()','ce2555cc19aa07d16a15ea1e5e1e58a69ffe677b411ae36ea2c5e7300913fe51','5a584ff426ba5a47f5522b0bd0a2a59c4fc60fefe542d6db795213868516b1fa',
   $changes$[
  [
   "01ef36668b4499a8d9384c6887fab29393ce1cac455f307c68710c2e9e3bb479",
@@ -163,7 +163,7 @@ DO $install$
 DECLARE step record; pair jsonb; found_oid oid; definition text; original text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','d52e5eaea50e84d85a750ac5f81c0162cf5e50f186be99b673f6c940e7e470ca','43aed234949d072a3d7d26e01b45eb2ea5f244c832f92da78b6a217315a37d75',
+ ('authority_metadata_service_account_access_label_ready_v1()','5a584ff426ba5a47f5522b0bd0a2a59c4fc60fefe542d6db795213868516b1fa','ce2555cc19aa07d16a15ea1e5e1e58a69ffe677b411ae36ea2c5e7300913fe51',
   $changes$[
  [
   "7eb9e29bfec2e5c9fc457bf0818b2489f7d0faaa25838f74324bc4e04608432a",

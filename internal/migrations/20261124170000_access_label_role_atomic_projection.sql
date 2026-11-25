@@ -476,7 +476,7 @@ BEGIN
     " PERFORM kaname._authority_sequence_select_v3(ordinals,at_time);\n IF program#>>'{frozen,mode}'='access_label_transition'\n AND program#>>'{frozen,access_label_scope_census,mode}'='revoke' THEN\n  required_questions:=kaname.authority_access_label_role_required_questions_v1(program->'frozen',at_time);\n  IF required_questions IS DISTINCT FROM '[]'::jsonb\n   OR program#>'{frozen,create}' IS DISTINCT FROM 'false'::jsonb\n   OR program#>'{frozen,request,rules}' IS DISTINCT FROM 'true'::jsonb\n   OR (program->'frozen') ? 'access_label_source_store_oid' THEN\n   RAISE EXCEPTION 'role revoke finalized census differs' USING ERRCODE='42501';END IF;\n  UPDATE pg_temp.kaname_authority_sequence_program s\n  SET frozen=s.frozen||jsonb_build_object('access_label_required_questions',required_questions,\n   'access_label_required_index','{}'::jsonb)\n  WHERE s.singleton AND s.nonce=(proof->>'nonce')::uuid AND s.decision_at=at_time\n   AND s.frozen_mode='access_label_transition'\n   AND NOT (s.frozen ? 'access_label_required_questions');\n  IF NOT FOUND THEN\n   RAISE EXCEPTION 'role revoke finalized program differs' USING ERRCODE='42501';END IF;\n END IF;\n"
   ]
 ]$patch$::jsonb),
-        ('authority_protocol_grant_runtime(regrole)','da2be233731558d1ddc8c253bfe0cd5e5941333c65ef9f3955bedac93ed4f66a','90b9f746e64b79902c3c399dde9a2aed399f8445dea1491daf9e86161e814449',$patch$[
+        ('authority_protocol_grant_runtime(regrole)','2bd4434aa60b0d76eeb9d6eac0475cbbeecf859aa0092f44ea7bf2bf1ace1892','3c51040a4cb1eca5971a109e1786a59ca3fc6e55af8dac0654920783efb821e1',$patch$[
   [
     " PERFORM kaname._authority_protocol_grant_runtime_generation1(p_runtime);",
     " IF EXISTS(SELECT 1 FROM kaname.authority_role_actor_login a WHERE a.singleton AND a.role_oid=p_runtime::oid) THEN\n  RAISE EXCEPTION 'role actor LOGIN requires its finite grants' USING ERRCODE='42501';END IF;\n PERFORM kaname._authority_protocol_grant_runtime_generation1(p_runtime);"
@@ -486,7 +486,7 @@ BEGIN
     " SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;\n -- Generation1 открывает SELECT по схеме; pin назначения остаётся у владельца.\n EXECUTE format('REVOKE ALL ON kaname.authority_role_actor_login FROM %I',runtime_name);"
   ]
 ]$patch$::jsonb),
-        ('_authority_crud_storage_v3()','fe12a95aa929e85b3e51eb046e029aad79430110b2adad61554d1f96737fe347','2c4e608b52e90f966e2d32990f276826245f761a280e9fe2f38057c1fa2eacca',$patch$[
+        ('_authority_crud_storage_v3()','1af1f1e917796102591107cf66a04f079145a229c6bb0abd689fcd142de9bfbe','cc3d0947da0f6803ddd05c8da80cb25952d6ef326d2726f991ba649ea3d926ff',$patch$[
   [
     "bcfedb5314ae275e71f5953dac76111ae65f217b4877e8154b224ccc9fe4b6c4",
     "0890abdfa2517000901077218dde1cbe48b465003ce4c8e5e74559a2ebaa167e"
@@ -512,8 +512,8 @@ BEGIN
     "0adfc241154b42e561425452f8ceef42eeefa3e802a21111e9e74d5a434830cd"
   ],
   [
-    "da2be233731558d1ddc8c253bfe0cd5e5941333c65ef9f3955bedac93ed4f66a",
-    "90b9f746e64b79902c3c399dde9a2aed399f8445dea1491daf9e86161e814449"
+    "2bd4434aa60b0d76eeb9d6eac0475cbbeecf859aa0092f44ea7bf2bf1ace1892",
+    "3c51040a4cb1eca5971a109e1786a59ca3fc6e55af8dac0654920783efb821e1"
   ],
   [
     " IF owner_oid IS DISTINCT FROM (SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user) THEN RETURN false;END IF;\n",
@@ -528,10 +528,10 @@ BEGIN
     "    SELECT 1 FROM typed_entry_exec_acl g WHERE g.grantee=a.grantee)))) OR (pin_expected.access_mode='role_login' AND EXISTS(\n    SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a\n    WHERE a.grantee<>owner_oid AND (a.grantee=0 OR a.is_grantable OR a.privilege_type<>'EXECUTE'\n      OR NOT EXISTS(SELECT 1 FROM kaname.authority_role_actor_login t\n       JOIN pg_catalog.pg_roles r ON (r.oid,r.rolname)=(t.role_oid,t.role_name)\n       WHERE t.singleton AND t.role_oid=a.grantee)))) END) THEN RETURN false;END IF;"
   ]
 ]$patch$::jsonb),
-        ('_authority_full_contract_storage_v3()','29532a992ae865977f50793695257c9f93a5397de4b31eb373bce8e5e58b87b9','bd7b954c72a8c66d3548bcf587bf803f9384cd0c590599f8cc3b9032e7f0ae7d',$patch$[
+        ('_authority_full_contract_storage_v3()','c6d6545229a7d01b3982bbe201e0f711e48afb935bf4c40c6a9c7c7dad9a563d','7ef6978e23de2ce46fa967f28c8e8d348ad93b0dde5db7e75ed976ace4c9bb36',$patch$[
   [
-    "fe12a95aa929e85b3e51eb046e029aad79430110b2adad61554d1f96737fe347",
-    "2c4e608b52e90f966e2d32990f276826245f761a280e9fe2f38057c1fa2eacca"
+    "1af1f1e917796102591107cf66a04f079145a229c6bb0abd689fcd142de9bfbe",
+    "cc3d0947da0f6803ddd05c8da80cb25952d6ef326d2726f991ba649ea3d926ff"
   ]
 ]$patch$::jsonb)
     ) AS changes(signature, before_sha, after_sha, substitutions) LOOP
@@ -599,13 +599,13 @@ BEGIN
         RAISE EXCEPTION 'несогласованное состояние перед изменением атомарной записи проекции роли' USING ERRCODE='55000';
     END IF;
     FOR item IN SELECT * FROM (VALUES
-        ('_authority_full_contract_storage_v3()','bd7b954c72a8c66d3548bcf587bf803f9384cd0c590599f8cc3b9032e7f0ae7d','29532a992ae865977f50793695257c9f93a5397de4b31eb373bce8e5e58b87b9',$patch$[
+        ('_authority_full_contract_storage_v3()','7ef6978e23de2ce46fa967f28c8e8d348ad93b0dde5db7e75ed976ace4c9bb36','c6d6545229a7d01b3982bbe201e0f711e48afb935bf4c40c6a9c7c7dad9a563d',$patch$[
   [
-    "2c4e608b52e90f966e2d32990f276826245f761a280e9fe2f38057c1fa2eacca",
-    "fe12a95aa929e85b3e51eb046e029aad79430110b2adad61554d1f96737fe347"
+    "cc3d0947da0f6803ddd05c8da80cb25952d6ef326d2726f991ba649ea3d926ff",
+    "1af1f1e917796102591107cf66a04f079145a229c6bb0abd689fcd142de9bfbe"
   ]
 ]$patch$::jsonb),
-        ('_authority_crud_storage_v3()','2c4e608b52e90f966e2d32990f276826245f761a280e9fe2f38057c1fa2eacca','fe12a95aa929e85b3e51eb046e029aad79430110b2adad61554d1f96737fe347',$patch$[
+        ('_authority_crud_storage_v3()','cc3d0947da0f6803ddd05c8da80cb25952d6ef326d2726f991ba649ea3d926ff','1af1f1e917796102591107cf66a04f079145a229c6bb0abd689fcd142de9bfbe',$patch$[
   [
     "    SELECT 1 FROM typed_entry_exec_acl g WHERE g.grantee=a.grantee)))) OR (pin_expected.access_mode='role_login' AND EXISTS(\n    SELECT 1 FROM aclexplode(coalesce(p.proacl,acldefault('f',p.proowner))) a\n    WHERE a.grantee<>owner_oid AND (a.grantee=0 OR a.is_grantable OR a.privilege_type<>'EXECUTE'\n      OR NOT EXISTS(SELECT 1 FROM kaname.authority_role_actor_login t\n       JOIN pg_catalog.pg_roles r ON (r.oid,r.rolname)=(t.role_oid,t.role_name)\n       WHERE t.singleton AND t.role_oid=a.grantee)))) END) THEN RETURN false;END IF;",
     "    SELECT 1 FROM typed_entry_exec_acl g WHERE g.grantee=a.grantee)))) END) THEN RETURN false;END IF;"
@@ -619,8 +619,8 @@ BEGIN
     " IF owner_oid IS DISTINCT FROM (SELECT oid FROM pg_catalog.pg_roles WHERE rolname=current_user) THEN RETURN false;END IF;\n"
   ],
   [
-    "90b9f746e64b79902c3c399dde9a2aed399f8445dea1491daf9e86161e814449",
-    "da2be233731558d1ddc8c253bfe0cd5e5941333c65ef9f3955bedac93ed4f66a"
+    "3c51040a4cb1eca5971a109e1786a59ca3fc6e55af8dac0654920783efb821e1",
+    "2bd4434aa60b0d76eeb9d6eac0475cbbeecf859aa0092f44ea7bf2bf1ace1892"
   ],
   [
     "0adfc241154b42e561425452f8ceef42eeefa3e802a21111e9e74d5a434830cd",
@@ -647,7 +647,7 @@ BEGIN
     "bcfedb5314ae275e71f5953dac76111ae65f217b4877e8154b224ccc9fe4b6c4"
   ]
 ]$patch$::jsonb),
-        ('authority_protocol_grant_runtime(regrole)','90b9f746e64b79902c3c399dde9a2aed399f8445dea1491daf9e86161e814449','da2be233731558d1ddc8c253bfe0cd5e5941333c65ef9f3955bedac93ed4f66a',$patch$[
+        ('authority_protocol_grant_runtime(regrole)','3c51040a4cb1eca5971a109e1786a59ca3fc6e55af8dac0654920783efb821e1','2bd4434aa60b0d76eeb9d6eac0475cbbeecf859aa0092f44ea7bf2bf1ace1892',$patch$[
   [
     " SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;\n -- Generation1 открывает SELECT по схеме; pin назначения остаётся у владельца.\n EXECUTE format('REVOKE ALL ON kaname.authority_role_actor_login FROM %I',runtime_name);",
     " SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;"

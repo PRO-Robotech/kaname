@@ -183,8 +183,8 @@ BEGIN
         ),
         (
             '_authority_crud_storage_v3()',
-            'c003684a2ab45b65e7d53be38d592dfb65c78768bf5793d5ff7fa863756c3658',
-            'f640484ea8c9afa1e0c83d4a40907e0ef42b1dca81fadc7eb558b406a1757f13',
+            '972bbab30b47edc04eca5e7a04583874178608ad752be84357a0cd5e086b8f85',
+            '9d18cd51bf9b55f68028c426540b5ef19f410ea5fc026859776fe41fc48282f1',
             $patch$[
   [
     " ('authority_binding_sequence_prepare_v3(text,jsonb)','a0290994e32a6eb0a8c753b3be6bff865afcb3a40d4a6f9dafcef0aa1c7beb3c',true,'v',true,'export'),",
@@ -198,12 +198,12 @@ BEGIN
         ),
         (
             '_authority_full_contract_storage_v3()',
-            '9bdcc946239c75af2aa22d6b9b8c08e8cb6f5013e1eec74217fddb655d6df09f',
-            '278ffcfbd0b872e311014247a7d000ae5e99818ed88510936537af11bec8f16e',
+            'c2f71f6ada22503f37fb76c065b8af7847957b74f7c9489f486e434d79f880e8',
+            '1cb1ab228cacbe657b021f31131131833e3a2482f2d3d831cebf8a770151a23b',
             $patch$[
   [
-    "c003684a2ab45b65e7d53be38d592dfb65c78768bf5793d5ff7fa863756c3658",
-    "f640484ea8c9afa1e0c83d4a40907e0ef42b1dca81fadc7eb558b406a1757f13"
+    "972bbab30b47edc04eca5e7a04583874178608ad752be84357a0cd5e086b8f85",
+    "9d18cd51bf9b55f68028c426540b5ef19f410ea5fc026859776fe41fc48282f1"
   ]
 ]$patch$::jsonb
         )
@@ -264,19 +264,19 @@ BEGIN
     FOR item IN SELECT * FROM (VALUES
         (
             '_authority_full_contract_storage_v3()',
-            '278ffcfbd0b872e311014247a7d000ae5e99818ed88510936537af11bec8f16e',
-            '9bdcc946239c75af2aa22d6b9b8c08e8cb6f5013e1eec74217fddb655d6df09f',
+            '1cb1ab228cacbe657b021f31131131833e3a2482f2d3d831cebf8a770151a23b',
+            'c2f71f6ada22503f37fb76c065b8af7847957b74f7c9489f486e434d79f880e8',
             $patch$[
   [
-    "f640484ea8c9afa1e0c83d4a40907e0ef42b1dca81fadc7eb558b406a1757f13",
-    "c003684a2ab45b65e7d53be38d592dfb65c78768bf5793d5ff7fa863756c3658"
+    "9d18cd51bf9b55f68028c426540b5ef19f410ea5fc026859776fe41fc48282f1",
+    "972bbab30b47edc04eca5e7a04583874178608ad752be84357a0cd5e086b8f85"
   ]
 ]$patch$::jsonb
         ),
         (
             '_authority_crud_storage_v3()',
-            'f640484ea8c9afa1e0c83d4a40907e0ef42b1dca81fadc7eb558b406a1757f13',
-            'c003684a2ab45b65e7d53be38d592dfb65c78768bf5793d5ff7fa863756c3658',
+            '9d18cd51bf9b55f68028c426540b5ef19f410ea5fc026859776fe41fc48282f1',
+            '972bbab30b47edc04eca5e7a04583874178608ad752be84357a0cd5e086b8f85',
             $patch$[
   [
     " ('authority_access_label_prepared_definition_v1(text,text,uuid,integer,integer)','a2bcc1f0193fe47bfcd7bcb0c4727cffbc892ee049826b28cbf78e418afe71ba',false,'v',true,'private'),\n ('authority_access_label_binding_definitions_prepare_v1(jsonb,text,text,text,text,integer,integer)','8127b1758d4ce9f8bfda917bb4bcc0bc292972aede72c22d7ba137289ec2b972',false,'v',true,'private'),",

@@ -154,7 +154,7 @@ BEGIN
   " manifest jsonb:=$manifest$\n[\n  {\n    \"signature\": \"_authority_metadata_registration_binding_holds_v1(integer)\",\n    \"digest\": \"861ddeac15c398add39958a4ef7af725aa93e1eca48948a1b2c751f0995d8f87\",\n    \"definer\": false,\n    \"volatility\": \"v\",\n    \"exported\": false,\n    \"result_type\": \"integer\",\n    \"result_set\": false,\n    \"language\": \"plpgsql\",\n    \"argnames\": [\n      \"p_budget\"\n    ],\n    \"argmodes\": null,\n    \"allargtypes\": null\n  },\n  {\n    \"signature\": \"_authority_metadata_registration_binding_check_v1(text,text)\",\n    \"digest\": \"de2458e1b5001b7f3a6390b8429168ea38f6184f34ae16723cba136a97ba26d9\",\n    \"definer\": false,\n    \"volatility\": \"v\",\n    \"exported\": false,\n    \"result_type\": \"void\",\n    \"result_set\": false,\n    \"language\": \"plpgsql\",\n    \"argnames\": [\n      \"p_model\",\n      \"p_id\"\n    ],\n    \"argmodes\": null,\n    \"allargtypes\": null\n  },\n"
  ]
 ]$changes$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','8749126dacec2773f4005f80c25019024f907cc027bce43edd0ae2a9d6bf2c71','b90d5c3f3a9b401374b4dd45e5e94e105d6d92f06fb06298ca9aabbf8bb812fb',
+ ('authority_metadata_service_account_access_label_ready_v1()','1e42612e22a7539b9d0fb112e457b385f194332060cd5e2bfaffa49ed2f99ff4','05f62d50bedc50db0d0eb12875f5bd06d835376b14a50c12b0d0ab6913c542d0',
   $changes$[
  [
   "c0d015f355dc1dae5fe3e10e7f5a51630c922f6405cc89ada7e809e4e4f931eb",
@@ -193,7 +193,7 @@ DO $install$
 DECLARE step record; pair jsonb; found_oid oid; definition text; original text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','b90d5c3f3a9b401374b4dd45e5e94e105d6d92f06fb06298ca9aabbf8bb812fb','8749126dacec2773f4005f80c25019024f907cc027bce43edd0ae2a9d6bf2c71',
+ ('authority_metadata_service_account_access_label_ready_v1()','05f62d50bedc50db0d0eb12875f5bd06d835376b14a50c12b0d0ab6913c542d0','1e42612e22a7539b9d0fb112e457b385f194332060cd5e2bfaffa49ed2f99ff4',
   $changes$[
  [
   "73cf60bf7d003e3a694303cc14b0db89eae7d179ba04e72c5556f0e78b6fb236",

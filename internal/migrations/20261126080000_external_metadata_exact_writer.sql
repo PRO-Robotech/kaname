@@ -186,7 +186,7 @@ BEGIN
   " FOREACH target IN ARRAY ARRAY['accounts','projects','resource_mirror'] LOOP\n  IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t"
  ]
 ]$change$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','f9e0e1c697eb521752665775ce760b354bfb815a7f3b5b01a0a14ba55345af84','6098027fa50d3962ef2b898886b041ddbea5f9df9c4d029da7fda152f61f8233',$change$[
+ ('authority_metadata_service_account_access_label_ready_v1()','27a1394930bf7124626312871154a81273124a54a5d860f9a60a2c283d4fb8e8','29f99c8f1b9b0965606002b6e2f37cd6c2eaf38a05e450de8107c380fa589e0c',$change$[
  [
   "5b99413fb55cfcab7302e560b12fc68b286a52ae4534b905893f623f0de2c763",
   "f7a3293081fe9356281e2022040aa3113069e89ea573fb328752f74cce447444"
@@ -247,7 +247,7 @@ DO $install$
 DECLARE step record; replacement jsonb; target oid; body text; definition text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','6098027fa50d3962ef2b898886b041ddbea5f9df9c4d029da7fda152f61f8233','f9e0e1c697eb521752665775ce760b354bfb815a7f3b5b01a0a14ba55345af84',$change$[
+ ('authority_metadata_service_account_access_label_ready_v1()','29f99c8f1b9b0965606002b6e2f37cd6c2eaf38a05e450de8107c380fa589e0c','27a1394930bf7124626312871154a81273124a54a5d860f9a60a2c283d4fb8e8',$change$[
  [
   "75edcda1114c591fa1dfd40a80930d3fade6f9eb6a9b34caebc97eef02f64986",
   "57682cf2c133a749ed3afba138506807ac08ae6d83b4411f198a06fa285a62f5"

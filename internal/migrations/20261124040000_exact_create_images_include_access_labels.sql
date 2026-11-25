@@ -60,8 +60,8 @@ BEGIN
         ),
         (
             '_authority_crud_storage_v3()',
-            '3294ef60eda8b6483e92b6df452d260bfe8ee0d11eb5e3519d7e57a6e744256f',
-            'eb6275fc7cf187806dd647806770c1ab7f9ca4426f7dd2d93951664ab04eee9a',
+            '5e21095177e65e55c600edb429a1ed9d55db08e1cd85908c06e701646c344f1e',
+            '762fb1c24b83c085045a76deb1ebc3bb8a5abc527af11097e1bb38b022c82ece',
             $patch$[
             ["2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e", "092aea9c77c443b16de6c595ee2aeca2d22984fdbaf54831faad5b38659ce11d"],
             ["bc276ed48b9a8e9d4eeb6cb472bfbda1a1a400dd8b34992f391f9423143272fc", "a0290994e32a6eb0a8c753b3be6bff865afcb3a40d4a6f9dafcef0aa1c7beb3c"],
@@ -71,10 +71,10 @@ BEGIN
         ),
         (
             '_authority_full_contract_storage_v3()',
-            '2b4dcb96150cb5c1b274a3dfef66831bc32dcc8337cc850f013b7062d3a4882c',
-            '49b7a806ea6c846fe35fd9777dd641f8f0fe50bdb2accaacc70624de5ce43790',
+            '1b7b404b55d7b4a3f0537f1b00bb925b6aa6bceeb2f3ff4ea2fc736eda5a677b',
+            'b9ecc56df1363970615aac9852ce65d707533034a1ded0674d3c3a8e80591361',
             $patch$[
-            ["3294ef60eda8b6483e92b6df452d260bfe8ee0d11eb5e3519d7e57a6e744256f", "eb6275fc7cf187806dd647806770c1ab7f9ca4426f7dd2d93951664ab04eee9a"]
+            ["5e21095177e65e55c600edb429a1ed9d55db08e1cd85908c06e701646c344f1e", "762fb1c24b83c085045a76deb1ebc3bb8a5abc527af11097e1bb38b022c82ece"]
             ]$patch$::jsonb
         )
     ) AS changes(signature, before_sha, after_sha, substitutions) LOOP
@@ -132,16 +132,16 @@ BEGIN
     FOR item IN SELECT * FROM (VALUES
         (
             '_authority_full_contract_storage_v3()',
-            '49b7a806ea6c846fe35fd9777dd641f8f0fe50bdb2accaacc70624de5ce43790',
-            '2b4dcb96150cb5c1b274a3dfef66831bc32dcc8337cc850f013b7062d3a4882c',
+            'b9ecc56df1363970615aac9852ce65d707533034a1ded0674d3c3a8e80591361',
+            '1b7b404b55d7b4a3f0537f1b00bb925b6aa6bceeb2f3ff4ea2fc736eda5a677b',
             $patch$[
-            ["eb6275fc7cf187806dd647806770c1ab7f9ca4426f7dd2d93951664ab04eee9a", "3294ef60eda8b6483e92b6df452d260bfe8ee0d11eb5e3519d7e57a6e744256f"]
+            ["762fb1c24b83c085045a76deb1ebc3bb8a5abc527af11097e1bb38b022c82ece", "5e21095177e65e55c600edb429a1ed9d55db08e1cd85908c06e701646c344f1e"]
             ]$patch$::jsonb
         ),
         (
             '_authority_crud_storage_v3()',
-            'eb6275fc7cf187806dd647806770c1ab7f9ca4426f7dd2d93951664ab04eee9a',
-            '3294ef60eda8b6483e92b6df452d260bfe8ee0d11eb5e3519d7e57a6e744256f',
+            '762fb1c24b83c085045a76deb1ebc3bb8a5abc527af11097e1bb38b022c82ece',
+            '5e21095177e65e55c600edb429a1ed9d55db08e1cd85908c06e701646c344f1e',
             $patch$[
             ["4fd40a4e10d3a8a31dfd02e02840da2a3ff31b45f2416c147c4f3e38d79f1b21", "909c304c45925ad0cee62e8ddc462b381778fffd89739e36b99195bea4f3b6f7"],
             ["5b08a8fb6bc43f571427993195d90b880c52fb2cdce91e29ead346579152eeb9", "5d47e24c50baaa1619a6cfb2198255c248fec06d535e13febacf7078c6aeae64"],

@@ -158,7 +158,7 @@ BEGIN
   " manifest jsonb:=$manifest$\n[\n  {\n    \"signature\": \"_authority_resource_access_label_requirements_v1(text,jsonb,jsonb,integer,integer)\",\n    \"digest\": \"38c56887f8c63dcd7f16477a4cf33542da9ee3449cf1b41ab9f70496dda873eb\",\n    \"definer\": false,\n    \"volatility\": \"v\",\n    \"exported\": false,\n    \"result_type\": \"jsonb\",\n    \"result_set\": false,\n    \"language\": \"plpgsql\",\n    \"argnames\": [\n      \"p_resource\",\n      \"p_old\",\n      \"p_new\",\n      \"p_rows\",\n      \"p_reads\"\n    ],\n    \"argmodes\": null,\n    \"allargtypes\": null\n  },\n"
  ]
 ]$changes$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','bbee2b2d3b3aaf8dd45fa0ec16a518d032e3360a6fec5a4ddd08fe899e6d55a1','3f15fa266924e9bfd02cd0f7595342ffb1f907b504f57dd474bec10216cb7be1',
+ ('authority_metadata_service_account_access_label_ready_v1()','6cf2090a95e25c88387bfdf0cb03f44387dbbbb1c1ac5dab0ecc4ffee587dabd','5ae05fde040599bdf37f1859fd2f987e80007242ea58512fb6298a9eff0e420e',
   $changes$[
  [
   "fb40b186a84a3f7303195ae6edb0829043ac43a7c2514bbdf0d1d1b2185027e0",
@@ -209,7 +209,7 @@ DO $install$
 DECLARE step record; pair jsonb; found_oid oid; definition text; original text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','3f15fa266924e9bfd02cd0f7595342ffb1f907b504f57dd474bec10216cb7be1','bbee2b2d3b3aaf8dd45fa0ec16a518d032e3360a6fec5a4ddd08fe899e6d55a1',
+ ('authority_metadata_service_account_access_label_ready_v1()','5ae05fde040599bdf37f1859fd2f987e80007242ea58512fb6298a9eff0e420e','6cf2090a95e25c88387bfdf0cb03f44387dbbbb1c1ac5dab0ecc4ffee587dabd',
   $changes$[
  [
   "e40c32117191982841cdd3197aa9f09889caf673edcb995a9c0896b0e66242d3",

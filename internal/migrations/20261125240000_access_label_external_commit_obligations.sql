@@ -183,29 +183,29 @@ BEGIN
   "  RAISE EXCEPTION 'selected sequence program is incomplete' USING ERRCODE='42501';END IF;\n IF program->>'family'='metadata' AND program#>>'{frozen,mode}'='external_access_labels' THEN\n  PERFORM kaname._authority_metadata_mirror_complete_v1();\n END IF;"
  ]
 ]$changes$::jsonb),
- ('_authority_crud_storage_v3()','1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f','4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743',
+ ('_authority_crud_storage_v3()','b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe','0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92',
   $changes$[
  [
   " ('_authority_sequence_complete_v3()','a8d690b1e0af17cf3c09b53ce8cbb651a119c76f16d3c0a0c10990b3cb031c05',true,'v',true,'private'),",
   " ('_authority_sequence_complete_v3()','e5d4c583a372c86fdcdbfb3e23ee72116f2a9efd221de97510f539fddf483dd4',true,'v',true,'private'),\n ('_authority_metadata_mirror_command_v1()','52823698e4b0ae99c11735589197cc0e7be627aca9ad3396e05f248241727aea',false,'v',true,'private'),\n ('_authority_metadata_mirror_complete_v1()','73a193078ce43a305df3253eed3a1957540eba61708f3138e3c4e8ffa38991ef',false,'v',true,'private'),"
  ]
 ]$changes$::jsonb),
- ('_authority_full_contract_storage_v3()','2822204d78946d3a74f9d8a1d498c2b64e8571da479d6280bf8dc1e63559d966','57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e',
+ ('_authority_full_contract_storage_v3()','ca82a212ba7ba6b3821a3923ab6be92bba6774b8c562312231c7fac320acd47b','c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b',
   $changes$[
  [
-  "1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f",
-  "4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743"
+  "b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe",
+  "0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92"
  ]
 ]$changes$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','3f15fa266924e9bfd02cd0f7595342ffb1f907b504f57dd474bec10216cb7be1','50eaf3862137e2bfe29e47c7b1e018794ce2f90606bac7f64702a5d8f441f201',
+ ('authority_metadata_service_account_access_label_ready_v1()','5ae05fde040599bdf37f1859fd2f987e80007242ea58512fb6298a9eff0e420e','f256e7f8258542c9fdbcacb424ed1ecf1689e03af494e066f73c76c789d861cd',
   $changes$[
  [
-  "1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f",
-  "4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743"
+  "b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe",
+  "0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92"
  ],
  [
-  "2822204d78946d3a74f9d8a1d498c2b64e8571da479d6280bf8dc1e63559d966",
-  "57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e"
+  "ca82a212ba7ba6b3821a3923ab6be92bba6774b8c562312231c7fac320acd47b",
+  "c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b"
  ]
 ]$changes$::jsonb)
  ) AS expected(signature,old_digest,new_digest,changes) LOOP
@@ -240,25 +240,25 @@ DO $install$
 DECLARE step record; pair jsonb; found_oid oid; definition text; original text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','50eaf3862137e2bfe29e47c7b1e018794ce2f90606bac7f64702a5d8f441f201','3f15fa266924e9bfd02cd0f7595342ffb1f907b504f57dd474bec10216cb7be1',
+ ('authority_metadata_service_account_access_label_ready_v1()','f256e7f8258542c9fdbcacb424ed1ecf1689e03af494e066f73c76c789d861cd','5ae05fde040599bdf37f1859fd2f987e80007242ea58512fb6298a9eff0e420e',
   $changes$[
  [
-  "57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e",
-  "2822204d78946d3a74f9d8a1d498c2b64e8571da479d6280bf8dc1e63559d966"
+  "c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b",
+  "ca82a212ba7ba6b3821a3923ab6be92bba6774b8c562312231c7fac320acd47b"
  ],
  [
-  "4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743",
-  "1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f"
+  "0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92",
+  "b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe"
  ]
 ]$changes$::jsonb),
- ('_authority_full_contract_storage_v3()','57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e','2822204d78946d3a74f9d8a1d498c2b64e8571da479d6280bf8dc1e63559d966',
+ ('_authority_full_contract_storage_v3()','c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b','ca82a212ba7ba6b3821a3923ab6be92bba6774b8c562312231c7fac320acd47b',
   $changes$[
  [
-  "4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743",
-  "1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f"
+  "0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92",
+  "b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe"
  ]
 ]$changes$::jsonb),
- ('_authority_crud_storage_v3()','4228f0559ab4575a7f655dc66da9008b5d6919dc7f7a16d13c0ed640d9ca2743','1ec552fc5336a98cece075fa2d69e3cd78807ab57865e1ad1a499142512dce9f',
+ ('_authority_crud_storage_v3()','0cab061e37e174b2adcd343d70c70dbc510ce1f40af8ca03bc6ef53d75c7cf92','b48b8605a5a58fb8bf900ff6d8d478e4060c94c3df14845d5a93e1fc1c762bfe',
   $changes$[
  [
   " ('_authority_sequence_complete_v3()','e5d4c583a372c86fdcdbfb3e23ee72116f2a9efd221de97510f539fddf483dd4',true,'v',true,'private'),\n ('_authority_metadata_mirror_command_v1()','52823698e4b0ae99c11735589197cc0e7be627aca9ad3396e05f248241727aea',false,'v',true,'private'),\n ('_authority_metadata_mirror_complete_v1()','73a193078ce43a305df3253eed3a1957540eba61708f3138e3c4e8ffa38991ef',false,'v',true,'private'),",

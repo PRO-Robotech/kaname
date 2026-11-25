@@ -91,7 +91,7 @@ BEGIN
   "'rows',base_rows+n,'reads',base_reads+1"
  ]
 ]$changes$::jsonb),
- ('_authority_full_contract_storage_v3()','57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e','101f173a9ff06492d12bbbf3e41f9e52e5979fdcd7ff7d6c4b884ceafcde9ec6',
+ ('_authority_full_contract_storage_v3()','c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b','55fa1ecf2a399ec6d808860833f09a66ff90232caf9d12eb31d72478b873c1d9',
   $changes$[
  [
   "45464597290417cfad0f087b8ccf44453c7b4362b94bde2229fe3e0e785b33f5",
@@ -116,7 +116,7 @@ BEGIN
   " direct_type:=CASE p_model WHEN 'account' THEN 'iam.account' WHEN 'project' THEN 'iam.project' WHEN 'iam_service_account' THEN 'iam.serviceAccount' END;\n -- Остальные штатные IAM output models не имеют собственного dirty root.\n -- Внешние aliases читаются в том же RR, включая retired: отсутствие mirror\n -- или live-флага не превращает оставшееся поколение в чистое состояние.\n IF direct_type IS NULL AND p_model NOT IN ('cluster','iam_user','iam_group','iam_role','iam_access_binding') THEN\n  logical_rows:=1;logical_reads:=1;\n  IF p_rows<logical_rows OR p_reads<logical_reads THEN\n   RAISE EXCEPTION 'external pending source budget exhausted' USING ERRCODE='54000';END IF;\n  IF NOT coalesce(has_table_privilege(invoker,'kaname.catalog_resource'::regclass,'SELECT'),false)\n   OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class c\n    WHERE c.oid='kaname.catalog_resource'::regclass AND c.relkind='r' AND c.relpersistence='p'\n     AND NOT c.relrowsecurity AND NOT c.relforcerowsecurity AND NOT c.relispartition\n     AND NOT c.relhassubclass AND NOT c.relhasrules) THEN\n   RAISE EXCEPTION 'external pending needs original catalog read access and ordinary source' USING ERRCODE='42501';END IF;\n  IF logical_reads>=p_reads THEN\n   RAISE EXCEPTION 'external pending catalog read budget exhausted' USING ERRCODE='54000';END IF;\n  logical_reads:=logical_reads+1;\n  -- UNIQUE(object_type,live) допускает две строки; третья означает отказ.\n  -- Сначала bounded census, затем любые проверки dirty predicates.\n  FOR catalog_row IN SELECT c.dotted,c.module,c.object_type,c.live\n   FROM ONLY kaname.catalog_resource c WHERE c.object_type=p_model\n   LIMIT least(3,p_rows-logical_rows+1) LOOP\n   logical_rows:=logical_rows+1;\n   IF logical_rows>p_rows THEN\n    RAISE EXCEPTION 'external pending catalog row budget exhausted' USING ERRCODE='54000';END IF;\n   IF jsonb_array_length(catalog_rows)>=2 OR catalog_row.module='iam'\n    OR catalog_row.object_type IS DISTINCT FROM p_model\n    OR kaname._authority_access_label_dirty_root_type_valid_v1(catalog_row.dotted) IS DISTINCT FROM true\n    OR split_part(catalog_row.dotted,'.',1) IS DISTINCT FROM catalog_row.module THEN\n    RAISE EXCEPTION 'external pending catalog identity unavailable' USING ERRCODE='42501';END IF;\n   catalog_rows:=catalog_rows||jsonb_build_array(to_jsonb(catalog_row));\n  END LOOP;\n  IF catalog_rows='[]'::jsonb THEN\n   RAISE EXCEPTION 'external pending catalog mapping unavailable' USING ERRCODE='42501';END IF;\n  FOR catalog_item IN SELECT value FROM jsonb_array_elements(catalog_rows)\n   ORDER BY value->>'dotted' COLLATE \"C\" LOOP\n   IF logical_reads>=p_reads THEN\n    RAISE EXCEPTION 'external pending root read budget exhausted' USING ERRCODE='54000';END IF;\n   logical_reads:=logical_reads+1;\n   SELECT EXISTS(SELECT 1 FROM kaname.authority_access_label_dirty_root r\n    WHERE r.root_type=catalog_item->>'dotted' AND r.root_id=p_id) INTO pending;\n   IF pending THEN\n    logical_rows:=logical_rows+1;\n    IF logical_rows>p_rows THEN\n     RAISE EXCEPTION 'external pending root row budget exhausted' USING ERRCODE='54000';END IF;\n    RETURN NEXT;RETURN;\n   END IF;\n  END LOOP;\n  IF logical_reads>=p_reads THEN\n   RAISE EXCEPTION 'external pending fact read budget exhausted' USING ERRCODE='54000';END IF;\n  logical_reads:=logical_reads+1;\n  SELECT EXISTS(SELECT 1 FROM kaname.authority_access_label_dirty_fact d\n   WHERE d.object_type=p_model AND d.object_id=p_id) INTO pending;\n  logical_rows:=logical_rows+CASE WHEN pending THEN 1 ELSE 0 END;\n  IF logical_rows>p_rows THEN\n   RAISE EXCEPTION 'external pending fact row budget exhausted' USING ERRCODE='54000';END IF;\n  RETURN NEXT;RETURN;\n END IF;\n"
  ]
 ]$changes$::jsonb),
- ('authority_metadata_service_account_access_label_ready_v1()','50eaf3862137e2bfe29e47c7b1e018794ce2f90606bac7f64702a5d8f441f201','c41d55203f97c0db8cbc42a23534aaf6560ba3eea9e382f1dc1c8516e976e437',
+ ('authority_metadata_service_account_access_label_ready_v1()','f256e7f8258542c9fdbcacb424ed1ecf1689e03af494e066f73c76c789d861cd','d138be11188212363fc7dd6475d08b9b92f209d5834b0cb22b4e147aa88a6d9c',
   $changes$[
  [
   "45464597290417cfad0f087b8ccf44453c7b4362b94bde2229fe3e0e785b33f5",
@@ -127,8 +127,8 @@ BEGIN
   "45ab208874926a028090e251b2440a6304de296fdc5424dba056a6fc1f1892cf"
  ],
  [
-  "57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e",
-  "101f173a9ff06492d12bbbf3e41f9e52e5979fdcd7ff7d6c4b884ceafcde9ec6"
+  "c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b",
+  "55fa1ecf2a399ec6d808860833f09a66ff90232caf9d12eb31d72478b873c1d9"
  ],
  [
   "e40c32117191982841cdd3197aa9f09889caf673edcb995a9c0896b0e66242d3",
@@ -185,7 +185,7 @@ DO $install$
 DECLARE step record; pair jsonb; found_oid oid; definition text; original text;
 BEGIN
  FOR step IN SELECT * FROM (VALUES
- ('authority_metadata_service_account_access_label_ready_v1()','c41d55203f97c0db8cbc42a23534aaf6560ba3eea9e382f1dc1c8516e976e437','50eaf3862137e2bfe29e47c7b1e018794ce2f90606bac7f64702a5d8f441f201',
+ ('authority_metadata_service_account_access_label_ready_v1()','d138be11188212363fc7dd6475d08b9b92f209d5834b0cb22b4e147aa88a6d9c','f256e7f8258542c9fdbcacb424ed1ecf1689e03af494e066f73c76c789d861cd',
   $changes$[
  [
   "2bc27d802bf1b8461acc43e4bad5a4b5a155665db51740553af1061a3597f81c",
@@ -196,8 +196,8 @@ BEGIN
   "e40c32117191982841cdd3197aa9f09889caf673edcb995a9c0896b0e66242d3"
  ],
  [
-  "101f173a9ff06492d12bbbf3e41f9e52e5979fdcd7ff7d6c4b884ceafcde9ec6",
-  "57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e"
+  "55fa1ecf2a399ec6d808860833f09a66ff90232caf9d12eb31d72478b873c1d9",
+  "c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b"
  ],
  [
   "45ab208874926a028090e251b2440a6304de296fdc5424dba056a6fc1f1892cf",
@@ -226,7 +226,7 @@ BEGIN
   "0c3a3bf0b6f329da989508ee996659557a419ca12e3c83eab11ae0daf5e126b7"
  ]
 ]$changes$::jsonb),
- ('_authority_full_contract_storage_v3()','101f173a9ff06492d12bbbf3e41f9e52e5979fdcd7ff7d6c4b884ceafcde9ec6','57c31f2abafba3f779aff359fc30dbdacc4827e2be18d9ed381831a27050996e',
+ ('_authority_full_contract_storage_v3()','55fa1ecf2a399ec6d808860833f09a66ff90232caf9d12eb31d72478b873c1d9','c85f7b863c7202a0e951426ab51a8e18a906b86c7c7bec61b25886a57e75417b',
   $changes$[
  [
   "d5892bc3912e46c57530c959d730e4a669707c34271798caa5a08cc954aed087",

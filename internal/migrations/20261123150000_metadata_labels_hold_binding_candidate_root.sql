@@ -154,6 +154,12 @@ BEGIN
  IF NOT kaname._authority_full_contract_storage_v3() THEN RAISE EXCEPTION 'binding runtime grant closure incomplete' USING ERRCODE='55000';END IF;
  PERFORM kaname._authority_protocol_grant_runtime_generation1(p_runtime);
  SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;
+ -- Исторический GRANT SELECT ON ALL TABLES не открывает состояние допуска.
+ EXECUTE format('REVOKE ALL ON TABLE kaname.authority_child_parent_state,kaname.authority_child_creation FROM %I',runtime_name);
+ IF has_table_privilege(p_runtime,'kaname.authority_child_parent_state','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ OR has_table_privilege(p_runtime,'kaname.authority_child_creation','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+  RAISE EXCEPTION 'runtime retains private child registration privileges' USING ERRCODE='42501';
+ END IF;
  FOREACH signature IN ARRAY ARRAY[
   'authority_native_write_arm_v4(uuid)','authority_native_write_read_v4()',
   'authority_native_delete_batch_read_v4()',
@@ -211,6 +217,14 @@ BEGIN
   'authority_sa_state_preflight_v3(text,boolean,text)'] LOOP
   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
  END LOOP;
+ -- После полной поставки выдаём runtime только узкие входы тела потомка.
+ IF to_regprocedure('kaname._authority_child_runtime_storage_v1()') IS NOT NULL THEN
+  FOREACH signature IN ARRAY ARRAY['authority_child_registration_begin_body_v1(jsonb)',
+   'authority_child_registration_step_v1(integer)','authority_child_registration_complete_v1()',
+   'authority_child_parent_close_apply_v1(jsonb)'] LOOP
+   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
+  END LOOP;
+ END IF;
 END $$;
 -- +goose StatementEnd
 
@@ -269,7 +283,7 @@ BEGIN
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
  ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
- ('authority_protocol_grant_runtime(regrole)','2c9f76c7514138e65250e22135bb6593912b9c0fb5613f2c9cfd97405244f1ca',false,'v',true,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','eca3ae8082386ec9ed099a19c0a3a84acc6c356e701eef7daf4fdef517e6f212',false,'v',true,'preserve'),
  ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
@@ -301,10 +315,11 @@ BEGIN
  ('_authority_crud_command_v3(text,jsonb)','c5002541ff2bbabedbcd9d74b6adc04b13a6a36833eefd1631f875d47652eb75',true,'i',true,'private'),
  ('_authority_crud_structural_v3(text,text,text,text)','00d37afb9a7b7c9d4534df79f313c14e13fc16a1756d368d85ca2e5f4d939c13',true,'i',true,'private'),
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
- ('authority_resource_assert_body_v2(jsonb)','3c9b0e789716d0e0c9d50e98b80ea7e90746703425e13dc92246b210d5c68410',true,'v',true,'preserve'),
- ('_authority_resource_require_completion_v2()','bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6',true,'v',true,'preserve'),
- ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9',true,'v',true,'preserve'),
- ('authority_resource_prewait_v2(jsonb,integer,integer)','e835d0c4f015334d151c7a902e7cb5c10a8f7d5d2ee2c4d6fad478bd558e5f83',true,'v',true,'preserve'),
+ ('authority_resource_registration_command_values_v2(jsonb)','ba55237e2826a2f425437d0993210204ab578a04decf5f7bbdf91fbf3c45aa3b',true,'v',true,'preserve'),
+ ('authority_resource_assert_body_v2(jsonb)','6aeb29fc8290e51a32a03b5902b485305bd2736b80f9a328fac55cea738ac3a1',true,'v',true,'preserve'),
+ ('_authority_resource_require_completion_v2()','e1c6b94cd3542ce6e1055c70a7ef067675ebbd3826084e24c04d21b3df29f203',true,'v',true,'preserve'),
+ ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
+ ('authority_resource_prewait_v2(jsonb,integer,integer)','6db93afbea0e41ec3015366f85a71fd440bbeeac259424e982556df55ed41522',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
  ('_authority_crud_intent_v3(jsonb)','e62f470c0c69a980308bec36a35f515609cb8fea56c79ec7632ac654a43e0f49',true,'i',true,'private'),
@@ -336,7 +351,7 @@ BEGIN
  ('_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','424927c26adc58d65a55a4567766054c378f1340662d0401146e5e2dac2f0bad',true,'v',true,'private'),
  ('_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','a9e7a60de752dcf436571f457c67de751439e77276005238dab9abed9ef9049b',true,'v',true,'private'),
  ('_authority_crud_scope_capture_v3(jsonb,integer,integer)','7cd250c6e17d5c41737c1afebca7576744bae05ec46af01136678c515e23f5e5',true,'s',true,'private'),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true,'v',true,'preserve'),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true,'v',true,'preserve'),
  ('_authority_resource_crud_store_v3(jsonb)','b3c4cf46195b7a32a2454911b29c8ea51a0e37741ca98380890e911f4e765135',true,'v',true,'private'),
  ('_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','8ebecbc122a5558910017569ac3ea927ad37ea4066dec179a253807b4c5d9574',true,'v',true,'private'),
  ('_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','ded94e6b1bf461dfaf9753a2e71dc73f45f474826b1d7a2f950e097c455629b0',true,'v',true,'private'),
@@ -349,7 +364,7 @@ BEGIN
  ('authority_binding_sequence_prepare_v3(text,jsonb)','bc276ed48b9a8e9d4eeb6cb472bfbda1a1a400dd8b34992f391f9423143272fc',true,'v',true,'export'),
  ('authority_binding_sequence_finalize_v3()','51e4b66f099b3b7c0a5f144af2ae540b5dbe72d00c52a170cfc7ec2e43f87fdb',true,'v',true,'export'),
  ('authority_binding_insert_stamp_v3(text)','0e37cf1836a1625f1c518c7c847cafe3da04ef9ef692db8c1c23fb27b40d1c71',true,'v',true,'export'),
- ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','de942f0c6c21834ac9ecb177f4dce25e5c66c83101aaaf78bd23805ab04952a6',true,'v',true,'export'),
+ ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','e61e4cb14a0cbe97eaae4466df38f79e9996e0eff1eb8ed79421835733dc19f6',true,'v',true,'export'),
  ('_authority_binding_stage_snapshot_v3()','9e9d561435b0f86c51aec452283505184beee36e1dc02f4af708590955d2eebf',true,'v',true,'private'),
  ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
  ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
@@ -396,7 +411,7 @@ BEGIN
  ('_authority_sequence_claim_v3(text,jsonb,jsonb)','18cdb51c9e44fa944b355cadf1abcb291eba062ca09f3221118bcd60d736c740',true,'v',true,'private'),
  ('_authority_sequence_applied_v3(text,bigint,jsonb)','0a4c24ded6b6aad09fd077e4a1ad8d40dee440c4e27e44dc20e4300bfc0a5a7d',true,'v',true,'private'),
  ('_authority_sequence_complete_v3()','c9f728c4492acf65f92ea6a6f411b3af85e63e765c5226bbf3ea1e80fd9291d1',true,'v',true,'private'),
- ('authority_resource_finalize_v2(jsonb,integer,integer)','f68d6ef701f2e730fd10d2c65aec966d04aceaf54465ac87b684da8157985f0c',true,'v',true,'preserve'),
+ ('authority_resource_finalize_v2(jsonb,integer,integer)','20a9e6ee2af213a514ca21399d62cdb981a399ad7e96cbae330c152d0ecf837d',true,'v',true,'preserve'),
  ('_authority_resource_object_prepare_v2(jsonb,integer,integer)','47aae35f146c1d05bf9f5f52f9f7b929d69d91f64b39844fd697530c467af440',true,'v',true,'preserve'),
  ('_authority_resource_object_program_v2(jsonb,timestamptz)','97f643954fbef4036c37240711c9ce9650045102c77bce1d5e8396d89a4c8464',true,'i',true,'preserve'),
  ('_authority_resource_object_sequence_prepare_v3(jsonb,integer)','bbf639e8b58fee3ee80ce322a7946cd5ae4a3f0a84804270117a369914fc5153',true,'v',true,'private'),
@@ -405,7 +420,8 @@ BEGIN
  ('_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','0d6ab18cc9cac1395df175c0c91912737bf8e78464d46da0c385e31aa36c9b66',true,'v',true,'private'),
  ('_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','ca262446dbab831c80c933c45b0095f12ceaa10367477a696266217b44736911',true,'v',true,'private'),
  ('_authority_resource_registration_direct_prepare_v2(jsonb,integer,integer)','ad9230edf198624a3d9caa84ee5a5a9954b79cd9afa58b1e0b64b60eb3dd2807',true,'v',true,'preserve'),
- ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','3b4c2286943cb21eb7a8f3f9875bd43a9da46c92268bb2838c30c01102df681d',true,'v',true,'preserve'),
+ ('_authority_child_parent_cascade_prewait_v1(jsonb,integer,integer)','801ee44ba52ceb636e3ca820b560b33c4558f7a8e504c1b9047ede50183035d7',false,'v',true,'private'),
+ ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','ed2c4fcf57221f8687c3d086a286bb738add6cfa84cebfda2fc0a20a95a37ace',true,'v',true,'preserve'),
  ('authority_role_stage_epoch_lock(text[],jsonb)','2f4e6d4569577abe84313594f72e973d8b5fb63ac2adbd5605640751c7bc5021',true,'v',true,'preserve'),
  ('authority_role_sequence_prepare_v3(jsonb,integer,integer)','5d47e24c50baaa1619a6cfb2198255c248fec06d535e13febacf7078c6aeae64',true,'v',true,'export'),
  ('authority_role_sequence_finalize_v3()','4b1b5626bc90a7826a4bed308befc83c4e688b636f9dcd59d7446811f20ec891',true,'v',true,'export'),
@@ -423,7 +439,7 @@ BEGIN
  ('_authority_resource_audit_capture_wait_v2(jsonb,integer,integer,boolean)','48833909f08147b697650810555b86266f9f7b6b0c41951fee89ba22ec25fd97',true,'v',true,'preserve'),
  ('_authority_resource_audit_plan_v2(jsonb,jsonb,jsonb)','f11cd1f48fdf0634bc288b523beb1758e66fbfab54fe020abb580cd0eaa99514',true,'i',true,'preserve'),
  ('_authority_resource_audit_wait_v2(jsonb,integer,integer)','29066819dd86fb4512a79fc4b8d30f88e95df89a74099e91471b39548efeb3e3',true,'v',true,'preserve'),
- ('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0',true,'i',true,'preserve'),
+ ('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','827602df4b6c9590bdd3cbf94087a2ccbdb412f95736be0c3eda05e6cfba18ac',true,'i',true,'preserve'),
  ('_authority_resource_binding_certificate_v2(jsonb,jsonb,text,text,text,boolean,jsonb)','ec4d5deaf2df7982eba06a3350b0ae874c7179af6b41912fae3ed4d93e5c9386',true,'i',true,'preserve'),
  ('_authority_resource_bundle_catalog_v2(integer,integer)','eab6ae0b0d35773cd85b32a52758804f843eb49b289c6296d44df34e92fa3842',true,'v',true,'preserve'),
  ('_authority_resource_capture_index_v2(jsonb,integer)','988ed25715d6c9322bff7d8a6dc4d60b9d849a512d30ff9b70f8a1afbaa464f4',true,'i',true,'preserve'),
@@ -432,7 +448,7 @@ BEGIN
  ('_authority_resource_catalog_capture_wait_v2(jsonb,integer,integer,boolean)','c2dce8593b8f7616af573591ed0d439f822054f78f96de78ff8fc20d59efde18',true,'v',true,'preserve'),
  ('_authority_resource_catalog_wait_v2(jsonb,integer,integer)','6231367fd8a56cec22aed190ae2eef6dd8b3f93b2db1a0d8810ca6d9d5d53e97',true,'v',true,'preserve'),
  ('_authority_resource_contained_v2(text,text,jsonb,text)','e8cd715375fb48ff94738b78d82f00087fa548634ca3ebc43edd45dd54c8a758',true,'i',true,'preserve'),
- ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','f463bd9d8f543624d5ca5d9f685bc2548b56410689a30470bcab07f0aa0d6790',true,'i',true,'preserve'),
+ ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','c24b6686e9bd21247289b6efcbd2277902da2cb951134cc770bdbeab4af12fe5',true,'i',true,'preserve'),
  ('_authority_resource_encode_proposed_rules_v2(jsonb,boolean)','e2f7cab577d72eedcbf78ccfbe3c3109cf1414d90617a036a95861ab199bbacc',true,'i',true,'preserve'),
  ('_authority_resource_epoch_wait_v2(jsonb,jsonb,jsonb,integer,integer)','52e0cc8f44374d68a98450683564534073a08be0727c31e8846757f906910129',true,'v',true,'preserve'),
  ('_authority_resource_grant_reference_v2(jsonb,text)','df8c0b484673605fdf285a40ab35045b49f622ed66da6d56962846d1228009b4',true,'i',true,'preserve'),
@@ -446,6 +462,8 @@ BEGIN
  ('_authority_resource_match_wait_v2(jsonb,integer,integer)','6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626',true,'v',true,'preserve'),
  ('_authority_resource_materializable_types_v2()','de8eb0540e5ee90a586412bc1503c3c16c24ba9f99359cae97ed7489c8151136',true,'i',true,'preserve'),
  ('_authority_resource_materialized_types_v2(jsonb,integer)','a1b18cbee25c6da9fa6cbd017b0dbcd69eaa5c692065d0856d6b65cadaad4bac',true,'i',true,'preserve'),
+ ('_authority_resource_materialized_types_v2(jsonb,integer,jsonb)','c48f643efc4c37a7de9bc99b59feeae1c7c631c005ff8fc8fc2cc56ec83a4861',true,'i',true,'private'),
+ ('_authority_binding_census_projection_v3(jsonb,jsonb,integer,jsonb)','36963e0529cbc6e5264d76b1d8aa88eea1f19839bfec61684821fac060f59478',true,'i',true,'private'),
  ('_authority_resource_member_obligations_v2(jsonb,jsonb,jsonb,jsonb,boolean,boolean)','4cda1e3112578a85f8b85c11a17a6d68126eb4eebea678c542fe5eee2e7a2d58',true,'i',true,'preserve'),
  ('_authority_resource_module_identity_v2(text,text,text)','b8c934a9370e413464b0577108ed9e69b42898308851b003ad2f646bd0e94fc8',true,'i',true,'preserve'),
  ('_authority_resource_nested_rows_v2(jsonb,jsonb,integer,integer)','3af0e8ae4591ff8be128e912062f921974d9d7ec9202c8ce1f4a6de651fed360',true,'v',true,'preserve'),
@@ -460,7 +478,7 @@ BEGIN
  ('_authority_resource_object_physical_v2(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','98f24f2154bfc6e60611130a825cf0eb93efb6631ed36ba142f8c9a2eb0cae61',true,'i',true,'preserve'),
  ('_authority_resource_object_store_v2(jsonb)','761cb220c553c2d519c5adc6fc14b6ab4675779b205dbc529982863023ac1b5a',true,'v',true,'preserve'),
  ('_authority_resource_object_write_keys_v2(jsonb,jsonb)','55621c02ba3a899e93d5c41eddef68dd231c37500d740e2ff09bfffcb8529072',true,'i',true,'preserve'),
- ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305',true,'i',true,'preserve'),
+ ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c',true,'i',true,'preserve'),
  ('_authority_resource_physical_relations_wait_v2(jsonb,integer)','86d6bd4c42c79ee3d6dc95ea2317113fcf99849f0445a03307e598abffecb3f2',true,'v',true,'preserve'),
  ('_authority_resource_predicate_maximum_v2(jsonb,jsonb)','54f35fa496cbd4bbb0ff0d7f838eab7e3dbb1bf17cf5b3ea8a54e55223e68a46',true,'i',true,'preserve'),
  ('_authority_resource_preheld_key_v2(integer,text,boolean)','77d85a114d79fb9d60470f0bdd63e2f688d5164fd5a225c5cebef10e43da78ea',true,'v',true,'preserve'),
@@ -471,7 +489,7 @@ BEGIN
  ('_authority_resource_publication_images_v2(text,text,boolean,timestamptz,jsonb,jsonb,timestamptz)','0a343a95b30ad5ec1de4aaaf900d74e0fef4c44506ca5c406ec9ea7e7916c53a',true,'i',true,'preserve'),
  ('_authority_resource_recipient_verbs_v2(jsonb,jsonb,jsonb,text,boolean,text,boolean)','f6080aad1d9dc4a12c26513ba2638f5fde3f959a79ce83a88a1c16e522b42c29',true,'i',true,'preserve'),
  ('_authority_resource_reconcile_wait_v2(integer,integer)','2e5af4934a850ef95f1a333ad71694bd4f27fa51f1b0de19b670ed9f3ca5d8fa',true,'v',true,'preserve'),
- ('_authority_resource_refusal_certificate_v2(jsonb,jsonb,jsonb,jsonb)','6839592d4eb1336e5deeef0eec6f2367c14f0717c63f575c4be6b03352563350',true,'i',true,'preserve'),
+ ('_authority_resource_refusal_certificate_v2(jsonb,jsonb,jsonb,jsonb)','1f5e087abb91e7289bd935f29592eb51b59f93b176dd1a86cee74672aa1f879a',true,'i',true,'preserve'),
  ('_authority_resource_refusal_materialize_v2(jsonb,jsonb,timestamptz)','fc6cef31e2f28cb7b6bf3d5b6f95aa601ac1caf89a55e7405af0c84a302d1eab',true,'i',true,'preserve'),
  ('_authority_resource_refusal_prepare_v2(jsonb,integer,integer)','1cf4deb21d1776d53041718e1a2d453150d83b269a8de108d021b736a348d831',true,'v',true,'preserve'),
  ('_authority_resource_registration_authority_final_v2(jsonb,timestamptz)','5369474ff41744e9375e8b91ed623a1fbeab6c8dcd954f563a89dcdbf672b965',true,'i',true,'preserve'),
@@ -481,7 +499,7 @@ BEGIN
  ('_authority_resource_registration_direct_program_v2(jsonb,jsonb,timestamptz)','89e76fe747ba97a46120af7c1548b02835beba9e19618fb03b0add94bf3c434c',true,'i',true,'preserve'),
  ('_authority_resource_registration_direct_sources_v2(jsonb,jsonb)','35a8292b281969ee1003e54336a2acda78e2c592daa4022b1412efd1996a0427',true,'i',true,'preserve'),
  ('_authority_resource_registration_fact_v2(text,text,jsonb)','81397be2c987bdd6787b0cc3fc52692b970c534ab42d126e5f1aafd28484c4c9',true,'i',true,'preserve'),
- ('_authority_resource_registration_intent_certificate_v2(jsonb,jsonb,jsonb,jsonb)','3fde2c87a6c7b8e3aebbd36fef57b37671f46b313af2e3348d9b27b0032015eb',true,'i',true,'preserve'),
+ ('_authority_resource_registration_intent_certificate_v2(jsonb,jsonb,jsonb,jsonb)','18c7790f1463d3982e3f69b7b80f1e2af3210a1da06202f88abc44cb681d86e5',true,'i',true,'preserve'),
  ('_authority_resource_registration_manifest_images_v2(jsonb,jsonb,jsonb)','acecdc1f6a1f2a36d62c82af93ccad6351700ba1bd927d26240c480ebc5b1596',true,'i',true,'preserve'),
  ('_authority_resource_registration_materialize_v2(jsonb,jsonb,jsonb,jsonb,jsonb,timestamptz)','455a6cb564a14038aff88f58f383ed79625016ec2896cf0f2f303b0e734a7964',true,'i',true,'preserve'),
  ('_authority_resource_registration_maximum_v2(jsonb,jsonb,jsonb,jsonb,jsonb)','0d869eee616ea83c8f5c20c179c727022ceecf8ff42cb0a53731aba56d8cb6cc',true,'i',true,'preserve'),
@@ -511,11 +529,11 @@ BEGIN
  ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef',true,'v',true,'preserve'),
  ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c',true,'v',true,'preserve'),
  ('_authority_resource_source_wait_v2(jsonb,boolean,integer,integer)','1ce9b16ec596aa1521e295cadb310ea5680c69ba5ea12ee995f186adeb5bd654',true,'v',true,'preserve'),
- ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754',true,'i',true,'private'),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','2b2757872642bb61bb18ab2f6dc58e300a9d356c68490303fc7ce2562802826b',true,'i',true,'private'),
  ('_authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','9415be5436a7ed74e97131d996f346df3f1b02d23c7f5b108fa7788629a0c6ed',true,'i',true,'preserve'),
  ('_authority_resource_subject_change_wait_v2(integer,integer)','bb5f61c161012d21fe2480ffbdc61fc8095ceb1d9d265a13b26530b22b568632',true,'v',true,'preserve'),
  ('_authority_resource_target_contains_v2(jsonb,text,text)','5c3e97459a3935ec873831692d25cf522a7ca8447a97fbb376a1be6aa9fd8186',true,'i',true,'preserve'),
- ('_authority_resource_tuple_relations_v2(jsonb,jsonb,text,jsonb,text)','12783ae0cb998e5b67d6fbb72bea4acea1467078509b818a2a2b0c4524d402a8',true,'i',true,'preserve'),
+ ('_authority_resource_tuple_relations_v2(jsonb,jsonb,text,jsonb,text)','efc819930de778d8c757833f9d5e3f056f9e7723da3dd2ef1e9d958c2902d0cb',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_audit_hierarchy_v2(jsonb,jsonb,jsonb,jsonb)','6f8f54188fade71649c640691ff5cabeffcf1512f89d4744e138be4b6f6a00d2',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_certificate_v2(jsonb,jsonb,jsonb,jsonb,jsonb)','023353817aec9d9ab441c2e5bd8f9ba66b6d2164d7d71f2d82f646b025a4e615',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_current_v2(jsonb,jsonb,jsonb)','91cb5cb519e0a34e103fcf84df5ecf2259c656282c55a0fc4c88a5f83cd84101',true,'i',true,'preserve'),
@@ -543,7 +561,7 @@ BEGIN
  ('_authority_resource_withdrawal_physical_v2(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','44869037245345da786a82632bb8f22d2a5095769ea5b194cd39ff63933b354d',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_retention_v2(jsonb,text,jsonb,jsonb,jsonb)','50d877065d0b35b3a8b9f13319110f0c736a790c18be146c38ba66fd471ecd81',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_role_images_v2(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','414605ec9f19132a0cb9fb3f89d3524e8547c400ae2bc45083865b53bee2fb68',true,'i',true,'preserve'),
- ('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','89c1b44eb9a74c42c2be80f3f395e05216636481893f47ac85b6696704689ab6',true,'i',true,'preserve'),
+ ('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','1a003c807a251a32fc1c07ab25f386c692ff8ff0104934684e515d343844ac57',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_role_rules_v2(jsonb,jsonb,text,jsonb)','9491569e7691e17074fe14ef74539351bd21fb7776970eb82a6f79a4aef1ea0b',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_roles_v2(jsonb,jsonb,jsonb,text,jsonb,jsonb,jsonb)','7a8a458214d4d7047ef95b7a7d89d1cf30fb44c2b0e641a9d0eddcb3cd3a70bd',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_rules_v2(jsonb,text,text)','7bf6058618cf10048a6cb7671342c222e6dd24ff4825d6743990dd2a8c50e29c',true,'i',true,'preserve'),
@@ -912,6 +930,16 @@ BEGIN
  OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=to_regclass('kaname.authority_writer_contract') AND relowner=owner_oid AND relkind='r' AND relpersistence='p')
  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
   WHERE c.oid=to_regclass('kaname.authority_writer_contract') AND a.grantee<>owner_oid) THEN RETURN false; END IF;
+ -- Хранилище инкарнаций и квитанций принадлежит только владельцу протокола.
+ IF EXISTS(SELECT 1
+  FROM unnest(ARRAY['authority_child_parent_state','authority_child_creation']) AS required(name)
+  LEFT JOIN pg_catalog.pg_class c ON c.oid=to_regclass('kaname.'||required.name)
+  WHERE c.oid IS NULL OR c.relowner IS DISTINCT FROM owner_oid OR c.relkind<>'r' OR c.relpersistence<>'p'
+   OR EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee<>owner_oid)
+   OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute col
+    CROSS JOIN LATERAL aclexplode(col.attacl) a
+    WHERE col.attrelid=c.oid AND col.attnum>0 AND NOT col.attisdropped AND a.grantee<>owner_oid)
+ ) THEN RETURN false;END IF;
  FOR target IN SELECT unnest(kaname.authority_protocol_tables()) LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=to_regclass('kaname.'||target)
    AND t.tgname='authority_protocol_statement' AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgtype::integer=62
@@ -984,7 +1012,8 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','aeae15a7999935cb4c70f1d3fa7cfa6e89ab23174486876cb35412dce7cd2a55',true),
+ ('_authority_child_runtime_storage_v1()','34e6b08a8a368a89f6c6afe61393a7b526b5ecc0482627c67005fa9db7c4fdf7',true),
+ ('_authority_crud_storage_v3()','84744955b6d8390e7a5d26066000d5dc4365d875f07aa8c7cf927c05e34ec2d0',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -1007,7 +1036,7 @@ BEGIN
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
@@ -1023,7 +1052,7 @@ BEGIN
    EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee<>owner_oid)
   ELSE false
  END) THEN RETURN false; END IF;
- RETURN kaname._authority_crud_storage_v3();
+ RETURN kaname._authority_crud_storage_v3() AND kaname._authority_child_runtime_storage_v1();
 END $$;
 -- +goose StatementEnd
 
@@ -1084,6 +1113,12 @@ BEGIN
  IF NOT kaname._authority_full_contract_storage_v3() THEN RAISE EXCEPTION 'binding runtime grant closure incomplete' USING ERRCODE='55000';END IF;
  PERFORM kaname._authority_protocol_grant_runtime_generation1(p_runtime);
  SELECT rolname INTO STRICT runtime_name FROM pg_catalog.pg_roles WHERE oid=p_runtime;
+ -- Исторический GRANT SELECT ON ALL TABLES не открывает состояние допуска.
+ EXECUTE format('REVOKE ALL ON TABLE kaname.authority_child_parent_state,kaname.authority_child_creation FROM %I',runtime_name);
+ IF has_table_privilege(p_runtime,'kaname.authority_child_parent_state','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+ OR has_table_privilege(p_runtime,'kaname.authority_child_creation','SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER') THEN
+  RAISE EXCEPTION 'runtime retains private child registration privileges' USING ERRCODE='42501';
+ END IF;
  FOREACH signature IN ARRAY ARRAY[
   'authority_native_write_arm_v4(uuid)','authority_native_write_read_v4()',
   'authority_native_delete_batch_read_v4()',
@@ -1140,6 +1175,14 @@ BEGIN
   'authority_sa_state_preflight_v3(text,boolean,text)'] LOOP
   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
  END LOOP;
+ -- После полной поставки выдаём runtime только узкие входы тела потомка.
+ IF to_regprocedure('kaname._authority_child_runtime_storage_v1()') IS NOT NULL THEN
+  FOREACH signature IN ARRAY ARRAY['authority_child_registration_begin_body_v1(jsonb)',
+   'authority_child_registration_step_v1(integer)','authority_child_registration_complete_v1()',
+   'authority_child_parent_close_apply_v1(jsonb)'] LOOP
+   EXECUTE format('GRANT EXECUTE ON FUNCTION kaname.%s TO %I',signature,runtime_name);
+  END LOOP;
+ END IF;
 END $$;
 -- +goose StatementEnd
 
@@ -1198,7 +1241,7 @@ BEGIN
  ('authority_subject_change_applied_v2()','fa776df6d3b95dadb13fa1684424b2db105b21f5b8862bd045680fb8129d094e',true,'v',true,'private'),
  ('authority_subject_change_statement_guard_v2()','600129602604e3cac17840ff155738e5c886677cd8be781b62b9b29f2fe785b0',true,'v',true,'private'),
  ('relation_fact_from_journal()','604d827358eab2f756c0c53d9a65cfbaf31b3f5d19ff8adc6e3dab944e8fa70a',false,'v',false,'preserve'),
- ('authority_protocol_grant_runtime(regrole)','94ae2c19e29b666c57be670abf65ae931c36af865d31844aec44998df68939a5',false,'v',true,'preserve'),
+ ('authority_protocol_grant_runtime(regrole)','d754231dce790f01596d86b4e2d3e0d4c5fd0672ab5bbd0bf9443687bc960df6',false,'v',true,'preserve'),
  ('authority_binding_command_begin_v3(jsonb)','39696919bfed78731817c77a37920e661801933c5ac544bc26ea5603a7fa39b1',true,'v',true,'export'),
  ('authority_binding_command_end_v3(jsonb)','2c9ee43be689f773c543fc800645f2aae482ec02d392fd28937efa50558915b2',true,'v',true,'export'),
  ('authority_binding_command_audit_v3(jsonb)','93c1bfc6bd6b753868e68ff6e408089f701d189ed6e7c30a32c7998baade872f',true,'v',true,'export'),
@@ -1230,10 +1273,11 @@ BEGIN
  ('_authority_crud_command_v3(text,jsonb)','c5002541ff2bbabedbcd9d74b6adc04b13a6a36833eefd1631f875d47652eb75',true,'i',true,'private'),
  ('_authority_crud_structural_v3(text,text,text,text)','00d37afb9a7b7c9d4534df79f313c14e13fc16a1756d368d85ca2e5f4d939c13',true,'i',true,'private'),
  ('_authority_crud_command_plan_v3(jsonb,jsonb)','ea252acb7bcebc7c96da591416609deb3b606d01eeda6a3a32e911a0e77af3d1',true,'i',true,'private'),
- ('authority_resource_assert_body_v2(jsonb)','3c9b0e789716d0e0c9d50e98b80ea7e90746703425e13dc92246b210d5c68410',true,'v',true,'preserve'),
- ('_authority_resource_require_completion_v2()','bbcfca0b3d5ff59ad273695dfed2451f1ff37bf4030f8f7083415396dafee0e6',true,'v',true,'preserve'),
- ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','3eb8735862b7643f353c9e10312c2fe9ca251489f875c1faf30289f3d166b5d9',true,'v',true,'preserve'),
- ('authority_resource_prewait_v2(jsonb,integer,integer)','e835d0c4f015334d151c7a902e7cb5c10a8f7d5d2ee2c4d6fad478bd558e5f83',true,'v',true,'preserve'),
+ ('authority_resource_registration_command_values_v2(jsonb)','ba55237e2826a2f425437d0993210204ab578a04decf5f7bbdf91fbf3c45aa3b',true,'v',true,'preserve'),
+ ('authority_resource_assert_body_v2(jsonb)','6aeb29fc8290e51a32a03b5902b485305bd2736b80f9a328fac55cea738ac3a1',true,'v',true,'preserve'),
+ ('_authority_resource_require_completion_v2()','e1c6b94cd3542ce6e1055c70a7ef067675ebbd3826084e24c04d21b3df29f203',true,'v',true,'preserve'),
+ ('authority_resource_fold_body_v2(text,jsonb,timestamptz)','6be8def5de6ed9a89e95f50764835b8da6baa06ca26a053b84bb4d6279b38282',true,'v',true,'preserve'),
+ ('authority_resource_prewait_v2(jsonb,integer,integer)','6db93afbea0e41ec3015366f85a71fd440bbeeac259424e982556df55ed41522',true,'v',true,'preserve'),
  ('_authority_crud_image_v3(integer,text,text,jsonb,jsonb,boolean)','967a84fb10617c3a5f376d63aaf2903538edc5fe1548150b307bae33a70ee3f9',true,'i',true,'private'),
  ('_authority_crud_domain_images_v3(jsonb,jsonb,jsonb,timestamptz)','2e4cf1562674897a696483469505925ba5862b6fe0422f663b330eb96f237b9e',true,'i',true,'private'),
  ('_authority_crud_intent_v3(jsonb)','e62f470c0c69a980308bec36a35f515609cb8fea56c79ec7632ac654a43e0f49',true,'i',true,'private'),
@@ -1265,7 +1309,7 @@ BEGIN
  ('_authority_crud_relation_wait_v3(jsonb,jsonb,jsonb,integer)','424927c26adc58d65a55a4567766054c378f1340662d0401146e5e2dac2f0bad',true,'v',true,'private'),
  ('_authority_crud_reserve_v3(jsonb,jsonb,jsonb,integer,integer)','a9e7a60de752dcf436571f457c67de751439e77276005238dab9abed9ef9049b',true,'v',true,'private'),
  ('_authority_crud_scope_capture_v3(jsonb,integer,integer)','7cd250c6e17d5c41737c1afebca7576744bae05ec46af01136678c515e23f5e5',true,'s',true,'private'),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true,'v',true,'preserve'),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true,'v',true,'preserve'),
  ('_authority_resource_crud_store_v3(jsonb)','b3c4cf46195b7a32a2454911b29c8ea51a0e37741ca98380890e911f4e765135',true,'v',true,'private'),
  ('_authority_crud_tuple_wait_v3(text,jsonb,boolean,integer,integer)','8ebecbc122a5558910017569ac3ea927ad37ea4066dec179a253807b4c5d9574',true,'v',true,'private'),
  ('_authority_crud_unique_wait_v3(text,jsonb,integer,integer)','ded94e6b1bf461dfaf9753a2e71dc73f45f474826b1d7a2f950e097c455629b0',true,'v',true,'private'),
@@ -1278,7 +1322,7 @@ BEGIN
  ('authority_binding_sequence_prepare_v3(text,jsonb)','bc276ed48b9a8e9d4eeb6cb472bfbda1a1a400dd8b34992f391f9423143272fc',true,'v',true,'export'),
  ('authority_binding_sequence_finalize_v3()','51e4b66f099b3b7c0a5f144af2ae540b5dbe72d00c52a170cfc7ec2e43f87fdb',true,'v',true,'export'),
  ('authority_binding_insert_stamp_v3(text)','0e37cf1836a1625f1c518c7c847cafe3da04ef9ef692db8c1c23fb27b40d1c71',true,'v',true,'export'),
- ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','de942f0c6c21834ac9ecb177f4dce25e5c66c83101aaaf78bd23805ab04952a6',true,'v',true,'export'),
+ ('authority_binding_stage_sequence_capture_v3(jsonb,text[],jsonb,integer,integer)','e61e4cb14a0cbe97eaae4466df38f79e9996e0eff1eb8ed79421835733dc19f6',true,'v',true,'export'),
  ('_authority_binding_stage_snapshot_v3()','9e9d561435b0f86c51aec452283505184beee36e1dc02f4af708590955d2eebf',true,'v',true,'private'),
  ('authority_binding_stage_sequence_prepare_v3(text,text[],jsonb,integer,integer)','efdbe3e491e0c3bd8ade664a61d8e049094cc5b781f7fe14347a94e2dd5979e6',true,'v',true,'export'),
  ('authority_binding_stage_sequence_finalize_v3(text)','cd285782054ce7720b1072484e7b24758bcae7f8b7c7a117556b9836c1299a18',true,'v',true,'export'),
@@ -1325,7 +1369,7 @@ BEGIN
  ('_authority_sequence_claim_v3(text,jsonb,jsonb)','18cdb51c9e44fa944b355cadf1abcb291eba062ca09f3221118bcd60d736c740',true,'v',true,'private'),
  ('_authority_sequence_applied_v3(text,bigint,jsonb)','0a4c24ded6b6aad09fd077e4a1ad8d40dee440c4e27e44dc20e4300bfc0a5a7d',true,'v',true,'private'),
  ('_authority_sequence_complete_v3()','c9f728c4492acf65f92ea6a6f411b3af85e63e765c5226bbf3ea1e80fd9291d1',true,'v',true,'private'),
- ('authority_resource_finalize_v2(jsonb,integer,integer)','f68d6ef701f2e730fd10d2c65aec966d04aceaf54465ac87b684da8157985f0c',true,'v',true,'preserve'),
+ ('authority_resource_finalize_v2(jsonb,integer,integer)','20a9e6ee2af213a514ca21399d62cdb981a399ad7e96cbae330c152d0ecf837d',true,'v',true,'preserve'),
  ('_authority_resource_object_prepare_v2(jsonb,integer,integer)','47aae35f146c1d05bf9f5f52f9f7b929d69d91f64b39844fd697530c467af440',true,'v',true,'preserve'),
  ('_authority_resource_object_program_v2(jsonb,timestamptz)','97f643954fbef4036c37240711c9ce9650045102c77bce1d5e8396d89a4c8464',true,'i',true,'preserve'),
  ('_authority_resource_object_sequence_prepare_v3(jsonb,integer)','bbf639e8b58fee3ee80ce322a7946cd5ae4a3f0a84804270117a369914fc5153',true,'v',true,'private'),
@@ -1334,7 +1378,8 @@ BEGIN
  ('_authority_resource_registration_sequence_prepare_v3(jsonb,integer,integer)','0d6ab18cc9cac1395df175c0c91912737bf8e78464d46da0c385e31aa36c9b66',true,'v',true,'private'),
  ('_authority_resource_registration_sequence_final_v3(jsonb,timestamptz)','ca262446dbab831c80c933c45b0095f12ceaa10367477a696266217b44736911',true,'v',true,'private'),
  ('_authority_resource_registration_direct_prepare_v2(jsonb,integer,integer)','ad9230edf198624a3d9caa84ee5a5a9954b79cd9afa58b1e0b64b60eb3dd2807',true,'v',true,'preserve'),
- ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','3b4c2286943cb21eb7a8f3f9875bd43a9da46c92268bb2838c30c01102df681d',true,'v',true,'preserve'),
+ ('_authority_child_parent_cascade_prewait_v1(jsonb,integer,integer)','801ee44ba52ceb636e3ca820b560b33c4558f7a8e504c1b9047ede50183035d7',false,'v',true,'private'),
+ ('_authority_resource_unregistration_prepare_v2(jsonb,integer,integer)','ed2c4fcf57221f8687c3d086a286bb738add6cfa84cebfda2fc0a20a95a37ace',true,'v',true,'preserve'),
  ('authority_role_stage_epoch_lock(text[],jsonb)','2f4e6d4569577abe84313594f72e973d8b5fb63ac2adbd5605640751c7bc5021',true,'v',true,'preserve'),
  ('authority_role_sequence_prepare_v3(jsonb,integer,integer)','5d47e24c50baaa1619a6cfb2198255c248fec06d535e13febacf7078c6aeae64',true,'v',true,'export'),
  ('authority_role_sequence_finalize_v3()','4b1b5626bc90a7826a4bed308befc83c4e688b636f9dcd59d7446811f20ec891',true,'v',true,'export'),
@@ -1351,7 +1396,7 @@ BEGIN
  ('_authority_resource_audit_capture_wait_v2(jsonb,integer,integer,boolean)','48833909f08147b697650810555b86266f9f7b6b0c41951fee89ba22ec25fd97',true,'v',true,'preserve'),
  ('_authority_resource_audit_plan_v2(jsonb,jsonb,jsonb)','f11cd1f48fdf0634bc288b523beb1758e66fbfab54fe020abb580cd0eaa99514',true,'i',true,'preserve'),
  ('_authority_resource_audit_wait_v2(jsonb,integer,integer)','29066819dd86fb4512a79fc4b8d30f88e95df89a74099e91471b39548efeb3e3',true,'v',true,'preserve'),
- ('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','0dd211dcb360329fa856f8c14692b50169668f73e2c03fd90aea3d3a0d7737b0',true,'i',true,'preserve'),
+ ('_authority_resource_binding_candidates_v2(jsonb,jsonb,text,text,text,boolean)','827602df4b6c9590bdd3cbf94087a2ccbdb412f95736be0c3eda05e6cfba18ac',true,'i',true,'preserve'),
  ('_authority_resource_binding_certificate_v2(jsonb,jsonb,text,text,text,boolean,jsonb)','ec4d5deaf2df7982eba06a3350b0ae874c7179af6b41912fae3ed4d93e5c9386',true,'i',true,'preserve'),
  ('_authority_resource_bundle_catalog_v2(integer,integer)','eab6ae0b0d35773cd85b32a52758804f843eb49b289c6296d44df34e92fa3842',true,'v',true,'preserve'),
  ('_authority_resource_capture_index_v2(jsonb,integer)','988ed25715d6c9322bff7d8a6dc4d60b9d849a512d30ff9b70f8a1afbaa464f4',true,'i',true,'preserve'),
@@ -1360,7 +1405,7 @@ BEGIN
  ('_authority_resource_catalog_capture_wait_v2(jsonb,integer,integer,boolean)','c2dce8593b8f7616af573591ed0d439f822054f78f96de78ff8fc20d59efde18',true,'v',true,'preserve'),
  ('_authority_resource_catalog_wait_v2(jsonb,integer,integer)','6231367fd8a56cec22aed190ae2eef6dd8b3f93b2db1a0d8810ca6d9d5d53e97',true,'v',true,'preserve'),
  ('_authority_resource_contained_v2(text,text,jsonb,text)','e8cd715375fb48ff94738b78d82f00087fa548634ca3ebc43edd45dd54c8a758',true,'i',true,'preserve'),
- ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','f463bd9d8f543624d5ca5d9f685bc2548b56410689a30470bcab07f0aa0d6790',true,'i',true,'preserve'),
+ ('_authority_resource_coordinate_certificate_v2(jsonb,jsonb,text,jsonb,jsonb)','c24b6686e9bd21247289b6efcbd2277902da2cb951134cc770bdbeab4af12fe5',true,'i',true,'preserve'),
  ('_authority_resource_encode_proposed_rules_v2(jsonb,boolean)','e2f7cab577d72eedcbf78ccfbe3c3109cf1414d90617a036a95861ab199bbacc',true,'i',true,'preserve'),
  ('_authority_resource_epoch_wait_v2(jsonb,jsonb,jsonb,integer,integer)','52e0cc8f44374d68a98450683564534073a08be0727c31e8846757f906910129',true,'v',true,'preserve'),
  ('_authority_resource_grant_reference_v2(jsonb,text)','df8c0b484673605fdf285a40ab35045b49f622ed66da6d56962846d1228009b4',true,'i',true,'preserve'),
@@ -1374,6 +1419,8 @@ BEGIN
  ('_authority_resource_match_wait_v2(jsonb,integer,integer)','6ff5dc168529251407ee765ab0f1a53e4089a124e101128f481ea5382ba3e626',true,'v',true,'preserve'),
  ('_authority_resource_materializable_types_v2()','de8eb0540e5ee90a586412bc1503c3c16c24ba9f99359cae97ed7489c8151136',true,'i',true,'preserve'),
  ('_authority_resource_materialized_types_v2(jsonb,integer)','a1b18cbee25c6da9fa6cbd017b0dbcd69eaa5c692065d0856d6b65cadaad4bac',true,'i',true,'preserve'),
+ ('_authority_resource_materialized_types_v2(jsonb,integer,jsonb)','c48f643efc4c37a7de9bc99b59feeae1c7c631c005ff8fc8fc2cc56ec83a4861',true,'i',true,'private'),
+ ('_authority_binding_census_projection_v3(jsonb,jsonb,integer,jsonb)','36963e0529cbc6e5264d76b1d8aa88eea1f19839bfec61684821fac060f59478',true,'i',true,'private'),
  ('_authority_resource_member_obligations_v2(jsonb,jsonb,jsonb,jsonb,boolean,boolean)','4cda1e3112578a85f8b85c11a17a6d68126eb4eebea678c542fe5eee2e7a2d58',true,'i',true,'preserve'),
  ('_authority_resource_module_identity_v2(text,text,text)','b8c934a9370e413464b0577108ed9e69b42898308851b003ad2f646bd0e94fc8',true,'i',true,'preserve'),
  ('_authority_resource_nested_rows_v2(jsonb,jsonb,integer,integer)','3af0e8ae4591ff8be128e912062f921974d9d7ec9202c8ce1f4a6de651fed360',true,'v',true,'preserve'),
@@ -1388,7 +1435,7 @@ BEGIN
  ('_authority_resource_object_physical_v2(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','98f24f2154bfc6e60611130a825cf0eb93efb6631ed36ba142f8c9a2eb0cae61',true,'i',true,'preserve'),
  ('_authority_resource_object_store_v2(jsonb)','761cb220c553c2d519c5adc6fc14b6ab4675779b205dbc529982863023ac1b5a',true,'v',true,'preserve'),
  ('_authority_resource_object_write_keys_v2(jsonb,jsonb)','55621c02ba3a899e93d5c41eddef68dd231c37500d740e2ff09bfffcb8529072',true,'i',true,'preserve'),
- ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','e22a387229f36c3ff81806752df50a0a0b5e03f2d8a66df1f0482180e17b5305',true,'i',true,'preserve'),
+ ('_authority_resource_ordinary_member_v2(jsonb,jsonb,text,jsonb,jsonb)','12f63b57af5fb53abdaaf7695491a13443f4a709a38d2124a8cfd707c6ce573c',true,'i',true,'preserve'),
  ('_authority_resource_physical_relations_wait_v2(jsonb,integer)','86d6bd4c42c79ee3d6dc95ea2317113fcf99849f0445a03307e598abffecb3f2',true,'v',true,'preserve'),
  ('_authority_resource_predicate_maximum_v2(jsonb,jsonb)','54f35fa496cbd4bbb0ff0d7f838eab7e3dbb1bf17cf5b3ea8a54e55223e68a46',true,'i',true,'preserve'),
  ('_authority_resource_preheld_key_v2(integer,text,boolean)','77d85a114d79fb9d60470f0bdd63e2f688d5164fd5a225c5cebef10e43da78ea',true,'v',true,'preserve'),
@@ -1399,7 +1446,7 @@ BEGIN
  ('_authority_resource_publication_images_v2(text,text,boolean,timestamptz,jsonb,jsonb,timestamptz)','0a343a95b30ad5ec1de4aaaf900d74e0fef4c44506ca5c406ec9ea7e7916c53a',true,'i',true,'preserve'),
  ('_authority_resource_recipient_verbs_v2(jsonb,jsonb,jsonb,text,boolean,text,boolean)','f6080aad1d9dc4a12c26513ba2638f5fde3f959a79ce83a88a1c16e522b42c29',true,'i',true,'preserve'),
  ('_authority_resource_reconcile_wait_v2(integer,integer)','2e5af4934a850ef95f1a333ad71694bd4f27fa51f1b0de19b670ed9f3ca5d8fa',true,'v',true,'preserve'),
- ('_authority_resource_refusal_certificate_v2(jsonb,jsonb,jsonb,jsonb)','6839592d4eb1336e5deeef0eec6f2367c14f0717c63f575c4be6b03352563350',true,'i',true,'preserve'),
+ ('_authority_resource_refusal_certificate_v2(jsonb,jsonb,jsonb,jsonb)','1f5e087abb91e7289bd935f29592eb51b59f93b176dd1a86cee74672aa1f879a',true,'i',true,'preserve'),
  ('_authority_resource_refusal_materialize_v2(jsonb,jsonb,timestamptz)','fc6cef31e2f28cb7b6bf3d5b6f95aa601ac1caf89a55e7405af0c84a302d1eab',true,'i',true,'preserve'),
  ('_authority_resource_refusal_prepare_v2(jsonb,integer,integer)','1cf4deb21d1776d53041718e1a2d453150d83b269a8de108d021b736a348d831',true,'v',true,'preserve'),
  ('_authority_resource_registration_authority_final_v2(jsonb,timestamptz)','5369474ff41744e9375e8b91ed623a1fbeab6c8dcd954f563a89dcdbf672b965',true,'i',true,'preserve'),
@@ -1409,7 +1456,7 @@ BEGIN
  ('_authority_resource_registration_direct_program_v2(jsonb,jsonb,timestamptz)','89e76fe747ba97a46120af7c1548b02835beba9e19618fb03b0add94bf3c434c',true,'i',true,'preserve'),
  ('_authority_resource_registration_direct_sources_v2(jsonb,jsonb)','35a8292b281969ee1003e54336a2acda78e2c592daa4022b1412efd1996a0427',true,'i',true,'preserve'),
  ('_authority_resource_registration_fact_v2(text,text,jsonb)','81397be2c987bdd6787b0cc3fc52692b970c534ab42d126e5f1aafd28484c4c9',true,'i',true,'preserve'),
- ('_authority_resource_registration_intent_certificate_v2(jsonb,jsonb,jsonb,jsonb)','3fde2c87a6c7b8e3aebbd36fef57b37671f46b313af2e3348d9b27b0032015eb',true,'i',true,'preserve'),
+ ('_authority_resource_registration_intent_certificate_v2(jsonb,jsonb,jsonb,jsonb)','18c7790f1463d3982e3f69b7b80f1e2af3210a1da06202f88abc44cb681d86e5',true,'i',true,'preserve'),
  ('_authority_resource_registration_manifest_images_v2(jsonb,jsonb,jsonb)','acecdc1f6a1f2a36d62c82af93ccad6351700ba1bd927d26240c480ebc5b1596',true,'i',true,'preserve'),
  ('_authority_resource_registration_materialize_v2(jsonb,jsonb,jsonb,jsonb,jsonb,timestamptz)','455a6cb564a14038aff88f58f383ed79625016ec2896cf0f2f303b0e734a7964',true,'i',true,'preserve'),
  ('_authority_resource_registration_maximum_v2(jsonb,jsonb,jsonb,jsonb,jsonb)','0d869eee616ea83c8f5c20c179c727022ceecf8ff42cb0a53731aba56d8cb6cc',true,'i',true,'preserve'),
@@ -1439,11 +1486,11 @@ BEGIN
  ('_authority_resource_selector_rows_v2(jsonb,integer,integer)','d7da86929ecc720bfd1f617a1c02ae074a487c8280e931a91cba0f008c8060ef',true,'v',true,'preserve'),
  ('_authority_resource_selector_shape_v2(jsonb,integer,integer)','c044631ad4287271aa8540488883ec06983a5abb85f484388a25cba713191a3c',true,'v',true,'preserve'),
  ('_authority_resource_source_wait_v2(jsonb,boolean,integer,integer)','1ce9b16ec596aa1521e295cadb310ea5680c69ba5ea12ee995f186adeb5bd654',true,'v',true,'preserve'),
- ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','24e7fbc54d15adea39c37df0bff9d333725a2a17911080d1698329cabc603754',true,'i',true,'private'),
+ ('_authority_resource_special_member_core_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','2b2757872642bb61bb18ab2f6dc58e300a9d356c68490303fc7ce2562802826b',true,'i',true,'private'),
  ('_authority_resource_special_member_v2(jsonb,jsonb,text,jsonb,jsonb,jsonb)','9415be5436a7ed74e97131d996f346df3f1b02d23c7f5b108fa7788629a0c6ed',true,'i',true,'preserve'),
  ('_authority_resource_subject_change_wait_v2(integer,integer)','bb5f61c161012d21fe2480ffbdc61fc8095ceb1d9d265a13b26530b22b568632',true,'v',true,'preserve'),
  ('_authority_resource_target_contains_v2(jsonb,text,text)','5c3e97459a3935ec873831692d25cf522a7ca8447a97fbb376a1be6aa9fd8186',true,'i',true,'preserve'),
- ('_authority_resource_tuple_relations_v2(jsonb,jsonb,text,jsonb,text)','12783ae0cb998e5b67d6fbb72bea4acea1467078509b818a2a2b0c4524d402a8',true,'i',true,'preserve'),
+ ('_authority_resource_tuple_relations_v2(jsonb,jsonb,text,jsonb,text)','efc819930de778d8c757833f9d5e3f056f9e7723da3dd2ef1e9d958c2902d0cb',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_audit_hierarchy_v2(jsonb,jsonb,jsonb,jsonb)','6f8f54188fade71649c640691ff5cabeffcf1512f89d4744e138be4b6f6a00d2',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_certificate_v2(jsonb,jsonb,jsonb,jsonb,jsonb)','023353817aec9d9ab441c2e5bd8f9ba66b6d2164d7d71f2d82f646b025a4e615',true,'i',true,'preserve'),
  ('_authority_resource_unregistration_current_v2(jsonb,jsonb,jsonb)','91cb5cb519e0a34e103fcf84df5ecf2259c656282c55a0fc4c88a5f83cd84101',true,'i',true,'preserve'),
@@ -1471,7 +1518,7 @@ BEGIN
  ('_authority_resource_withdrawal_physical_v2(jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','44869037245345da786a82632bb8f22d2a5095769ea5b194cd39ff63933b354d',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_retention_v2(jsonb,text,jsonb,jsonb,jsonb)','50d877065d0b35b3a8b9f13319110f0c736a790c18be146c38ba66fd471ecd81',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_role_images_v2(jsonb,jsonb,jsonb,jsonb,jsonb,jsonb,timestamptz,timestamptz)','414605ec9f19132a0cb9fb3f89d3524e8547c400ae2bc45083865b53bee2fb68',true,'i',true,'preserve'),
- ('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','89c1b44eb9a74c42c2be80f3f395e05216636481893f47ac85b6696704689ab6',true,'i',true,'preserve'),
+ ('_authority_resource_withdrawal_role_projection_v2(jsonb,jsonb,jsonb,jsonb)','1a003c807a251a32fc1c07ab25f386c692ff8ff0104934684e515d343844ac57',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_role_rules_v2(jsonb,jsonb,text,jsonb)','9491569e7691e17074fe14ef74539351bd21fb7776970eb82a6f79a4aef1ea0b',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_roles_v2(jsonb,jsonb,jsonb,text,jsonb,jsonb,jsonb)','7a8a458214d4d7047ef95b7a7d89d1cf30fb44c2b0e641a9d0eddcb3cd3a70bd',true,'i',true,'preserve'),
  ('_authority_resource_withdrawal_rules_v2(jsonb,text,text)','7bf6058618cf10048a6cb7671342c222e6dd24ff4825d6743990dd2a8c50e29c',true,'i',true,'preserve'),
@@ -1840,6 +1887,16 @@ BEGIN
  OR NOT EXISTS(SELECT 1 FROM pg_catalog.pg_class WHERE oid=to_regclass('kaname.authority_writer_contract') AND relowner=owner_oid AND relkind='r' AND relpersistence='p')
  OR EXISTS(SELECT 1 FROM pg_catalog.pg_class c CROSS JOIN LATERAL aclexplode(c.relacl) a
   WHERE c.oid=to_regclass('kaname.authority_writer_contract') AND a.grantee<>owner_oid) THEN RETURN false; END IF;
+ -- Хранилище инкарнаций и квитанций принадлежит только владельцу протокола.
+ IF EXISTS(SELECT 1
+  FROM unnest(ARRAY['authority_child_parent_state','authority_child_creation']) AS required(name)
+  LEFT JOIN pg_catalog.pg_class c ON c.oid=to_regclass('kaname.'||required.name)
+  WHERE c.oid IS NULL OR c.relowner IS DISTINCT FROM owner_oid OR c.relkind<>'r' OR c.relpersistence<>'p'
+   OR EXISTS(SELECT 1 FROM aclexplode(coalesce(c.relacl,acldefault('r',c.relowner))) a WHERE a.grantee<>owner_oid)
+   OR EXISTS(SELECT 1 FROM pg_catalog.pg_attribute col
+    CROSS JOIN LATERAL aclexplode(col.attacl) a
+    WHERE col.attrelid=c.oid AND col.attnum>0 AND NOT col.attisdropped AND a.grantee<>owner_oid)
+ ) THEN RETURN false;END IF;
  FOR target IN SELECT unnest(kaname.authority_protocol_tables()) LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_catalog.pg_trigger t WHERE t.tgrelid=to_regclass('kaname.'||target)
    AND t.tgname='authority_protocol_statement' AND t.tgenabled='O' AND NOT t.tgisinternal AND t.tgtype::integer=62
@@ -1912,7 +1969,8 @@ BEGIN
  -- Один SQL-запрос на все отпечатки; ACL читается только после совпадения
  -- тела и параметров приватной функции.
  IF EXISTS(SELECT 1 FROM (VALUES
- ('_authority_crud_storage_v3()','6326dbbe95ddb1ccaf50e2f59eda2a2072a2dbdbe253db6263c2a9073f717b42',true),
+ ('_authority_child_runtime_storage_v1()','34e6b08a8a368a89f6c6afe61393a7b526b5ecc0482627c67005fa9db7c4fdf7',true),
+ ('_authority_crud_storage_v3()','6b39ee6bf886b1ae0746093127e5b89264d32b88f01b3e3ff8bb79ebed51f259',true),
  ('authority_parent_prelock_admit_v3()','0a5d8d81822501af40183c78d52e8897d3bf8583e8b888589a64951a88139247',true),
  ('_authority_minted_cutoff_key_v3(text)','e070405bfea920fb884831cd02890bd90810a65f4d617a828b1af9ea48542623',true),
  ('_authority_minted_cutoff_order_v3()','d911640bce1f00a365213aa03845461e4d6f479ca564e40745b810ad2976dd29',true),
@@ -1935,7 +1993,7 @@ BEGIN
  ('authority_protocol_stage_full_v3(text,bytea,text,text,text)','1f7a9c17af7a4c3ec041405fa9f0dddc69cdf3fa666ba72db47247cde8447037',false),
  ('authority_protocol_activate_full_v3(text,text,text)','646328a2433e1d31d17a9c178ac3ab59a5a65d8252accf5295a20d22705d31cf',false),
  ('authority_protocol_attestation()','130a504f7da2b6780cd4e91a2c7103f9fabe765541f0f2611f900ce679ddd502',true),
- ('authority_protocol_statement_guard()','e188d77b0c72ec88024fb6ab264e2ae639679213ff727b5c61946dfde596bdad',true),
+ ('authority_protocol_statement_guard()','7608e2d0a1b1ce2bb11182a349150e5369e2bd97c5fb8abc3da84b3d2e0c229a',true),
  ('authority_protocol_row_guard()','cb90a95df9b7105f053ae0c8652407335ef82745a2e749dc395b1c82e8435d12',true),
  ('_authority_protocol_stage_generation1(text,bytea,text,text,text)','7ffb942af742bff4b556f07b00d9d8f75fefba3aa1f00445073140b5c8072bde',false),
  ('_authority_protocol_activate_generation1(text,text,text)','00d97c37e2ab533c232e4cffb975e8d71c3eefa98228e0f39d90249526bf041c',false),
@@ -1951,7 +2009,7 @@ BEGIN
    EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee<>owner_oid)
   ELSE false
  END) THEN RETURN false; END IF;
- RETURN kaname._authority_crud_storage_v3();
+ RETURN kaname._authority_crud_storage_v3() AND kaname._authority_child_runtime_storage_v1();
 END $$;
 -- +goose StatementEnd
 
