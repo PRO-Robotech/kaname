@@ -18,12 +18,11 @@ package user_tokens
 import (
 	"context"
 
+	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/service"
 )
 
 const (
-	// auditEventUserTokenIssued — UserTokenService.Issue.
-	auditEventUserTokenIssued = "iam.user_token.issued"
 	// auditEventUserGrantRevoked — UserTokenService.Revoke.
 	auditEventUserGrantRevoked = "iam.user_token.revoked"
 )
@@ -35,24 +34,6 @@ type auditEmitter interface {
 	EmitTx(ctx context.Context, tx service.Tx, ev service.AuditEvent) error
 }
 
-// userTokenAuditPayload — тело event_payload для issue/revoke-события токена.
-// Snake_case ключи (паритет с прочими audit-строками).
-//
-//   - actor         — ВЕРИФИЦИРОВАННЫЙ принципал вызывающего (из
-//     PrincipalFromContext), никогда из тела запроса (anti-spoofing).
-//   - user_id       — User, которому принадлежит токен.
-//   - token_id      — kaname UserOAuthClient id (uoc_…), НЕ секрет.
-//   - key_algorithm — JOSE alg зарегистрированного публичного ключа ("ES256").
-//
-// НИКОГДА не несёт private_key_pem / любой токен — credential-материал не попадает
-// в audit-trail.
 func userTokenAuditPayload(actor, userID, tokenID, keyAlgorithm string) map[string]any {
-	return map[string]any{
-		"actor":         actor,
-		"resource_type": "user_token",
-		"resource_id":   tokenID,
-		"user_id":       userID,
-		"token_id":      tokenID,
-		"key_algorithm": keyAlgorithm,
-	}
+	return shared.UserTokenAuditPayload(actor, userID, tokenID, keyAlgorithm)
 }

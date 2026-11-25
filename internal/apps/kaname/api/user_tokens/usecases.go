@@ -646,12 +646,7 @@ func (u *IssueUserTokenUseCase) commitMapping(ctx context.Context, row domain.Us
 	// Durable audit-строка в ТОЙ ЖЕ tx (атомарно с Insert). Payload несёт только
 	// не-секретные идентификаторы (нет key material).
 	if u.audit != nil {
-		if aerr := u.audit.EmitTx(ctx, tx, service.AuditEvent{
-			EventType:       auditEventUserTokenIssued,
-			TenantAccountID: "",
-			Payload: userTokenAuditPayload(
-				actor.ID, string(row.UserID), string(persisted.ID), keyAlgorithm),
-		}); aerr != nil {
+		if aerr := u.audit.EmitTx(ctx, tx, shared.UserTokenIssuedAuditEvent(actor.ID, row.UserID, persisted.ID, keyAlgorithm)); aerr != nil {
 			return domain.UserOAuthClient{}, mapPGErrLogged(ctx, u.logger, "user_tokens.Issue.emitAudit", aerr)
 		}
 	}
