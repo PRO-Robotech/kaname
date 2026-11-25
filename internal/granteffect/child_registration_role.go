@@ -25,7 +25,7 @@ func (c *Compiler) compileChildRegistration(s *Set, b Binding, sel domain.RuleSe
 		s.obligations = append(s.obligations, Obligation{"catalog_type", sel.Container.Type, p})
 		return
 	}
-	region, err := selectorRegion(sel.Container.Arm, sel.Container.ResourceNames, sel.Container.MatchLabels)
+	region, err := selectorRegion(sel.Container.Arm, sel.Container.ResourceNames, sel.Container.MatchLabels, sel.Container.MatchAccessLabels)
 	if err != nil {
 		s.obligations = append(s.obligations, Obligation{"selector", err.Error(), p})
 		return
