@@ -60,6 +60,7 @@ type callerNode struct {
 	lit *ast.FuncLit
 }
 type callerGraph struct {
+	directMethodRefs      map[*types.Func]bool // Точные прямые упоминания методов в типизированном радиусе.
 	p                     *surfaceProgram
 	closureOwners         map[*ast.FuncLit][]callerNode // Неизменяемый индекс синтаксиса; called остаётся отдельным для каждого решения.
 	bodies                map[callerNode]callerBody
@@ -207,6 +208,7 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 		g.bodies[callerNode{lit: lit}] = callerBody{sp, lit.Body, "closure@" + p.fset.Position(lit.Pos()).String()}
 	}
 	g.indexCallerClosureOwners()
+	g.indexDirectCallerMethods()
 	// go/types даёт отдельный объект каждой ветви type switch. Индекс
 	// общих присваиваний его не содержит; источник у него — operand switch.
 	for _, sp := range p.pkgs {

@@ -200,7 +200,7 @@ func (g *callerGraph) bindCaller(sp *surfaceSrcPkg, owner callerNode, call *ast.
 					method, _ := selection.Obj().(*types.Func)
 					bound = method != nil && (isIfaceMethod(method) || len(selection.Index()) > 1)
 				}
-				if !bound {
+				if !bound && !g.capturedCallerField(sp, sel, selection, target.fn, sig) {
 					g.addCallerLive(sig.Recv(), valueSrc{pkg: sp, fk: callerKey(owner), expr: sel.X, tuple: -1})
 				}
 			}
