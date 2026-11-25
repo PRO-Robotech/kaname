@@ -316,6 +316,9 @@ func (g *callerGraph) retainCallerAnswer(key callerResolveKey, answer callerReso
 	}
 	// Копия размером ровно с ответ не удерживает ёмкость сырого объединения.
 	answer.values = append([]callerOrigin(nil), answer.values...)
+	if d := g.finalProbe; d != nil {
+		d.saveMemo(key, initial, answer.unknown)
+	}
 	g.resolveMemoGeneration++
 	if initial {
 		g.initialResolveMemo[key] = answer

@@ -138,6 +138,9 @@ func (g *callerGraph) embeddedCallerSources(src valueSrc, fields []*types.Var, s
 			// Значение, прочитанное при доказательстве времени жизни этого запроса, сохраняет
 			// начальные источники и явные записи, уже найденные владельцем.
 			active := g.fieldQueries[query]
+			if active.unknown {
+				g.finalReason("published_field_unknown", src.expr, nil, fields[0])
+			}
 			return active.refs, active.unknown
 		}
 		defer g.leaveCallerFieldQuery(query)
@@ -212,6 +215,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 		return nil, true
 	}
 	if src.rangeKey {
+		g.finalReason("range_key_field", src.expr, nil, fields[0])
 		// Поле ключа map не является полем значения контейнера.
 		return nil, true
 	}
@@ -254,6 +258,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 			path := append(fieldPath(sel), fields...)
 			return g.embeddedCallerSources(src, path, seen)
 		}
+		g.finalReason("nonfield_selector", src.expr, nil, fields[0])
 		return nil, true
 	case *ast.CompositeLit:
 		if values, indexed := g.embeddedLiterals.values[callerEmbeddedLiteralKey{sp, x}]; indexed && fields[0] != nil {
@@ -282,6 +287,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 				}
 				return refs, unknown
 			}
+			g.finalReason("unsupported_field_literal", src.expr, nil, fields[0])
 			return nil, true
 		}
 		for i, elt := range x.Elts {
@@ -290,6 +296,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 			if kv, ok := elt.(*ast.KeyValueExpr); ok {
 				id, ok := kv.Key.(*ast.Ident)
 				if !ok {
+					g.finalReason("unsupported_field_key", src.expr, kv.Key, fields[0])
 					return nil, true
 				}
 				field, _ = sp.info.Uses[id].(*types.Var)
@@ -330,6 +337,15 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 		unknown = u
 		for _, target := range targets {
 			if target.node == (callerNode{}) {
+				if d := g.finalProbe; d != nil && d.active != nil && !d.muted {
+					kind := "field_return_no_body"
+					if target.foreign {
+						kind = "field_return_foreign_candidate"
+					} else if target.nilValue {
+						kind = "field_return_nil_candidate"
+					}
+					g.finalReason(kind, src.expr, x.Fun, fields[0])
+				}
 				unknown = true
 				continue
 			}
@@ -340,6 +356,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 			}
 			results := g.index.returns[callerKey(target.node)]
 			if i >= len(results) {
+				g.finalReason("field_missing_return", src.expr, x.Fun, fields[0])
 				unknown = true
 				continue
 			}
@@ -362,6 +379,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 	default:
 		v := callerVariable(sp, expr)
 		if v == nil {
+			g.finalReason("unsupported_field_source", src.expr, nil, fields[0])
 			return nil, true
 		}
 		sources := g.sources(v)
@@ -371,6 +389,7 @@ func (g *callerGraph) embeddedCallerSourcesRaw(src valueSrc, fields []*types.Var
 				return nil, false
 			}
 			g.observeUnboundCallback(v)
+			g.finalReason("unbound_field_variable", src.expr, nil, fields[0])
 			return nil, true
 		}
 		for _, value := range sources {

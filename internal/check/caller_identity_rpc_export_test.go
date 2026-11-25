@@ -28,7 +28,8 @@ func CheckNarrowingWitnessForTest(ctx context.Context, root string, declared []C
 	if err != nil {
 		return CheckNarrowingWitness{}, err
 	}
-	scope := callerRegisteredWalk{rpc: rpc}
+	d := newFinalCauseProbe(p)
+	scope := callerRegisteredWalk{rpc: rpc, finalProbe: d}
 	r := scope.collect(ctx, p, callerExternalLeafProof(l), nil)
 	if r.Invalid != "" || scope.readSet == nil {
 		return CheckNarrowingWitness{}, fmt.Errorf("обход Check не завершён: %s %v", r.Invalid, r.Findings)
@@ -38,6 +39,7 @@ func CheckNarrowingWitnessForTest(ctx context.Context, root string, declared []C
 	if err != nil {
 		return CheckNarrowingWitness{}, err
 	}
+	d.print(p, r.Findings, rpc, narrow[rpc])
 	selected := map[string]bool{}
 	if narrow[rpc] {
 		selected[rpc] = true

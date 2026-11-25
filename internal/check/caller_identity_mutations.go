@@ -507,8 +507,16 @@ func (g *callerGraph) callerObjectsRaw(src valueSrc, seen map[callerObjectSource
 }
 
 func (g *callerGraph) callerMutations(src valueSrc, field *types.Var) (refs []valueSrc, unknown bool) {
+	d := g.finalBoundary()
+	var why finalCause
+	if d != nil {
+		defer func() { d.finishBoundary(unknown, why) }()
+	}
 	objects, u := g.callerObjects(src, map[callerObjectSourceID]bool{})
 	unknown = u
+	if d != nil && u && why.Kind == "" {
+		why = causeAt("mutation_unknown_input_object", src.expr, nil, field)
+	}
 	for _, write := range g.mutations[field.Origin()] {
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 			return nil, true
@@ -520,10 +528,16 @@ func (g *callerGraph) callerMutations(src valueSrc, field *types.Var) (refs []va
 		if len(write.path) > 0 {
 			var u bool
 			owners, u = g.embeddedCallerSources(write.owner, write.path, map[callerFieldKey]bool{})
+			if d != nil && u && why.Kind == "" {
+				why = causeAt("mutation_unknown_embedded_owner", src.expr, write.owner.expr, field)
+			}
 			unknown = unknown || u
 		}
 		for _, owner := range owners {
 			other, u := g.callerObjects(owner, map[callerObjectSourceID]bool{})
+			if d != nil && u && why.Kind == "" {
+				why = causeAt("mutation_unknown_write_owner", src.expr, owner.expr, field)
+			}
 			if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 				return nil, true
 			}
@@ -536,6 +550,9 @@ func (g *callerGraph) callerMutations(src valueSrc, field *types.Var) (refs []va
 					// Непрослеженный вызов callback не доказывает отсутствия
 					// записи: учитываем её и сохраняем отказ до активации.
 					if write.value.fk.lit != nil && !g.called[callerNode{lit: write.value.fk.lit}] {
+						if d != nil && why.Kind == "" {
+							why = causeAt("mutation_inactive_closure", src.expr, write.value.expr, field)
+						}
 						unknown = true
 					}
 					refs = append(refs, write.value)

@@ -164,7 +164,28 @@ func (g *callerGraph) orderCallerLifetimeWrites() {
 // Это доказательство не предоставляет цели вызовов. Оно лишь отвергает начальное значение,
 // если достижимый эффект может адресовать его выделение памяти. Явные поля конструктора
 // и пропущенные нулевые поля проходят через один и тот же барьер.
-func (g *callerGraph) callerLifetimeUnknown(src valueSrc, fields ...*types.Var) bool {
+func (g *callerGraph) callerLifetimeUnknown(src valueSrc, fields ...*types.Var) (result bool) {
+	var why finalCause
+	var copied copiedFieldObservation
+	d := g.finalBoundary()
+	var field *types.Var
+	if d != nil {
+		if len(fields) > 0 {
+			field = fields[0]
+		}
+		defer func() {
+			why.Copied = copied
+			if d.observed.FirstRejection == "" {
+				d.observed.FirstRejection = copied.FirstRejection
+			}
+			d.observed.Reached = d.observed.Reached || copied.Reached
+			d.observed.Accepted = d.observed.Accepted || copied.Accepted
+			d.observed.HasKnownSource = d.observed.HasKnownSource || copied.HasKnownSource
+			d.observed.KnownSourceReturnedTrue = d.observed.KnownSourceReturnedTrue || copied.KnownSourceReturnedTrue
+			d.observed.Continued = d.observed.Continued || copied.Continued
+			d.finishBoundary(result, why)
+		}()
+	}
 	if g.semanticOverflow {
 		return true
 	}
@@ -180,19 +201,39 @@ func (g *callerGraph) callerLifetimeUnknown(src valueSrc, fields ...*types.Var) 
 	defer func() { g.lifetimeScanning = false }()
 	g.closeCallerEffects()
 	if g.effectIncomplete {
+		if d != nil {
+			why = causeAt("lifetime_incomplete_effect_closure", src.expr, nil, field)
+		}
 		return true
 	}
 	objects, unknown := g.callerObjects(src, map[callerObjectSourceID]bool{})
 	if unknown {
+		if d != nil {
+			why = causeAt("lifetime_unknown_object", src.expr, nil, field)
+		}
 		return true
 	}
 	for object := range objects {
 		probe := callerLifetimeProbe{g: g, want: object, seen: map[callerResolveKey]bool{}, objects: map[callerObjectKey]bool{}}
+		if d != nil {
+			probe.detail = &finalCause{}
+			probe.copied = &copied
+		}
 		if len(fields) > 0 {
 			probe.field = fields[0].Origin()
 		}
 		for _, write := range g.lifetimeWrites {
+			if probe.detail != nil {
+				*probe.detail = finalCause{}
+			}
 			if write.whole && g.callerLifetimeEffectPossible(write.owner) && probe.contains(write.owner) && !probe.separateScalarStore(write.owner, src, objects) {
+				if d != nil {
+					why = causeAt("lifetime_possible_whole_write", src.expr, write.owner.expr, field)
+					why.Nested, why.NestedAt = probe.detail.Kind, probe.detail.Source
+					if probe.steps > callerLifetimeStepLimit {
+						why.Kind += "_at_probe_limit"
+					}
+				}
 				return true
 			}
 		}
@@ -205,11 +246,31 @@ func (g *callerGraph) callerLifetimeUnknown(src valueSrc, fields ...*types.Var) 
 			}
 			// Выражение функции несёт связанного получателя или замыкание;
 			// проверка лишь аргументов пропускает мутацию получателя без аргументов.
+			if probe.detail != nil {
+				*probe.detail = finalCause{}
+			}
 			if probe.opaqueCalleeContains(site) {
+				if d != nil {
+					why = causeAt("lifetime_opaque_receiver", src.expr, site.call.Fun, field)
+					why.Nested, why.NestedAt = probe.detail.Kind, probe.detail.Source
+					if probe.steps > callerLifetimeStepLimit {
+						why.Kind += "_at_probe_limit"
+					}
+				}
 				return true
 			}
 			for _, arg := range site.call.Args {
+				if probe.detail != nil {
+					*probe.detail = finalCause{}
+				}
 				if probe.contains(valueSrc{pkg: site.pkg, fk: site.fk, expr: arg, tuple: -1}) {
+					if d != nil {
+						why = causeAt("lifetime_opaque_argument", src.expr, arg, field)
+						why.Nested, why.NestedAt = probe.detail.Kind, probe.detail.Source
+						if probe.steps > callerLifetimeStepLimit {
+							why.Kind += "_at_probe_limit"
+						}
+					}
 					return true
 				}
 			}
@@ -257,6 +318,8 @@ func (g *callerGraph) callerLifetimeLocal(site callSrc) bool {
 }
 
 type callerLifetimeProbe struct {
+	copied  *copiedFieldObservation
+	detail  *finalCause
 	g       *callerGraph
 	want    callerObjectKey
 	field   *types.Var
@@ -272,9 +335,11 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 	p.steps++
 	p.g.work.LifetimeProbeSteps++
 	if p.steps > callerLifetimeStepLimit || src.pkg == nil || src.expr == nil {
+		p.noteFinalDetail("step_limit_or_missing_source", src.expr)
 		return true
 	}
 	if p.g.ctx != nil && p.g.ctx.Err() != nil {
+		p.noteFinalDetail("context_done", src.expr)
 		return true
 	}
 	e := ast.Unparen(src.expr)
@@ -354,13 +419,49 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 				base := src
 				base.expr = x.X
 				refs, unknown := p.g.embeddedCallerSources(base, fieldPath(selection), map[callerFieldKey]bool{})
-				if unknown && !p.copiedStringDisjoint(src, x) {
-					return true
+				var copyTrace *copiedFieldObservation
+				if unknown {
+					if p.copied != nil && x == p.g.finalProbe.read {
+						copyTrace = p.copied
+						copyTrace.Reached = true
+					}
+					if !p.copiedStringDisjoint(src, x) {
+						if copyTrace != nil && copyTrace.FirstRejection == "" {
+							switch {
+							case p.field == nil:
+								copyTrace.FirstRejection = "no_queried_field"
+							case p.want.field != nil:
+								copyTrace.FirstRejection = "queried_field_address"
+							case p.g.copiedStringFields[x] != src.pkg:
+								copyTrace.FirstRejection = "unindexed_read"
+							case src.tuple != -1 || src.elem || src.rangeKey || src.rangeVal || src.opAssign:
+								copyTrace.FirstRejection = "non_value_source"
+							default:
+								if _, isInterface := p.field.Type().Underlying().(*types.Interface); !isInterface {
+									copyTrace.FirstRejection = "query_not_interface_or_mode_guard"
+								} else {
+									copyTrace.FirstRejection = "mode_guard_or_type_containment"
+								}
+							}
+						}
+						p.noteFinalDetail("field_source_unknown", x)
+						return true
+					}
+					if copyTrace != nil {
+						copyTrace.Accepted = true
+						copyTrace.HasKnownSource = copyTrace.HasKnownSource || len(refs) > 0
+					}
 				}
 				for _, ref := range refs {
 					if p.contains(ref) {
+						if copyTrace != nil {
+							copyTrace.KnownSourceReturnedTrue = true
+						}
 						return true
 					}
+				}
+				if copyTrace != nil {
+					copyTrace.Continued = true
 				}
 				return false
 			}
@@ -377,6 +478,7 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 	if variable := callerVariable(src.pkg, e); variable != nil {
 		if _, ok := e.(*ast.Ident); ok {
 			if p.want.zero == variable.Origin() {
+				p.noteFinalDetail("same_variable_storage", e)
 				return true
 			}
 			refs := p.g.sources(variable)
@@ -384,7 +486,11 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 				if _, zero := p.g.zeroVars[variable.Origin()]; zero || p.g.emptyVariadic[variable.Origin()] {
 					return p.objectWrites(callerObjectKey{pkg: src.pkg, zero: variable.Origin()})
 				}
-				return p.typeMayContain(src.pkg.info.TypeOf(e))
+				possible := p.typeMayContain(src.pkg.info.TypeOf(e))
+				if possible {
+					p.noteFinalDetail("unbound_variable_type_may_contain", e)
+				}
+				return possible
 			}
 			for _, ref := range refs {
 				if p.contains(ref) {
@@ -401,6 +507,7 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 	}
 	objects, unknown := p.g.callerObjects(src, map[callerObjectSourceID]bool{})
 	if unknown {
+		p.noteFinalDetail("object_source_unknown", e)
 		return true
 	}
 	for object := range objects {
@@ -411,6 +518,7 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 			continue
 		}
 		if object == p.want {
+			p.noteFinalDetail("same_allocation", e)
 			return true
 		}
 		if p.objects[object] {
@@ -489,6 +597,7 @@ func (p *callerLifetimeProbe) containsDirectReceiverValue(src valueSrc, lit *ast
 	p.g.work.LifetimeProbeSteps++
 	if p.steps > callerLifetimeStepLimit || p.g.semanticOverflow || p.g.ctx != nil && p.g.ctx.Err() != nil ||
 		(p.want.pkg == src.pkg && p.want.expr == lit) {
+		p.noteFinalDetail("direct_receiver_guard_or_same_literal", lit)
 		return true
 	}
 	for i, elt := range lit.Elts {
@@ -552,6 +661,9 @@ func (p *callerLifetimeProbe) objectWrites(object callerObjectKey) bool {
 			// функцией, передающей значение через yield. После совпадения
 			// владельца сохраняем UNKNOWN для такого значения.
 			if write.value.rangeKey || write.value.rangeVal || p.contains(write.value) {
+				if write.value.rangeKey || write.value.rangeVal {
+					p.noteFinalDetail("range_write_value", write.value.expr)
+				}
 				return true
 			}
 		}
@@ -565,6 +677,7 @@ func (p *callerLifetimeProbe) objectWrites(object callerObjectKey) bool {
 		typ = object.pkg.info.TypeOf(object.expr)
 	}
 	if typ == nil {
+		p.noteFinalDetail("object_writes_missing_type", object.expr)
 		return true
 	}
 	if ptr, ok := typ.Underlying().(*types.Pointer); ok {
@@ -892,6 +1005,7 @@ func (p *callerLifetimeProbe) addressContains(src valueSrc, operand ast.Expr) bo
 		if selected := src.pkg.info.Selections[selection]; selected != nil && selected.Kind() == types.FieldVal {
 			objects, unknown := p.g.callerObjects(src, map[callerObjectSourceID]bool{})
 			if unknown {
+				p.noteFinalDetail("field_address_unknown", operand)
 				return true
 			}
 			want := p.want
@@ -899,6 +1013,7 @@ func (p *callerLifetimeProbe) addressContains(src valueSrc, operand ast.Expr) bo
 				want.field = p.field
 			}
 			if objects[want] {
+				p.noteFinalDetail("same_field_address", operand)
 				return true
 			}
 			// Адресация другой ячейки не может заменить эту ячейку. Её значение
@@ -912,6 +1027,11 @@ func (p *callerLifetimeProbe) addressContains(src valueSrc, operand ast.Expr) bo
 // Источники чтения элемента включают все записи через алиасы той же
 // памяти. Одних рёбер вложенности недостаточно для прямого чтения.
 func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, seen map[callerFieldKey]bool) (refs []valueSrc, unknown bool) {
+	d := g.finalBoundary()
+	var why finalCause
+	if d != nil {
+		defer func() { d.finishBoundary(unknown, why) }()
+	}
 	g.work.ContainerCalls++
 	if g.semanticOverflow {
 		return nil, true
@@ -921,6 +1041,9 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 	}
 	typ := callerContainerType(src.pkg.info.TypeOf(src.expr))
 	if typ == nil {
+		if d != nil && why.Kind == "" {
+			why = causeAt("container_unknown_type", src.expr, nil, nil)
+		}
 		return nil, true
 	}
 	switch typ.Underlying().(type) {
@@ -950,6 +1073,9 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 	}
 	objects, u := g.callerContainerObjects(src, key, callerContainerInput)
 	unknown = u
+	if d != nil && why.Kind == "" && u {
+		why = causeAt("container_unknown_input_object", src.expr, nil, nil)
+	}
 	candidates, indexed := g.callerContainerWriteCandidates(typ)
 	g.work.ContainerOriginalWrites += len(g.lifetimeWrites)
 	count := len(g.lifetimeWrites)
@@ -992,6 +1118,9 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 		}
 		g.work.ContainerTypeCompatibleWrites++
 		owners, u := ownerReuse.writeObjects(g, write.owner, true)
+		if d != nil && why.Kind == "" && u {
+			why = causeAt("container_unknown_write_owner", src.expr, write.owner.expr, nil)
+		}
 		unknown = unknown || u
 		matched := false
 		for object := range owners {
@@ -1003,6 +1132,9 @@ func (g *callerGraph) callerContainerSources(src valueSrc, fields []*types.Var, 
 			// Локальный сертификат никогда не пересекает этот переход.
 			ownerReuse = callerContainerObjectReuse{}
 			values, u := g.embeddedCallerSources(write.value, fields, seen)
+			if d != nil && why.Kind == "" && u {
+				why = causeAt("container_unknown_write_value", src.expr, write.value.expr, nil)
+			}
 			refs = append(refs, values...)
 			unknown = unknown || u
 		}

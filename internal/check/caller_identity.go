@@ -60,6 +60,7 @@ type callerNode struct {
 	lit *ast.FuncLit
 }
 type callerGraph struct {
+	finalProbe            *finalCauseProbe
 	directMethodRefs      map[*types.Func]bool // Точные прямые упоминания методов в типизированном радиусе.
 	p                     *surfaceProgram
 	closureOwners         map[*ast.FuncLit][]callerNode // Неизменяемый индекс синтаксиса; called остаётся отдельным для каждого решения.
@@ -257,6 +258,7 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 }
 
 func (g *callerGraph) targets(sp *surfaceSrcPkg, e ast.Expr, _ map[*types.Var]bool) (out []callerNode, unresolved bool) {
+	d, row := g.finalTarget(e)
 	values, u := g.resolve(valueSrc{pkg: sp, expr: e, tuple: -1}, false, map[callerResolveKey]bool{})
 	unresolved = u || len(values) == 0
 	seen := map[callerNode]bool{}
@@ -272,6 +274,17 @@ func (g *callerGraph) targets(sp *surfaceSrcPkg, e ast.Expr, _ map[*types.Var]bo
 	if unresolved && g.may != nil && !g.unresolvedCallerRelevant(sp, e) {
 		g.identityFree[pPosition(g.p, e)] = true
 		unresolved = false
+	}
+	if d != nil {
+		row.Unresolved = unresolved
+		row.Cause = d.first
+		if len(values) == 0 && !u {
+			row.Cause = causeAt("root_empty_origins", e, nil, nil)
+		}
+		if u && row.Cause.Kind == "" {
+			row.Cause = causeAt("unattributed_root", e, nil, nil)
+		}
+		d.active, d.first = nil, finalCause{}
 	}
 	return out, unresolved
 }
@@ -419,6 +432,7 @@ func judgeCallerIdentityDiagnostic(ctx context.Context, p *surfaceProgram, decla
 // Пустой rpc требует обхода всей регистрации. Один rpc годится для проверки
 // конкретного обработчика и не подтверждает декларации остальных методов.
 type callerRegisteredWalk struct {
+	finalProbe    *finalCauseProbe
 	rpc           string
 	readSet       map[string]bool
 	appliedNarrow map[string]bool
@@ -429,6 +443,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 		return CallerIdentityReport{Findings: []string{"обход личности пуст: нет композиционного корня"}}
 	}
 	g := callerGraphFor(p, observer)
+	g.finalProbe = scope.finalProbe
 	defer g.refuseCallerSemanticOverflow(&report)
 	g.ctx = ctx
 	g.claimCallerFieldQueryIndex()
@@ -712,6 +727,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 				return r
 			}
 			g.work.SolveRounds++
+			g.finalProbe.startRound(round + 1)
 			if err := ctx.Err(); err != nil {
 				r.Invalid = err.Error()
 				r.Work = g.work

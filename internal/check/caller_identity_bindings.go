@@ -256,6 +256,39 @@ func (g *callerGraph) resolveOwned(src valueSrc, receiver bool, seen map[callerR
 // distinctPrefix принадлежит одному циклу sources(v). Пока он жив, верхний
 // frame содержит только seed и чтения предыдущих различных исходников цикла.
 func (g *callerGraph) resolveOwnedSibling(src valueSrc, receiver bool, seen map[callerResolveKey]bool, owner *callerOriginOwner, distinctPrefix *bool) (values []callerOrigin, unknown bool) {
+	d := g.finalProbe
+	if d != nil {
+		// A target can first be evaluated inside an object/lifetime proof whose
+		// nested UNKNOWN is intentionally discarded. Observe that exact target
+		// in isolation so an eventual authentic memo hit can carry its origin.
+		previous, previousMuted, previousCause := d.active, d.muted, d.first
+		coldIndex := -1
+		if !receiver && (d.active == nil || d.muted) {
+			if _, selector := src.expr.(*ast.SelectorExpr); selector {
+				if i, ok := d.index[src.expr]; ok && !d.warming[i] {
+					cold := d.sites[i]
+					d.warming[i], coldIndex = true, i
+					d.active, d.muted, d.first = &cold, false, finalCause{}
+				}
+			}
+		}
+		if d.active != nil && !d.muted {
+			before := d.first
+			d.first = finalCause{}
+			defer func() {
+				if unknown && d.first.Kind == "" {
+					d.first = causeAt("unattributed_resolve", src.expr, nil, nil)
+				}
+				if !unknown || before.Kind != "" {
+					d.first = before
+				}
+				if coldIndex >= 0 {
+					d.warming[coldIndex] = false
+					d.active, d.muted, d.first = previous, previousMuted, previousCause
+				}
+			}()
+		}
+	}
 	skipSiblings := distinctPrefix != nil && *distinctPrefix
 	if skipSiblings {
 		// Только непосредственный initial-hit может продолжить тот же префикс.
@@ -281,6 +314,10 @@ func (g *callerGraph) resolveOwnedSibling(src valueSrc, receiver bool, seen map[
 	}
 	if g.resolveMemo == nil || g.resolveMemoEpoch != g.bindingEpoch {
 		g.work.ResolveInvalidations++
+		if d != nil {
+			clear(d.memo)
+			clear(d.records)
+		}
 		g.resolveMemo = map[callerResolveKey]callerResolveAnswer{}
 		g.initialResolveMemo = map[callerResolveKey]callerResolveAnswer{}
 		g.resolveMemoGeneration++
@@ -308,9 +345,18 @@ func (g *callerGraph) resolveOwnedSibling(src valueSrc, receiver bool, seen map[
 		if skipSiblings && initial && entryRead && !owner.top.bad {
 			*distinctPrefix = true
 		}
+		if d != nil && d.active != nil && !d.muted {
+			g.finalCacheResult(src, answer, !receiver && len(seen) == 0, "resolve_memo", d.memo[finalMemoKey{key, initial}])
+		}
 		return answer.values, answer.unknown
 	}
+	if d != nil && d.active != nil && !d.muted {
+		d.replayCause = finalSaved{}
+	}
 	if answer, ok := g.callerOriginHitWithEntryRead(owner, key, entryRead); ok {
+		if d != nil && d.active != nil && !d.muted {
+			g.finalCacheResult(src, answer, !receiver && len(seen) == 0, "origin_replay", d.replayCause)
+		}
 		return answer.values, answer.unknown
 	}
 	frame := g.beginCallerOriginFrame(owner, key)
@@ -424,6 +470,7 @@ func (g *callerGraph) resolveRawOwned(src valueSrc, receiver bool, seen map[call
 		if fn.Pkg() != nil && g.safeExternal[fn.Pkg().Path()] {
 			return []callerOrigin{{foreign: true}}, false
 		}
+		g.finalReason("missing_function_body", e, nil, nil)
 		return nil, true
 	}
 	if lit, ok := e.(*ast.FuncLit); ok {
@@ -456,6 +503,7 @@ func (g *callerGraph) resolveRawOwned(src valueSrc, receiver bool, seen map[call
 			if _, zero := g.zeroVars[v.Origin()]; zero || g.emptyVariadic[v.Origin()] {
 				return []callerOrigin{{nilValue: true}}, g.callerVariableLifetimeUnknown(src, v)
 			}
+			g.finalReason("unbound_variable", e, nil, nil)
 			g.observeUnboundCallback(v)
 			return nil, true
 		}
@@ -526,6 +574,7 @@ func (g *callerGraph) resolveRawOwned(src valueSrc, receiver bool, seen map[call
 			}
 			if i < sig.Results().Len() {
 				if iface, ok := sig.Results().At(i).Type().Underlying().(*types.Interface); ok && iface.NumMethods() == 0 {
+					g.finalReason("opaque_foreign_interface_result", e, x.Fun, nil)
 					return nil, true
 				}
 			}
@@ -563,6 +612,7 @@ func (g *callerGraph) resolveRawOwned(src valueSrc, receiver bool, seen map[call
 			}
 			rs := g.index.returns[callerKey(target.node)]
 			if index >= len(rs) {
+				g.finalReason("missing_return", e, nil, nil)
 				unknown = true
 				continue
 			}
@@ -625,6 +675,7 @@ func (g *callerGraph) resolveRawOwned(src valueSrc, receiver bool, seen map[call
 			unknown = unknown || u
 		}
 	default:
+		g.finalReason("unhandled_receiver_expression", e, nil, nil)
 		return nil, true
 	}
 	return values, unknown
@@ -639,17 +690,22 @@ func (g *callerGraph) boundMethod(sp *surfaceSrcPkg, receiver ast.Expr, method *
 func (g *callerGraph) boundMethodOwned(sp *surfaceSrcPkg, receiver ast.Expr, method *types.Func, seen map[callerResolveKey]bool, owner *callerOriginOwner) (nodes []callerNode, unknown bool) {
 	origins, u := g.resolveOwned(valueSrc{pkg: sp, expr: receiver, tuple: -1}, true, seen, owner)
 	unknown = u
+	if u {
+		g.finalReason("unknown_receiver", receiver, nil, nil)
+	}
 	for _, origin := range origins {
 		if origin.foreign || origin.nilValue {
 			continue
 		}
 		if origin.typ == nil {
+			g.finalReason("origin_missing_type", receiver, origin.source.expr, nil)
 			unknown = true
 			continue
 		}
 		obj, index, _ := types.LookupFieldOrMethod(origin.typ, true, method.Pkg(), method.Name())
 		fn, ok := obj.(*types.Func)
 		if !ok {
+			g.finalReason("receiver_missing_method", receiver, origin.source.expr, nil)
 			unknown = true
 			continue
 		}
@@ -666,6 +722,7 @@ func (g *callerGraph) boundMethodOwned(sp *surfaceSrcPkg, receiver ast.Expr, met
 			continue
 		}
 		if isIfaceMethod(fn) {
+			g.finalReason("dispatch_still_interface", receiver, origin.source.expr, nil)
 			unknown = true
 			continue
 		}
@@ -676,10 +733,12 @@ func (g *callerGraph) boundMethodOwned(sp *surfaceSrcPkg, receiver ast.Expr, met
 			}
 			nodes = append(nodes, callerNode{fn: fn})
 		} else if fn.Pkg() == nil || !g.safeExternal[fn.Pkg().Path()] {
+			g.finalReason("missing_method_body", receiver, origin.source.expr, nil)
 			unknown = true
 		}
 	}
 	if len(origins) == 0 {
+		g.finalReason("receiver_empty_origins", receiver, nil, nil)
 		unknown = true
 	}
 	return nodes, unknown

@@ -486,6 +486,9 @@ func (g *callerGraph) callerOriginHitWithEntryRead(owner *callerOriginOwner, key
 			}
 		}
 		answer := callerResolveAnswer{record.values, record.unknown}
+		if d := g.finalProbe; d != nil && d.active != nil && !d.muted {
+			d.replayCause = d.recordReason(record)
+		}
 		if !g.addCallerSemantic(record.effects.cuts, record.effects.skips, record.effects.cycles, 0) {
 			answer = callerResolveAnswer{nil, true}
 		}
@@ -572,6 +575,9 @@ func (g *callerGraph) endCallerOriginFrame(owner *callerOriginOwner, frame *call
 			frame.bucket = c.callerOriginBucket(frame.key, frame.scope, frame.state, frame.ctx)
 			frame.bucketNext = c.originIndex.buckets[frame.bucket]
 			c.originIndex.buckets[frame.bucket] = frame
+			if d := g.finalProbe; d != nil && !d.muted && d.active != nil {
+				d.saveRecord(frame)
+			}
 			g.work.OriginTransferStores++
 			return
 		}
