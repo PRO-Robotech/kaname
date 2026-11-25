@@ -19,6 +19,7 @@ const (
 	resourceObjectFull resourceObjectRoute = iota + 1
 	resourceObjectForward
 	resourceObjectForwardNoStale
+	resourceObjectPendingGroup
 )
 
 type resourceObjectPreparation struct {
@@ -39,8 +40,22 @@ type resourceObjectPreparation struct {
 // входит в protected source footprint, но сам по себе не выбирает выдачу для
 // materialization: кандидатами остаются members и selector match.
 func prepareResourceObject(ctx context.Context, parents *resourceParentCapture, facts *catalog.Facts, typ, id string, route resourceObjectRoute) (*resourceObjectPreparation, error) {
-	if parents == nil || parents.source == nil || parents.source.sealed || facts == nil || !nativeQuestionToken(typ) || !nativeQuestionToken(id) || route < resourceObjectFull || route > resourceObjectForwardNoStale {
+	if parents == nil || parents.source == nil || parents.source.sealed || facts == nil || !nativeQuestionToken(typ) || !nativeQuestionToken(id) || route < resourceObjectFull || route > resourceObjectPendingGroup {
 		return nil, kaname.ErrSourceUnconfirmed
+	}
+	var generation resourceGenerationProjection
+	if route == resourceObjectPendingGroup {
+		if typ != "iam.group" {
+			return nil, kaname.ErrInvalidAuthorityFencePlan
+		}
+		var err error
+		generation, err = captureResourceGeneration(ctx, parents, "iam_group", id)
+		if err != nil {
+			return nil, err
+		}
+		if !generation.directGroup {
+			return nil, nil
+		}
 	}
 	capture, err := parents.catalog(ctx, typ)
 	if err != nil {
@@ -50,8 +65,13 @@ func prepareResourceObject(ctx context.Context, parents *resourceParentCapture, 
 	if !known || cat.identity.Dotted != typ {
 		return nil, kaname.ErrSourceUnconfirmed
 	}
-	var generation resourceGenerationProjection
-	if route == resourceObjectFull {
+	if route == resourceObjectPendingGroup {
+		if cat.identity.ObjectType != "iam_group" || !cat.live {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		// Подписанный RC prewait подтверждает полный снимок поколения и его hash.
+		route = resourceObjectFull
+	} else if route == resourceObjectFull {
 		generation, err = captureResourceGeneration(ctx, parents, cat.identity.ObjectType, id)
 		if err != nil {
 			return nil, err

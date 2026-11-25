@@ -110,6 +110,8 @@ func (r metadataMutation) nativeCatalogType() string {
 		return "iam.project"
 	case r.kind == "service_account" && r.table == "service_accounts" && r.typ == "iam_service_account":
 		return "iam.serviceAccount"
+	case r.kind == "group" && r.table == "groups" && r.typ == "iam_group" && r.mode == metadataMutationAccessLabels:
+		return "iam.group"
 	default:
 		return ""
 	}
@@ -119,6 +121,7 @@ type metadataStage struct {
 	mirrorAccount string
 	request       metadataMutation
 	xmin          string
+	ctid          string
 	auditID       domain.AuditEventID
 	old           json.RawMessage
 	rename        bool
@@ -145,6 +148,12 @@ func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request 
 		rootRows = 3 // Зеркало, тип и объектное действие каталога.
 		if scope.project != "" {
 			rootRows++
+		}
+	} else if request.kind == "group" {
+		// ctid отличает версии строки при повторном UPDATE с тем же xmin.
+		if err := tx.QueryRow(ctx, `SELECT o.xmin::text,o.ctid::text,to_jsonb(o) FROM ONLY kaname.groups o WHERE o.id=$1`,
+			request.id).Scan(&s.xmin, &s.ctid, &s.old); err != nil {
+			return nil, err
 		}
 	} else {
 		// Имя таблицы проверено по закрытому списку IAM.
@@ -215,6 +224,24 @@ func (p *MetadataMutationWriters) stage(ctx context.Context, tx pgx.Tx, request 
 	// The unchanged owner/creator is read from OLD, never trusted from the PATCH.
 	if request.kind == "account" {
 		in.mutationSubjects = []domain.Subject{{Type: domain.SubjectTypeUser, ID: domain.SubjectID(old.Owner)}}
+	}
+	if request.kind == "group" {
+		in.mutationSubjects = []domain.Subject{{Type: domain.SubjectTypeGroup, ID: domain.SubjectID(request.id)}}
+		if len(s.changed) != 0 {
+			// Обычный row guard группы учитывает переходы правил и выдач
+			// в других аккаунтах, даже если сама группа остаётся на месте.
+			groupScope, err := readGroupObjectUpdateScope(ctx, tx, request.id)
+			if err != nil {
+				return nil, err
+			}
+			in.consumedReads++
+			in.global = groupScope.global
+			if !groupScope.global {
+				for _, account := range groupScope.accounts {
+					in.additionalAccounts = append(in.additionalAccounts, domain.AccountID(account))
+				}
+			}
+		}
 	}
 	if request.kind == "service_account" {
 		in.mutationSubjects = []domain.Subject{{Type: domain.SubjectTypeServiceAccount, ID: domain.SubjectID(request.id)}}
@@ -319,6 +346,7 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 			return nil, err
 		}
 		protectedChange := request.mode == metadataMutationAccessLabels && slices.Contains(stage.changed, "access_labels")
+		ordinaryGroup := request.kind == "group" && !protectedChange
 		firstRead, finalRead := policyPlanOrdinaryRead, policyPlanOrdinaryRead
 		if protectedChange {
 			firstRead = policyPlanBeforeMetadataFreeze
@@ -342,13 +370,16 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 		if err == nil && protectedChange {
 			err = stage.prepareProtected(ctx, tx, patch.AccessLabels, work)
 		}
+		if err == nil && ordinaryGroup {
+			err = stage.reserveGroupOrdinary(ctx, tx, actor, encodedPatch, work)
+		}
 		if err == nil {
 			err = p.policy.protectPolicyPlanAt(ctx, w, stage.plan, firstRead)
 		}
 		if err == nil && protectedChange {
 			err = stage.freezeProtected(ctx, tx, p.policy.bundle, actor, encodedPatch, work)
 		}
-		if err == nil && !protectedChange && ordinaryRR == nil {
+		if err == nil && !protectedChange && !ordinaryGroup && ordinaryRR == nil {
 			// При прежнем значении accessLabels проверяем обычную маску
 			// и не резервируем запись защищённого атрибута.
 			body := encodedPatch
@@ -368,8 +399,8 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 		if err == nil {
 			var semantic *semanticAuthorityWriteTx
 			semantic, err = p.finalizeMetadataAuthorization(ctx, w, stage, finalRead)
-			if err == nil && protectedChange {
-				err = stage.approveProtectedApply(ctx, semantic, actor, work)
+			if err == nil && (protectedChange || ordinaryGroup) {
+				err = stage.approveProtectedApply(ctx, semantic, work)
 			}
 			if err == nil && ordinaryRR != nil {
 				err = stage.acceptOrdinaryMirror(ctx, semantic)
@@ -384,6 +415,11 @@ func (p *MetadataMutationWriters) openMetadataTx(ctx context.Context, request me
 				w.tx = &policyLeaseTx{Tx: tx, conn: conn}
 				transferred = true
 				out := &metadataWriteTx{semanticAuthorityWriteTx: semantic, auditID: stage.auditID, changed: stage.changed}
+				if stage.request.kind == "group" {
+					out.groupWrite = &groupMetadataWrite{
+						actor: string(actor.ID), expectsReconcile: protectedChange || slices.Contains(stage.changed, "labels"),
+					}
+				}
 				if request.operation != nil {
 					out.mirrorAccount = stage.mirrorAccount
 				}
@@ -471,10 +507,11 @@ func (p *MetadataMutationWriters) finalizeMetadataAuthorization(ctx context.Cont
 type metadataWriteTx struct {
 	mirrorAccount string
 	*semanticAuthorityWriteTx
-	auditID   domain.AuditEventID
-	auditUsed bool
-	changed   []string
-	protected *metadataProtectedWrite
+	auditID    domain.AuditEventID
+	auditUsed  bool
+	changed    []string
+	protected  *metadataProtectedWrite
+	groupWrite *groupMetadataWrite
 }
 
 func (w *metadataWriteTx) MetadataChangedFields() []string {
@@ -482,6 +519,9 @@ func (w *metadataWriteTx) MetadataChangedFields() []string {
 }
 
 func (w *metadataWriteTx) EmitAuditEvent(ctx context.Context, ev service.AuditEvent) error {
+	if w.groupWrite != nil {
+		return w.confirmGroupAudit(ctx, ev)
+	}
 	if w.auditUsed || w.auditID == "" {
 		return kaname.ErrInvalidAuthorityFencePlan
 	}

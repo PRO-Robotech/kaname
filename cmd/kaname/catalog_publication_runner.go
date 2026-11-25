@@ -47,6 +47,7 @@ type publishedWriterGeneration struct {
 	policy        *publishedPolicyParticipants
 	metadata      *kanamepg.MetadataMutationWriters
 	metadataPorts publishedMetadataPorts
+	groupLabels   kaname.GroupAccessLabelsWriterFactory
 	roles         publishedRoleWriters
 	userLabels    kaname.UserAccessLabelsWriter
 	state         *kanamepg.ServiceAccountStateWriters
@@ -179,6 +180,10 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	if err != nil {
 		return nil, err
 	}
+	groupLabels, err := metadata.WithInstalledGroupAccessLabels(ctx)
+	if err != nil {
+		return nil, err
+	}
 	state, err := kanamepg.NewServiceAccountStateWriters(ctx, repo, publication.Bundle)
 	if err != nil {
 		return nil, err
@@ -208,7 +213,7 @@ func (r *publishedWriterGenerations) generationFor(ctx context.Context, snapshot
 	generation := &publishedWriterGeneration{
 		snapshot: snapshot, contract: contract, repo: repo, bundle: publication.Bundle,
 		catalog: catalog, cluster: cluster, invites: invites, policy: policy,
-		metadata: metadata, metadataPorts: metadataPorts, roles: roles, userLabels: userLabels, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
+		metadata: metadata, metadataPorts: metadataPorts, groupLabels: groupLabels, roles: roles, userLabels: userLabels, state: state, crud: crud, admission: admission, groups: groups, resource: resource,
 	}
 	r.current = generation
 	return generation, nil

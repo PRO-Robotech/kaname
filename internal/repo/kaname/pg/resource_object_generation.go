@@ -14,6 +14,7 @@ import (
 
 type resourceGenerationProjection struct {
 	fingerprint   *string
+	directGroup   bool
 	outputRefs    []string
 	externalRoots []domain.ResourceRef
 }
@@ -58,11 +59,29 @@ func captureResourceGeneration(ctx context.Context, parents *resourceParentCaptu
 		return resourceGenerationProjection{}, kaname.ErrSourceUnconfirmed
 	}
 	out := resourceGenerationProjection{fingerprint: fingerprint, outputRefs: make([]string, 0, len(outputs))}
+	nativeRefs := make(map[string]bool)
 	for _, root := range roots {
 		if len(root) != 2 || !nativeQuestionToken(root[0]) || !nativeQuestionToken(root[1]) {
 			return resourceGenerationProjection{}, kaname.ErrSourceUnconfirmed
 		}
 		switch root[0] {
+		case "iam.group":
+			// При пересчёте чужого выхода корень группы тоже входит в граф.
+			const nativeModel = "iam_group"
+			capture, err := parents.catalog(ctx, nativeModel)
+			if err != nil {
+				return resourceGenerationProjection{}, err
+			}
+			resource, ok := capture.selected()
+			expected := domain.CatalogTypeIdentity{Dotted: root[0], Module: "iam", ObjectType: nativeModel}
+			if !ok || len(capture.rows) != 1 || !resource.live || resource.identity != expected {
+				return resourceGenerationProjection{}, kaname.ErrSourceUnconfirmed
+			}
+			nativeRefs[nativeModel+":"+root[1]] = true
+			if model == nativeModel && id == root[1] {
+				out.directGroup = true
+			}
+			continue
 		case "iam.account", "iam.project", "iam.serviceAccount":
 			continue
 		}
@@ -78,7 +97,10 @@ func captureResourceGeneration(ctx context.Context, parents *resourceParentCaptu
 		if len(output) != 2 || !nativeQuestionToken(output[0]) || !nativeQuestionToken(output[1]) || strings.Contains(output[0], ".") {
 			return resourceGenerationProjection{}, kaname.ErrSourceUnconfirmed
 		}
-		out.outputRefs = append(out.outputRefs, output[0]+":"+output[1])
+		ref := output[0] + ":" + output[1]
+		out.outputRefs = append(out.outputRefs, ref)
+		delete(nativeRefs, ref)
 	}
+	out.outputRefs = append(out.outputRefs, resourceSortedSet(nativeRefs)...)
 	return out, ctx.Err()
 }

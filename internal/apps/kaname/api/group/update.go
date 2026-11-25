@@ -7,11 +7,14 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/PRO-Robotech/corelib/operations"
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/authzguard"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	iamerr "github.com/PRO-Robotech/kaname/internal/errors"
+	"github.com/PRO-Robotech/kaname/internal/grantpolicy"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/service"
 	iamv1 "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
@@ -19,17 +22,19 @@ import (
 )
 
 type UpdateGroupInput struct {
-	ID          domain.GroupID
-	Name        *domain.GroupName
-	Description *domain.Description
-	Labels      domain.Labels
-	UpdateMask  []string
+	ID           domain.GroupID
+	Name         *domain.GroupName
+	Description  *domain.Description
+	Labels       domain.Labels
+	AccessLabels domain.Labels
+	UpdateMask   []string
 }
 
 var groupMutableFields = map[string]struct{}{
-	"name":        {},
-	"description": {},
-	"labels":      {},
+	"name":          {},
+	"description":   {},
+	"labels":        {},
+	"access_labels": {},
 }
 
 var groupImmutableFields = map[string]string{
@@ -41,9 +46,10 @@ var groupImmutableFields = map[string]string{
 }
 
 type UpdateGroupUseCase struct {
-	lifecycleWriter lifecycleWriterSelection
-	repo            Repo
-	opsRepo         operations.Repo
+	lifecycleWriter    lifecycleWriterSelection
+	accessLabelsWriter kaname.GroupAccessLabelsWriterFactory
+	repo               Repo
+	opsRepo            operations.Repo
 	// Optional post-commit per-object materializer (the SAME port the create-path
 	// uses). A LABEL change flips iam-direct selector membership, so the object must
 	// be re-materialized; nil-safe, the co-committed reconcile event + periodic sweep
@@ -70,6 +76,16 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 	if err := shared.ValidateResourceID(string(in.ID), domain.PrefixGroup, "group"); err != nil {
 		return nil, err
 	}
+	// Пустая карта без явной маски сохраняет защищённые метки.
+	accessLabels := in.AccessLabels
+	if len(accessLabels) == 0 {
+		accessLabels = nil
+	}
+	mask, accessLabels, applyAccessLabels := shared.ResolveAccessLabelsUpdate(in.UpdateMask, accessLabels)
+	if applyAccessLabels && u.accessLabelsWriter == nil {
+		return nil, iamerr.Wrapf(iamerr.ErrUnavailable, "Protected accessLabels writer unavailable")
+	}
+	in.UpdateMask = mask
 	if err := shared.ValidateUpdateMask(in.UpdateMask, groupMutableFields, groupImmutableFields); err != nil {
 		return nil, err
 	}
@@ -103,9 +119,14 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 		target.Description = *in.Description
 		changed = append(changed, "description")
 	}
-	if newLabels, apply := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels); apply && !shared.LabelsEqual(newLabels, current.Labels) {
+	newLabels, applyLabels := shared.ResolveLabelsUpdate(in.UpdateMask, in.Labels)
+	if applyLabels && !shared.LabelsEqual(newLabels, current.Labels) {
 		target.Labels = newLabels
 		changed = append(changed, "labels")
+	}
+	if applyAccessLabels && !shared.LabelsEqual(accessLabels, current.AccessLabels) {
+		target.AccessLabels = accessLabels
+		changed = append(changed, "access_labels")
 	}
 	if err := target.Validate(); err != nil {
 		return nil, shared.MapValidationErr(err)
@@ -126,8 +147,25 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 		return nil, err
 	}
 	maskCopy := append([]string{}, in.UpdateMask...)
+	if applyAccessLabels && len(maskCopy) == 0 {
+		// Фоновая подготовка не должна записать старый снимок отсутствующих полей.
+		maskCopy = []string{"access_labels"}
+		if in.Name != nil {
+			maskCopy = append(maskCopy, "name")
+		}
+		if in.Description != nil {
+			maskCopy = append(maskCopy, "description")
+		}
+		if applyLabels {
+			maskCopy = append(maskCopy, "labels")
+		}
+	}
 	changedCopy := append([]string{}, changed...)
+	principal := operations.PrincipalFromContext(ctx)
 	operations.Run(ctx, u.opsRepo, op.ID, func(ctx context.Context) (*anypb.Any, error) {
+		if applyAccessLabels {
+			ctx = operations.WithPrincipal(ctx, principal)
+		}
 		return u.doUpdate(ctx, target, maskCopy, actor, changedCopy)
 	})
 	return &op, nil
@@ -165,16 +203,24 @@ func (u *UpdateGroupUseCase) Execute(ctx context.Context, in UpdateGroupInput) (
 // co-committed reconcile event and the periodic sweep stay the at-least-once backstop,
 // so this changes WHEN the revoke is observed, not WHETHER it happens.
 func (u *UpdateGroupUseCase) doUpdate(ctx context.Context, g domain.Group, mask []string, actor string, changed []string) (*anypb.Any, error) {
-	updated, err := withGroupLifecycleTx(ctx, u.lifecycleWriter, u.repo, kaname.GroupUpdate, g,
-		func(ctx context.Context, w Writer) (domain.Group, error) {
-			upd, uerr := w.GroupsW().Update(ctx, g, mask)
-			if uerr != nil {
-				return domain.Group{}, uerr
+	protected := shared.AccessLabelsMaskRequested(mask)
+	var updated domain.Group
+	var committedFields []string
+	body := func(ctx context.Context, w Writer) error {
+		effective := changed
+		if protected {
+			effects, ok := w.(kaname.MetadataUpdateEffects)
+			if !ok {
+				return iamerr.Wrapf(iamerr.ErrUnavailable, "Metadata update effects unavailable")
 			}
-			if len(changed) == 0 {
-				return upd, nil
-			}
-			if aerr := w.EmitAuditEvent(ctx, service.AuditEvent{
+			effective = slices.Clone(effects.MetadataChangedFields())
+		}
+		upd, err := w.GroupsW().Update(ctx, g, mask)
+		if err != nil {
+			return err
+		}
+		if len(effective) != 0 {
+			if err := w.EmitAuditEvent(ctx, service.AuditEvent{
 				EventType:       auditEventGroupUpdated,
 				TenantAccountID: string(upd.AccountID),
 				Payload: map[string]any{
@@ -182,23 +228,30 @@ func (u *UpdateGroupUseCase) doUpdate(ctx context.Context, g domain.Group, mask 
 					"resource_type":  "group",
 					"resource_id":    string(upd.ID),
 					"account_id":     string(upd.AccountID),
-					"changed_fields": changed,
+					"changed_fields": effective,
 				},
-			}); aerr != nil {
-				return domain.Group{}, aerr
+			}); err != nil {
+				return err
 			}
-			// Durable half. Co-committed in THIS writer-tx (ban #10) so the label write
-			// and the re-materialization trigger are atomic: a crash after commit still
-			// leaves the reconciler an at-least-once record that this group's selector
-			// membership must be re-evaluated. Only on a labels change — no other
-			// mutable field of a Group can flip an ARM_LABELS match.
-			if labelsChanged(changed) {
-				if rerr := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.group", string(upd.ID)); rerr != nil {
-					return domain.Group{}, rerr
+			if labelsChanged(effective) {
+				if err := w.EmitReconcileEvent(ctx, shared.ReconcileEventUpsert, "iam.group", string(upd.ID)); err != nil {
+					return err
 				}
 			}
-			return upd, nil
-		})
+		}
+		updated, committedFields = upd, effective
+		return nil
+	}
+
+	var err error
+	if protected {
+		err = shared.ExecuteConfiguredPreparedWrite(ctx, u.accessLabelsWriter, func(ctx context.Context) (kaname.Writer, error) {
+			return u.accessLabelsWriter.GroupAccessLabelsWriter(ctx, g, mask, grantpolicy.Actor(ctx))
+		}, body)
+		err = shared.MapRepoErrAt(ctx, err)
+	} else {
+		err = u.lifecycleWriter.run(ctx, u.repo, kaname.GroupUpdate, g, body)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +260,7 @@ func (u *UpdateGroupUseCase) doUpdate(ctx context.Context, g domain.Group, mask 
 	// point the cross-service register path uses: its delete-stale guard finds the
 	// existing members and delegates to the FULL ReconcileObject, which is what actually
 	// revokes a now-unmatched grant. Detached (GoPostCommit) — never gates Operation.done.
-	if labelsChanged(changed) && u.reconciler != nil {
+	if labelsChanged(committedFields) && u.reconciler != nil {
 		id := string(updated.ID)
 		shared.GoPostCommit(ctx, u.logger, "group label re-materialization", func(ctx context.Context) {
 			if rerr := u.reconciler.ReconcileObjectForward(ctx, "iam.group", id); rerr != nil && u.logger != nil {
@@ -219,13 +272,7 @@ func (u *UpdateGroupUseCase) doUpdate(ctx context.Context, g domain.Group, mask 
 	return marshalGroup(updated)
 }
 
-// labelsChanged reports whether the changed-fields set includes labels (the only
-// field that can flip iam-direct selector membership).
+// Обе карты меток влияют на состав выдач по селекторам.
 func labelsChanged(changed []string) bool {
-	for _, c := range changed {
-		if c == "labels" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(changed, "labels") || slices.Contains(changed, "access_labels")
 }

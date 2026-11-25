@@ -29,6 +29,11 @@ type ObjectDecisionRunner interface {
 	RunObjectDecision(context.Context, string, string, ObjectDecisionRoute) ([]ObjectDecisionSize, error)
 }
 
+// Участник FULL берёт событие группы только при открытом поколении самой группы.
+type groupGenerationRunner interface {
+	RunPendingGroupGeneration(context.Context, string) ([]ObjectDecisionSize, bool, error)
+}
+
 var errObjectDecisionOnly = errors.New("object decision runner rejects binding callbacks")
 
 // Новый engine предоставляет только закрытые object routes. Общий TxRunner
@@ -61,10 +66,14 @@ func (r *Reconciler) runObjectDecision(ctx context.Context, typ, id string, rout
 	if err != nil {
 		return err
 	}
+	recordObjectDecisionSizes(recorder, sizes)
+	return nil
+}
+
+func recordObjectDecisionSizes(recorder SizeRecorder, sizes []ObjectDecisionSize) {
 	if recorder != nil {
 		for _, size := range sizes {
 			recorder.ObserveBindingMaterialization(size.Objects, size.Tuples)
 		}
 	}
-	return nil
 }

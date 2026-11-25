@@ -27,7 +27,29 @@ func (r *Reconciler) WithGroupObjectReconciler(group *Reconciler) error {
 	if r == nil || group == nil || group == r || group.groupObjects != nil || group.objectConfigured {
 		return errors.New("invalid group object reconciler")
 	}
+	r.groupGenerations = nil
 	r.groupObjects = group
+	return nil
+}
+
+// WithBackgroundGroupObjectReconciler подключает очередь после выбора общего
+// object participant. В профиле FULL только он может закрыть подписанное поколение.
+func (r *Reconciler) WithBackgroundGroupObjectReconciler(group *Reconciler) error {
+	if r == nil || r.objectObjects == nil {
+		return errObjectParticipantAbsent
+	}
+	var runner groupGenerationRunner
+	if decisions := r.objectObjects.objectDecisions; decisions != nil {
+		var ok bool
+		runner, ok = decisions.(groupGenerationRunner)
+		if !ok {
+			return errObjectParticipantAbsent
+		}
+	}
+	if err := r.WithGroupObjectReconciler(group); err != nil {
+		return err
+	}
+	r.groupGenerations = runner
 	return nil
 }
 
@@ -40,6 +62,7 @@ func (r *Reconciler) WithObjectReconciler(object *Reconciler) error {
 	if r == nil {
 		return errObjectParticipantAbsent
 	}
+	r.groupGenerations = nil
 	r.objectConfigured = true
 	r.objectObjects = nil
 	if object == nil || object == r || object.objectConfigured || object.groupObjects != nil {

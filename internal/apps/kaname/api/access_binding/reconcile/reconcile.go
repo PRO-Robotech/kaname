@@ -482,6 +482,7 @@ type Reconciler struct {
 	objectDecisions  ObjectDecisionRunner
 	stagedBindings   StagedBindingReconciler
 	groupObjects     *Reconciler
+	groupGenerations groupGenerationRunner
 	objectObjects    *Reconciler
 	objectConfigured bool
 	tx               TxRunner
@@ -785,6 +786,16 @@ func (r *Reconciler) fullPass(ctx context.Context, bindingID domain.AccessBindin
 // страховкой доставки хотя бы один раз, сводящей всё, что мог пропустить пообъектный проход.
 func (r *Reconciler) ReconcileObject(ctx context.Context, objectType, objectID string) error {
 	if objectType == "iam.group" && r.groupObjects != nil {
+		if r.groupGenerations != nil {
+			sizes, handled, err := r.groupGenerations.RunPendingGroupGeneration(ctx, objectID)
+			if err != nil {
+				return err
+			}
+			if handled {
+				recordObjectDecisionSizes(r.size, sizes)
+				return nil
+			}
+		}
 		return r.groupObjects.ReconcileObject(ctx, objectType, objectID)
 	}
 	if r.objectConfigured {

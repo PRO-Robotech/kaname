@@ -235,6 +235,11 @@ func wireFullStartupServices(ctx context.Context, profile *fullStartupProfile, r
 	if err != nil {
 		return nil, fmt.Errorf("metadata access label installation: %w", err)
 	}
+	groupAccessLabels, err := metadata.WithInstalledGroupAccessLabels(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("group metadata access label installation: %w", err)
+	}
+	svcs.groupHandler.WithGroupAccessLabelsWriter(groupAccessLabels)
 	if userLabels != nil {
 		if svcs.userHandler == nil {
 			return nil, fmt.Errorf("authority-protocol user handler is absent")
@@ -312,6 +317,9 @@ func wirePublishedFullStartupServices(ctx context.Context, publication *publishe
 	if _, ok := generation.metadataPorts.(kaname.ServiceAccountAccessLabelsWriterFactory); ok {
 		metadata = publishedServiceAccountAccessLabels{publishedAccessLabels{writers}}
 	}
+	if generation.groupLabels != nil {
+		svcs.groupHandler.WithGroupAccessLabelsWriter(writers)
+	}
 	svcs.accountMetadataUpdate.WithAccountMetadataWriter(metadata)
 	svcs.projectMetadataUpdate.WithProjectMetadataWriter(metadata)
 	svcs.serviceAccountMetadataUpdate.WithServiceAccountMetadataWriter(metadata)
@@ -337,7 +345,7 @@ func wirePublishedFullStartupServices(ctx context.Context, publication *publishe
 		}
 		svcs.userHandler.WithUserAccessLabelsWriter(writers)
 	}
-	return &fullStartupParticipants{objects: objects, bindings: writers}, nil
+	return &fullStartupParticipants{objects: objects, groups: objects, bindings: writers}, nil
 }
 
 // Общая настоящая провязка фоновой очереди. Вызывается serve и native holder;
@@ -350,7 +358,7 @@ func wireBackgroundAuthorityParticipants(engine *reconcile.Reconciler, bindings 
 	if err := wireObjectAndBindingAuthorityParticipants(engine, bindings, objects); err != nil {
 		return err
 	}
-	return engine.WithGroupObjectReconciler(groups)
+	return engine.WithBackgroundGroupObjectReconciler(groups)
 }
 
 func wireObjectAndBindingAuthorityParticipants(engine *reconcile.Reconciler, bindings reconcile.StagedBindingReconciler,

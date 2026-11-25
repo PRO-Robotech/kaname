@@ -48,8 +48,7 @@ func (p *GroupMembershipParticipant) groupObjectWriter(ctx context.Context, kind
 			err := q.QueryRow(ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1,$2)`, string(g.ID), string(g.AccountID)).Scan(&s.accounts, &s.global)
 			return s, err
 		}
-		err := q.QueryRow(ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1)`, string(g.ID)).Scan(&s.accounts, &s.global)
-		return s, err
+		return readGroupObjectUpdateScope(ctx, q, string(g.ID))
 	}
 	for attempt := 0; attempt < authorityEntryLimit(ctx); attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -95,6 +94,15 @@ func (p *GroupMembershipParticipant) groupObjectWriter(ctx context.Context, kind
 		}
 	}
 	return nil, kaname.ErrAuthorityClassificationChanged
+}
+
+func readGroupObjectUpdateScope(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, id string) (groupMembershipScope, error) {
+	var scope groupMembershipScope
+	err := q.QueryRow(ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1)`, id).
+		Scan(&scope.accounts, &scope.global)
+	return scope, err
 }
 
 // NewGroupObjectReconciler отдаёт настоящий single-object engine. Его full-binding

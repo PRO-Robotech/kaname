@@ -81,6 +81,18 @@ func (r *publishedWriterGenerations) RunChildParentClose(ctx context.Context, in
 	return generation.resource.RunChildParentClose(pinned, in)
 }
 
+// Проверку открытого подписанного поколения вызывает только фоновый reconciler.
+func (r *publishedWriterGenerations) RunPendingGroupGeneration(ctx context.Context, id string) ([]reconcile.ObjectDecisionSize, bool, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	if generation.resource == nil {
+		return nil, false, authzsnapshot.ErrUnconfirmed
+	}
+	return generation.resource.RunPendingGroupGeneration(pinned, id)
+}
+
 func (r *publishedWriterGenerations) RunObjectDecision(ctx context.Context, typ, id string, route reconcile.ObjectDecisionRoute) ([]reconcile.ObjectDecisionSize, error) {
 	pinned, generation, err := r.resolve(ctx)
 	if err != nil {

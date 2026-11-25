@@ -234,7 +234,11 @@ func (w *protectedServiceAccountMetadata) Update(ctx context.Context, value doma
 	return w.WriterIface.Update(ctx, value, regular)
 }
 
-func (s *metadataStage) approveProtectedApply(ctx context.Context, w *semanticAuthorityWriteTx, actor domain.Subject, work *int) error {
+func (s *metadataStage) approveProtectedApply(ctx context.Context, w *semanticAuthorityWriteTx, work *int) error {
+	actor := s.plan.request.actor
+	if s.request.kind == "group" {
+		return s.acceptGroupProtected(ctx, w.tx, actor, work)
+	}
 	budget := s.plan.nativeBudget
 	var cost protectedMetadataCost
 	err := w.tx.QueryRow(ctx, `SELECT used_rows,used_reads,used_work

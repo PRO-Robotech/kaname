@@ -6,6 +6,7 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/api/access_binding/reconcile"
@@ -43,6 +44,26 @@ func resourceObjectRouteFrom(in reconcile.ObjectDecisionRoute) (resourceObjectRo
 // Каждая попытка владеет одной lease от RR до завершения RC. Cleanup и Release
 // заканчиваются до следующего Acquire; контекст и read budget общие для цикла.
 func (r *ResourceDecisionRunner) RunObjectDecision(ctx context.Context, typ, id string, requested reconcile.ObjectDecisionRoute) ([]reconcile.ObjectDecisionSize, error) {
+	route, err := resourceObjectRouteFrom(requested)
+	if err != nil {
+		return nil, err
+	}
+	return r.runObjectDecision(ctx, typ, id, route)
+}
+
+var errNoDirectGroupGeneration = errors.New("no direct Group generation in snapshot")
+
+// Чистый RR возвращает управление штатному membership participant. Во всех
+// остальных случаях этот runner владеет полным результатом попытки.
+func (r *ResourceDecisionRunner) RunPendingGroupGeneration(ctx context.Context, id string) ([]reconcile.ObjectDecisionSize, bool, error) {
+	sizes, err := r.runObjectDecision(ctx, "iam.group", id, resourceObjectPendingGroup)
+	if err == errNoDirectGroupGeneration {
+		return nil, false, nil
+	}
+	return sizes, true, err
+}
+
+func (r *ResourceDecisionRunner) runObjectDecision(ctx context.Context, typ, id string, route resourceObjectRoute) ([]reconcile.ObjectDecisionSize, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -52,16 +73,12 @@ func (r *ResourceDecisionRunner) RunObjectDecision(ctx context.Context, typ, id 
 	if err := r.bundle.Validate(); err != nil {
 		return nil, err
 	}
-	route, err := resourceObjectRouteFrom(requested)
-	if err != nil {
-		return nil, err
-	}
 	if !nativeQuestionToken(typ) || !nativeQuestionToken(id) {
 		return nil, kaname.ErrInvalidAuthorityFencePlan
 	}
 	budget := &relverdict.AdministrativeReadBudget{}
 	var sizes []reconcile.ObjectDecisionSize
-	_, err = runResourceAttempts(ctx, func() (kaname.ResourceDecisionResult, error) {
+	_, err := runResourceAttempts(ctx, func() (kaname.ResourceDecisionResult, error) {
 		// Ни одна неудачная попытка не оставляет наблюдение следующей попытке.
 		sizes = nil
 		lease, err := r.repo.master.Acquire(ctx)
@@ -122,6 +139,16 @@ func (r *ResourceDecisionRunner) runResourceObjectOnce(ctx context.Context, conn
 	prepared, err := prepareResourceObject(ctx, parents, r.facts, typ, id, route)
 	if err != nil {
 		return nil, err
+	}
+	if prepared == nil {
+		if route != resourceObjectPendingGroup {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		if err = rollbackResourceAttempt(ctx, rr); err != nil {
+			return nil, err
+		}
+		active = nil
+		return nil, errNoDirectGroupGeneration
 	}
 	empty, err := prepared.emptySnapshot(ctx, parents)
 	if err != nil {

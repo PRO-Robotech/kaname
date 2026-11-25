@@ -16,6 +16,7 @@ import (
 
 	"github.com/PRO-Robotech/kaname/internal/apps/kaname/shared"
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	repogroup "github.com/PRO-Robotech/kaname/internal/repo/kaname/group"
 )
 
@@ -63,12 +64,23 @@ func (h *Handler) Create(ctx context.Context, req *iamv1.CreateGroupRequest) (*o
 	return shared.OperationToProto(op), nil
 }
 
+// WithGroupAccessLabelsWriter подключает готовый контракт защищённой записи.
+func (h *Handler) WithGroupAccessLabelsWriter(f kaname.GroupAccessLabelsWriterFactory) *Handler {
+	h.update.accessLabelsWriter = f
+	return h
+}
+
 func (h *Handler) Update(ctx context.Context, req *iamv1.UpdateGroupRequest) (*operationpb.Operation, error) {
-	if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
-		return nil, err
+	if h.update == nil || h.update.accessLabelsWriter == nil {
+		if err := shared.RejectAccessLabelsWrite(req.GetAccessLabels(), req.GetUpdateMask().GetPaths()); err != nil {
+			return nil, err
+		}
 	}
 	in := UpdateGroupInput{
 		ID: domain.GroupID(req.GetGroupId()),
+	}
+	if labels := req.GetAccessLabels(); len(labels) != 0 {
+		in.AccessLabels = labelsFromProto(labels)
 	}
 	if name := req.GetName(); name != "" {
 		n := domain.GroupName(name)

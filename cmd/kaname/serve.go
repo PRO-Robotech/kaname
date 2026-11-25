@@ -2295,11 +2295,7 @@ func runServe(cfg config.Config, optional ...installationServeDependencies) erro
 	reconcileAdapter := kanamepg.NewReconcileAdapter(pool, catalogSnapshot)
 	reconcileEngine := reconcile.New(reconcileAdapter,
 		logger.With(slog.String("component", "rsab_reconciler")), catalogSnapshot)
-	if publication != nil {
-		if err := wireObjectAndBindingAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant); err != nil {
-			return startupFailureAt(err)
-		}
-	} else if cfg.AuthorityProtocol.Participant() {
+	if publication != nil || cfg.AuthorityProtocol.Participant() {
 		if err := wireBackgroundAuthorityParticipants(reconcileEngine, bindingStageParticipant, resourceObjectParticipant, groupObjectParticipant); err != nil {
 			return startupFailureAt(err)
 		}

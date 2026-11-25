@@ -120,6 +120,18 @@ func (r *publishedWriterGenerations) UpdateUserAccessLabels(ctx context.Context,
 	return writer.UpdateUserAccessLabels(pinned, id, labels, accessLabels, actor, pending)
 }
 
+func (r *publishedWriterGenerations) GroupAccessLabelsWriter(ctx context.Context, value domain.Group, mask []string, actor domain.Subject) (kaname.SemanticAuthorityWriter, error) {
+	pinned, generation, err := r.resolve(ctx)
+	if err != nil {
+		return nil, err
+	}
+	writer := generation.groupLabels
+	if writer == nil {
+		return nil, kaname.ErrSemanticIdentityUnavailable
+	}
+	return writer.GroupAccessLabelsWriter(pinned, value, mask, actor)
+}
+
 func (r *publishedWriterGenerations) InstalledResourceMetadataUpdate(ctx context.Context) (kaname.ResourceMetadataUpdateWriter, error) {
 	pinned, generation, err := r.resolve(ctx)
 	if err != nil {

@@ -34,6 +34,13 @@ type ServiceAccountAccessLabelsWriterFactory interface {
 	ServiceAccountAccessLabelsWriter(context.Context, domain.ServiceAccount, []string, domain.Subject) (SemanticAuthorityWriter, error)
 }
 
+// GroupAccessLabelsWriterFactory открывает точную подготовленную правку меток
+// группы и завершает её в том же транзакционном исполнителе.
+type GroupAccessLabelsWriterFactory interface {
+	PreparedWriteExecutor
+	GroupAccessLabelsWriter(context.Context, domain.Group, []string, domain.Subject) (SemanticAuthorityWriter, error)
+}
+
 // MetadataUpdateEffects сообщает изменённые поля из принятого OLD и маски
 // подготовленной транзакции. Список относится только к этой попытке записи.
 type MetadataUpdateEffects interface {
