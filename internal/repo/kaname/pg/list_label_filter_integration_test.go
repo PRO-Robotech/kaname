@@ -29,7 +29,8 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 
 	owner := mustSeedUser(t, ctx, pool, "l1043")
 	otherOwner := mustSeedUser(t, ctx, pool, "l1043-other")
-	missing := seedAccount(t, ctx, repo, "acc-l1043-missing", owner)
+	var missing domain.AccountID
+	require.NoError(t, pool.QueryRow(ctx, "SELECT account_id FROM users WHERE id = $1", owner).Scan(&missing))
 	wr, err := repo.Writer(ctx)
 	require.NoError(t, err)
 	defer func() { _ = wr.Rollback(ctx) }()
@@ -53,7 +54,7 @@ func TestAccountListLabelFilterBeforePagination(t *testing.T) {
 		Filter:   `labels.team/platform@v2 = ""`,
 		PageSize: 1,
 		Candidates: &visibility.PageScope{
-			ObjectIDs: []string{string(missing.ID), string(first), string(second), string(nonempty)},
+			ObjectIDs: []string{string(missing), string(first), string(second), string(nonempty)},
 		},
 	}
 	out, next, err := rd.Accounts().List(ctx, f)
