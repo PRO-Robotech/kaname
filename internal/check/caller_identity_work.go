@@ -219,6 +219,7 @@ func callerGraphFor(p *surfaceProgram, observe CallerIdentityObserver) *callerGr
 	g := *entry.graph
 	g.objectSourceIDs = nil
 	g.fieldQueryHeads = nil
+	g.fieldQueryIndexOwner = nil
 	g.fieldQueryIndexedDepth = 0
 	g.live = map[*types.Var][]valueSrc{}
 	g.emptyVariadic = map[*types.Var]bool{}

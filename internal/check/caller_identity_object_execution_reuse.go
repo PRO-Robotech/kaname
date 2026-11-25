@@ -129,6 +129,11 @@ func (g *callerGraph) callerExecutionScopeTracked() bool {
 	if g.fieldQueryIndexedDepth != len(g.fieldQueries) {
 		return false
 	}
+	// Содержимое снимка проверяется отдельно. У закрытого обхода
+	// корректность связей обеспечена при добавлении и снятии кадров.
+	if g.fieldQueryIndexOwner == g {
+		return true
+	}
 	covered := 0
 	for source, head := range g.fieldQueryHeads {
 		if head <= 0 || head > len(g.fieldQueries) {

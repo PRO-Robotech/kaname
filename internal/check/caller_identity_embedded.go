@@ -24,6 +24,15 @@ func callerNil(sp *surfaceSrcPkg, expr ast.Expr) bool {
 	return ok
 }
 
+// Закрытый collect начинает с отдельного пустого графа. Только enter и
+// leave меняют структуру его индекса, а обновление refs и unknown меняет
+// лишь содержимое кадра. За пределами collect индекс перепроверяется целиком.
+func (g *callerGraph) claimCallerFieldQueryIndex() {
+	if g.fieldQueries == nil && g.fieldQueryHeads == nil && g.fieldQueryIndexedDepth == 0 && callerFreshReplayContext(g.ctx) {
+		g.fieldQueryIndexOwner = g
+	}
+}
+
 type callerFieldQuery struct {
 	source  callerResolveKey
 	fields  []*types.Var
@@ -43,6 +52,7 @@ func (g *callerGraph) enterCallerFieldQuery(src valueSrc, fields []*types.Var) (
 		g.fieldQueryIndexedDepth = 0
 	} else if g.fieldQueryIndexedDepth != len(g.fieldQueries) {
 		// Прямые изменения синтетического стека требуют старого поиска до полного снятия стека.
+		g.fieldQueryIndexOwner = nil
 		g.fieldQueryIndexedDepth = -1
 	}
 	indexed := g.fieldQueryIndexedDepth >= 0
@@ -87,7 +97,8 @@ func (g *callerGraph) enterCallerFieldQuery(src valueSrc, fields []*types.Var) (
 
 // Кадр снимает только его владелец в прежней позиции defer, включая отмену и UNKNOWN.
 func (g *callerGraph) leaveCallerFieldQuery(index int) {
-	if g.fieldQueryIndexedDepth != len(g.fieldQueries) {
+	if g.fieldQueryIndexedDepth != len(g.fieldQueries) || g.fieldQueryIndexOwner == g && index != len(g.fieldQueries)-1 {
+		g.fieldQueryIndexOwner = nil
 		g.fieldQueryIndexedDepth = -1
 	}
 	if g.fieldQueryIndexedDepth >= 0 {
