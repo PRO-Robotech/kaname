@@ -211,6 +211,15 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 	if active {
 		beforeRights = grantState(t, true)
 	}
+	countProjectWrite := func(t *testing.T) int {
+		t.Helper()
+		var count int
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT count(*) FROM ONLY kaname.fga_outbox
+			WHERE event_type='fga.tuple.write' AND payload=jsonb_build_object('object','project:'||$1::text,'user','user:'||$2::text,
+				'relation','v_get','relations',jsonb_build_array('v_get','viewer'))`, project.ID, recipient).Scan(&count))
+		return count
+	}
+	beforeWrites := countProjectWrite(t)
 	assertStored(t, old, "labels", 0, true)
 	t.Run("unauthorized rolls back", func(t *testing.T) {
 		denied := run(t, recipient)
@@ -218,6 +227,7 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		require.Equal(t, int32(codes.PermissionDenied), denied.Error.GetCode(), "%v", denied.Error)
 		assertStored(t, old, "labels", 0, true)
 		require.Equal(t, before, grantState(t, false))
+		require.Equal(t, beforeWrites, countProjectWrite(t))
 		if active {
 			assertActiveRows(t, old.Fingerprint())
 			check(t, recipient, "v_get", "project:"+string(project.ID), true)
@@ -237,6 +247,11 @@ func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingS
 		require.Nil(t, done.Error, "%v", done.Error)
 		assertStored(t, next, "access_labels", 1, false)
 		require.Equal(t, beforeRights, grantState(t, active))
+		wantWrites := beforeWrites
+		if active {
+			wantWrites++
+		}
+		require.Equal(t, wantWrites, countProjectWrite(t))
 		if active {
 			assertActiveRows(t, next.Fingerprint())
 			check(t, outsider, "v_get", "project:"+string(project.ID), false)

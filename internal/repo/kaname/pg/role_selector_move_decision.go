@@ -28,7 +28,17 @@ type roleSelectorMoveAuthorization struct {
 	retained    *roleSelectorMoveRetainedProof
 }
 
-const pendingNoCopyPrepareTransport = "pending_no_copy_v1"
+const (
+	pendingNoCopyPrepareTransport = "pending_no_copy_v1"
+	activeNoCopyPrepareTransport  = "active_project_no_copy_v1"
+)
+
+func (s *roleSelectorMoveStage) sourceTransport() string {
+	if s != nil && len(s.captured.Carriers) == 1 && s.captured.Carriers[0].Carrier.Binding.Status == domain.AccessBindingStatusActive {
+		return activeNoCopyPrepareTransport
+	}
+	return pendingNoCopyPrepareTransport
+}
 
 // Владелец БД резервирует физические источники на тех же часах RC, на которых
 // затем сверяются Grant, проекции и удержанные кортежи из снимка RR.
@@ -45,7 +55,7 @@ func (s *roleMutationStage) holdSelectorMove(ctx context.Context, w *semanticAut
 		Transport string          `json:"_selector_move"`
 		Request   json.RawMessage `json:"request"`
 		Hold      json.RawMessage `json:"hold"`
-	}{Transport: pendingNoCopyPrepareTransport, Request: request, Hold: hold})
+	}{Transport: s.selectorMove.sourceTransport(), Request: request, Hold: hold})
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +67,7 @@ func (s *roleMutationStage) holdSelectorMove(ctx context.Context, w *semanticAut
 	if err := w.tx.QueryRow(ctx, roleSequencePrepareSQL, input, budget.RemainingRows(), budget.RemainingReads()).Scan(&receipt); err != nil {
 		return nil, err
 	}
-	if err := chargeSelectorMovePrepareReceipt(budget, receipt); err != nil {
+	if err := chargeSelectorMovePrepareReceiptFor(budget, receipt, s.selectorMove.sourceTransport()); err != nil {
 		return nil, err
 	}
 	if err := authorization.confirmHeldSources(ctx, w); err != nil {
@@ -69,6 +79,10 @@ func (s *roleMutationStage) holdSelectorMove(ctx context.Context, w *semanticAut
 }
 
 func chargeSelectorMovePrepareReceipt(budget *relverdict.AdministrativeReadBudget, raw json.RawMessage) error {
+	return chargeSelectorMovePrepareReceiptFor(budget, raw, pendingNoCopyPrepareTransport)
+}
+
+func chargeSelectorMovePrepareReceiptFor(budget *relverdict.AdministrativeReadBudget, raw json.RawMessage, transport string) error {
 	var cost struct {
 		Transport string              `json:"selector_move_transport"`
 		Mode      roleAccessLabelMode `json:"access_label_mode"`
@@ -80,7 +94,7 @@ func chargeSelectorMovePrepareReceipt(budget *relverdict.AdministrativeReadBudge
 	}
 	// Протокол v1 учитывает четыре строки и четыре чтения адаптера
 	// плюс непустую перепись владельца. SQL возвращает их общую стоимость.
-	if cost.Transport != pendingNoCopyPrepareTransport || cost.Mode != roleAccessLabelOrdinary || cost.Rows <= 4 || cost.Reads <= 4 {
+	if cost.Transport != transport || cost.Mode != roleAccessLabelOrdinary || cost.Rows <= 4 || cost.Reads <= 4 {
 		return kaname.ErrSourceUnconfirmed
 	}
 	return chargeNativePolicyBudget(budget, cost.Rows, cost.Reads)
@@ -294,4 +308,42 @@ func (d roleSelectorMoveAuthorizedChanges) pendingSourceInput(ctx context.Contex
 		return nil, kaname.ErrSourceReadLimit
 	}
 	return sets, ctx.Err()
+}
+
+// activeProjectSourceInput передаёт результат штатного Grant и reconcile для одного
+// проекта. Владелец заново строит все четыре команды из физических OLD и NEW.
+func (d roleSelectorMoveAuthorizedChanges) activeProjectSourceInput(ctx context.Context, w *semanticAuthorityWriteTx) (json.RawMessage, error) {
+	owner, effect := d.changes.owner, d.changes.access
+	copies, err := owner.copyInput(w)
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(copies, []byte("[]")) || !bytes.Equal(d.copies, copies) || len(d.retained)+len(effect.Added)+len(effect.Removed)+len(effect.ResidualFold) != 0 ||
+		len(owner.move.captured.Carriers) != 1 || len(owner.move.captured.Collateral) != 0 || len(effect.Bindings) != 1 || len(effect.Commands) != 4 {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	carrier, binding := owner.move.captured.Carriers[0].Carrier.Binding, effect.Bindings[0]
+	if carrier.Status != domain.AccessBindingStatusActive || carrier.ExpiresAt != nil || carrier.RevokedAt != nil || carrier.RoleID != owner.move.captured.Before.ID ||
+		carrier.ResourceType != "account" || carrier.ResourceID == "" || carrier.Target.AllInScope || len(carrier.Target.Resources) != 1 ||
+		carrier.Target.Resources[0].Type != "iam.project" || carrier.Target.Resources[0].ID == "" || binding.Pending || binding.BindingID != carrier.ID || len(binding.Coordinates) != 2 ||
+		effect.Commands[0].Kind != "members" || effect.Commands[1].Kind != "write" || effect.Commands[2].Kind != "record" || effect.Commands[3].Kind != "member_delete" {
+		return nil, kaname.ErrSourceUnconfirmed
+	}
+	for i, ref := range []domain.ResourceRef{{Type: "iam.account", ID: carrier.ResourceID}, carrier.Target.Resources[0]} {
+		c := binding.Coordinates[i]
+		if !c.Present || c.Resource != ref {
+			return nil, kaname.ErrSourceUnconfirmed
+		}
+		if err := chargeNativePolicyBudget(w.producerBudget, 1+len(c.Before)+len(c.Proposed), 0); err != nil {
+			return nil, err
+		}
+	}
+	raw, err := json.Marshal(map[string]any{"coordinates": binding.Coordinates, "commands": effect.Commands})
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 131072 {
+		return nil, kaname.ErrSourceReadLimit
+	}
+	return raw, ctx.Err()
 }

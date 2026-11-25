@@ -26,7 +26,12 @@ func (w *preparedRoleWriteTx) finalizePendingSelectorMove(ctx context.Context, d
 		w.stage.selectorMove == nil || decision.changes.owner == nil || decision.changes.owner.move != w.stage.selectorMove {
 		return kaname.ErrSourceUnconfirmed
 	}
-	sets, err := decision.pendingSourceInput(ctx, w.semanticAuthorityWriteTx)
+	sourceInput := decision.pendingSourceInput
+	transport := w.stage.selectorMove.sourceTransport()
+	if transport == activeNoCopyPrepareTransport {
+		sourceInput = decision.activeProjectSourceInput
+	}
+	sets, err := sourceInput(ctx, w.semanticAuthorityWriteTx)
 	if err != nil {
 		return err
 	}
@@ -47,7 +52,7 @@ func (w *preparedRoleWriteTx) finalizePendingSelectorMove(ctx context.Context, d
 		}
 		return err
 	}
-	if err := chargeSelectorMoveFinalizeReceipt(budget, receipt); err != nil {
+	if err := chargeSelectorMoveFinalizeReceiptFor(budget, receipt, transport); err != nil {
 		return err
 	}
 	if err := ctx.Err(); err != nil {
@@ -71,6 +76,10 @@ func (w *preparedRoleWriteTx) ConfirmPreparedSelectorMove(ctx context.Context) e
 // После выбора SQL владеет всем остатком для deferred replay. Оставить его
 // в Go-бюджете означало бы второй раз разрешить те же строки и чтения.
 func chargeSelectorMoveFinalizeReceipt(budget *relverdict.AdministrativeReadBudget, raw json.RawMessage) error {
+	return chargeSelectorMoveFinalizeReceiptFor(budget, raw, pendingNoCopyPrepareTransport)
+}
+
+func chargeSelectorMoveFinalizeReceiptFor(budget *relverdict.AdministrativeReadBudget, raw json.RawMessage, expectedTransport string) error {
 	if budget == nil || len(raw) == 0 || len(raw) > 4096 {
 		return kaname.ErrSourceUnconfirmed
 	}
@@ -96,7 +105,7 @@ func chargeSelectorMoveFinalizeReceipt(budget *relverdict.AdministrativeReadBudg
 	if tok, err := decoder.Token(); err != nil || tok != json.Delim('}') || len(fields) != 0 {
 		return kaname.ErrSourceUnconfirmed
 	}
-	if _, err := decoder.Token(); err != io.EOF || transport != pendingNoCopyPrepareTransport || phase != "selected" ||
+	if _, err := decoder.Token(); err != io.EOF || transport != expectedTransport || phase != "selected" ||
 		!accessLabelSourceDigest(sourceHash) || !accessLabelSourceDigest(contentHash) {
 		return kaname.ErrSourceUnconfirmed
 	}
