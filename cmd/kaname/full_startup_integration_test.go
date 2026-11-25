@@ -53,7 +53,7 @@ func fullStartupSeedPerson(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	return user, account
 }
 
-func fullStartupRuntimePool(t *testing.T, ctx context.Context, owner *pgxpool.Pool) *pgxpool.Pool {
+func fullStartupRestrictedLogin(t *testing.T, ctx context.Context, owner *pgxpool.Pool) (string, string) {
 	t.Helper()
 	login, password := "full_startup_"+ids.NewID("rol"), ids.NewID("pwd")
 	quoted := pgx.Identifier{login}.Sanitize()
@@ -65,7 +65,13 @@ func fullStartupRuntimePool(t *testing.T, ctx context.Context, owner *pgxpool.Po
 		_, _ = owner.Exec(cleanup, "DROP OWNED BY "+quoted)
 		_, _ = owner.Exec(cleanup, "DROP ROLE "+quoted)
 	})
-	_, err = owner.Exec(ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, login)
+	return login, password
+}
+
+func fullStartupRuntimePool(t *testing.T, ctx context.Context, owner *pgxpool.Pool) *pgxpool.Pool {
+	t.Helper()
+	login, password := fullStartupRestrictedLogin(t, ctx, owner)
+	_, err := owner.Exec(ctx, `SELECT kaname.authority_protocol_grant_runtime($1::regrole)`, login)
 	require.NoError(t, err)
 	cfg := owner.Config()
 	cfg.ConnConfig.User, cfg.ConnConfig.Password, cfg.AfterConnect = login, password, nil

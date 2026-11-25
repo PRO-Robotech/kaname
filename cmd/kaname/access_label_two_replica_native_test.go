@@ -59,8 +59,8 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 	connectionB := provisionNativeRuntime(t, f, filepath.Join(f.session.Root, "reader-b-runtime-grants.log"))
 	require.NotEqual(t, connectionA.User, connectionB.User)
 	replicas := []*nativeAccessLabelReplica{
-		startNativeAccessLabelReplica(t, f, "writer-a", installruntime.DefaultNativePorts(), connectionA),
-		startNativeAccessLabelReplica(t, f, "reader-b", installruntime.SecondNativePorts(), connectionB),
+		startNativeAccessLabelReplica(t, f, "writer-a", installruntime.DefaultNativePorts(), connectionA, nil),
+		startNativeAccessLabelReplica(t, f, "reader-b", installruntime.SecondNativePorts(), connectionB, nil),
 	}
 	require.NotEqual(t, replicas[0].pid, replicas[1].pid)
 	continuing := func() {
@@ -241,18 +241,27 @@ func (r *nativeAccessLabelReplica) observation(t *testing.T) nativeAccessLabelRe
 	r.assertContinuing(t)
 	return nativeAccessLabelReplicaObservation{Name: r.name, PID: r.pid, BinarySHA256: r.process.BinarySHA256, ConfigSHA256: r.process.ConfigSHA256, Ports: r.ports.All(), SameCgroup: true, IdentityUnchanged: true, ListenersOwned: true}
 }
-func startNativeAccessLabelReplica(t *testing.T, f *installationNativeWorld, name string, ports installruntime.NativePorts, connection *pgx.ConnConfig) *nativeAccessLabelReplica {
+func startNativeAccessLabelReplica(t *testing.T, f *installationNativeWorld, name string, ports installruntime.NativePorts, connection, executor *pgx.ConnConfig) *nativeAccessLabelReplica {
 	t.Helper()
 	values, err := ports.EnvironmentOverrides()
 	require.NoError(t, err)
 	values["KANAME_REPOSITORY__POSTGRES__URL"] = (&url.URL{Scheme: "postgres", User: url.User(connection.User), Host: "127.0.0.1:" + f.stand.PGPort, Path: "/kaname", RawQuery: "sslmode=require&application_name=" + name}).String()
 	values["KANAME_DB_PASSWORD"] = connection.Password
 	values["KANAME_REPOSITORY__POSTGRES__REPLICA_BUDGET"] = "2"
-	environment := nativeAccessLabelEnvironment(f.session.Environment, values, "KANAME_DB_HOST", "KANAME_DB_PORT", "KANAME_DB_USER", "KANAME_DB_NAME", "KANAME_BOOTSTRAP_ROOT_EMAIL")
-	config, err := installruntime.FullStartupConfig(map[string]any{
-		"authority-protocol": map[string]any{"participation": "participant", "full-semantics": false},
+	doc := map[string]any{
+		"authority-protocol": map[string]any{"participation": "participant", "full-semantics": executor != nil},
 		"manifests":          map[string]any{"dir": "", "required": false},
-	}, f.writerPlan)
+	}
+	if executor != nil {
+		const passwordEnv = "USER_METADATA_TEST_DB_PASSWORD"
+		values[passwordEnv] = executor.Password
+		values["KANAME_REPOSITORY__POSTGRES__MAX_CONNS"] = "8"
+		doc["repository"] = map[string]any{"postgres": map[string]any{"role-writer": map[string]any{
+			"user": executor.User, "password-from-env": passwordEnv, "max-conns": 4,
+		}}}
+	}
+	environment := nativeAccessLabelEnvironment(f.session.Environment, values, "KANAME_DB_HOST", "KANAME_DB_PORT", "KANAME_DB_USER", "KANAME_DB_NAME", "KANAME_BOOTSTRAP_ROOT_EMAIL")
+	config, err := installruntime.FullStartupConfig(doc, f.writerPlan)
 	require.NoError(t, err)
 	root := filepath.Join(f.session.Root, name)
 	require.NoError(t, os.Mkdir(root, 0700))
@@ -277,7 +286,7 @@ func startNativeAccessLabelReplica(t *testing.T, f *installationNativeWorld, nam
 	ready, cancel := context.WithTimeout(f.given.ctx, 90*time.Second)
 	err = process.AwaitReady(ready, wire.ProductionReady)
 	cancel()
-	require.NoError(t, err, "staged participant must become ready on its own listener")
+	require.NoError(t, err, "participant must become ready on its own listener")
 	path := filepath.Join(root, "process", "process.json")
 	raw, err := os.ReadFile(path)
 	require.NoError(t, err)
