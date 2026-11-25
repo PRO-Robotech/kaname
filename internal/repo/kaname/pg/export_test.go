@@ -19,6 +19,12 @@ import (
 // другой запрос — и осталась бы зелёной ровно тогда, когда предел сняли с
 // настоящего.
 
+// RoleMoveStageTupleGrantSQL — та же передача права чтения, которую выполняет RR-writer.
+const RoleMoveStageTupleGrantSQL = roleMoveStageTupleGrantSQL
+
+// AccessLabelMoveCoordinateEffect сохраняет формат реального payload для SQL-проб переноса.
+type AccessLabelMoveCoordinateEffect = accessLabelMoveCoordinateEffect
+
 // MembersOfGroupsSQL — оператор, который исполняет MembersOfGroups.
 const MembersOfGroupsSQL = membersOfGroupsSQL
 
