@@ -6,6 +6,7 @@ package pg
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 
 	"github.com/PRO-Robotech/kaname/internal/catalog"
@@ -143,6 +144,13 @@ func (s *roleSelectorMoveStage) compileChanges(
 	if err != nil {
 		return empty, err
 	}
+	// При переносе без копий замена fingerprint не меняет права ни
+	// одного действующего получателя, в том числе при нескольких выдачах.
+	if len(copies) == 0 {
+		if err := requireNoCopySelectorMoveParity(ctx, effect, budget); err != nil {
+			return empty, err
+		}
+	}
 	grants, err := accessLabelMoveGrantResidual(ctx, s.captured, effect.Bindings, at, budget)
 	if err != nil {
 		return empty, err
@@ -160,6 +168,41 @@ func (s *roleSelectorMoveStage) compileChanges(
 		return empty, err
 	}
 	return changes, ctx.Err()
+}
+
+// Проверка относится к рассчитанным правам. Подлинность OLD-строк членов и
+// журнала и их атомарную замену по-прежнему подтверждает владелец записи.
+func requireNoCopySelectorMoveParity(ctx context.Context, effect accessLabelMoveEffect, budget *relverdict.AdministrativeReadBudget) error {
+	if len(effect.Added) != 0 || len(effect.Removed) != 0 || len(effect.ResidualFold) != 0 {
+		return kaname.ErrSourceUnconfirmed
+	}
+	for _, binding := range effect.Bindings {
+		if binding.Pending {
+			continue
+		}
+		if err := budget.Charge(len(binding.Coordinates), 0); err != nil {
+			return err
+		}
+		for _, coordinate := range binding.Coordinates {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			before, proposed := make(map[domain.MembershipTuple]bool), make(map[domain.MembershipTuple]bool)
+			if err := collectSelectorMoveTuples(coordinate.Before, before, budget); err != nil {
+				return err
+			}
+			if err := collectSelectorMoveTuples(coordinate.Proposed, proposed, budget); err != nil {
+				return err
+			}
+			if err := budget.Charge(len(before), 0); err != nil {
+				return err
+			}
+			if !maps.Equal(before, proposed) {
+				return kaname.ErrSourceUnconfirmed
+			}
+		}
+	}
+	return ctx.Err()
 }
 
 type roleSelectorMoveGrant struct {

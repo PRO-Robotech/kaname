@@ -27,6 +27,15 @@ import (
 )
 
 func TestRoleSelectorMovePendingSourcesAreBoundToDecision(t *testing.T) {
+	testRoleSelectorMoveSources(t, false)
+}
+
+func TestRoleSelectorMoveActiveNoCopyMemberWitness(t *testing.T) {
+	testRoleSelectorMoveSources(t, true)
+}
+
+func testRoleSelectorMoveSources(t *testing.T, active bool) {
+	t.Helper()
 	r, owner := writerProtocolRigBeforePreparation(t)
 	actor := bindingPublicOwner(t, r)
 	role := ids.NewID("rol")
@@ -49,6 +58,21 @@ func TestRoleSelectorMovePendingSourcesAreBoundToDecision(t *testing.T) {
 	_, err = seed.Exec(r.ctx, `INSERT INTO kaname.access_binding_emitted_tuples(binding_id,fga_user,relation,object,source)
 		VALUES($1,'account:'||$2::text,'account','iam_access_binding:'||$1::text,'binding')`, binding, r.a)
 	require.NoError(t, err)
+	if active {
+		// Физические OLD-строки независимы от предлагаемого p_coordinates.
+		old := domain.Rule{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}, MatchLabels: map[string]string{"team": "blue"}}
+		_, err = seed.Exec(r.ctx, `UPDATE kaname.access_bindings SET status='ACTIVE' WHERE id=$1`, binding)
+		require.NoError(t, err)
+		_, err = seed.Exec(r.ctx, `INSERT INTO kaname.access_binding_target_members
+			(binding_id,role_id,rule_fp,object_type,object_id,verification_status)
+			VALUES($1,$2,$3,'iam.project',$4,'ACTIVE')`, binding, role, old.Fingerprint(), project)
+		require.NoError(t, err)
+		_, err = seed.Exec(r.ctx, `INSERT INTO kaname.access_binding_emitted_tuples
+			(binding_id,source,member_object_type,member_object_id,fga_user,relation,object)
+			SELECT $1,'member','iam.project',$2,'user:'||$3::text,verb,'project:'||$2::text
+			FROM unnest(ARRAY['v_get','viewer']) AS verbs(verb)`, binding, project, actor)
+		require.NoError(t, err)
+	}
 	require.NoError(t, seed.Commit(r.ctx))
 	move, err := json.Marshal(map[string]any{"role_id": role, "version": version, "physical": physical, "proposed_rules": json.RawMessage(proposed),
 		"moves": []map[string]int{{"rule_index": 0, "child_index": -1}}, "copy_candidates": []any{}})
@@ -102,6 +126,27 @@ func TestRoleSelectorMovePendingSourcesAreBoundToDecision(t *testing.T) {
 			PERFORM kaname.authority_role_stage_epoch_lock(NULL::text[],epoch);
 			IF action='transport_finalize' THEN PERFORM kaname._authority_role_move_sequence_finalize_v1('[]'::jsonb,100000,4096);END IF;
 			RETURN 'true'::jsonb;
+		END IF;
+		IF action='active_member_insert' THEN
+			RETURN kaname._authority_role_move_active_member_insert_v1(100000,4096);
+		END IF;
+		IF action IN ('active_source_seal','active_source_replay','active_source_tamper') THEN
+			IF action='active_source_tamper' THEN
+				UPDATE pg_temp.kaname_authority_sequence_program SET frozen=jsonb_set(frozen,
+					'{selector_move_active_project_seal,witness,ledger_sha256}','"stale"'::jsonb,false) WHERE singleton;
+			END IF;
+			RETURN kaname._authority_role_move_active_project_seal_v1(
+				CASE WHEN action='active_source_seal' THEN coordinate_sets END,100000,4096);
+		END IF;
+		IF action IN ('active_witness','active_stale_member','active_stale_ledger') THEN
+			IF action='active_stale_member' THEN
+				UPDATE pg_temp.kaname_authority_sequence_program SET frozen=jsonb_set(frozen,
+					'{selector_move,binding_census,members,0,0}','"stale"'::jsonb,false) WHERE singleton;
+			ELSIF action='active_stale_ledger' THEN
+				UPDATE pg_temp.kaname_authority_sequence_program SET frozen=jsonb_set(frozen,
+					'{selector_move,binding_census,ledger,0,0}','"stale"'::jsonb,false) WHERE singleton;
+			END IF;
+			RETURN kaname._authority_role_move_active_project_witness_v1(coordinate_sets,100000,4096);
 		END IF;
 		IF action='content' THEN PERFORM kaname.authority_role_move_content_approved_v1();RETURN 'true'::jsonb;END IF;
 		IF action='prepare' THEN
@@ -256,6 +301,145 @@ func TestRoleSelectorMovePendingSourcesAreBoundToDecision(t *testing.T) {
 	_, err = tx.Exec(r.ctx, `SELECT kaname.authority_protocol_enter_typed_v3('global',ARRAY[]::text[],'[]'::jsonb,'role',$1,$2,$3,'decision')`, identity.ModelID, identity.CatalogID, identity.ProjectorVersion)
 	require.NoError(t, err)
 	const call = `SELECT kaname.test_role_pending_source_v1($1,$2::jsonb)`
+	if active {
+		const privilege = `SELECT has_function_privilege(current_user,'kaname._authority_role_move_active_project_witness_v1(jsonb,integer,integer)','EXECUTE')`
+		var privileged bool
+		require.NoError(t, r.runtime.QueryRow(r.ctx, privilege).Scan(&privileged))
+		require.False(t, privileged)
+		require.NoError(t, tx.QueryRow(r.ctx, privilege).Scan(&privileged))
+		require.False(t, privileged)
+		_, err = tx.Exec(r.ctx, call, "prepare", nil)
+		require.NoError(t, err)
+		payload, err := json.Marshal(all)
+		require.NoError(t, err)
+		var report struct {
+			Role        string            `json:"role_id"`
+			Binding     string            `json:"binding_id"`
+			Project     string            `json:"project_id"`
+			Member      []json.RawMessage `json:"member_old"`
+			NewFP       string            `json:"new_rule_fp"`
+			LedgerHash  string            `json:"ledger_sha256"`
+			Rows, Reads int
+		}
+		require.NoError(t, tx.QueryRow(r.ctx, call, "active_witness", payload).Scan(&report))
+		require.Equal(t, role, report.Role)
+		require.Equal(t, binding, report.Binding)
+		require.Equal(t, project, report.Project)
+		require.Len(t, report.Member, 3)
+		var physicalMember struct {
+			FP string `json:"rule_fp"`
+		}
+		require.NoError(t, json.Unmarshal(report.Member[2], &physicalMember))
+		require.Equal(t, oldRule.Fingerprint(), physicalMember.FP)
+		require.Equal(t, newRule.Fingerprint(), report.NewFP)
+		require.Len(t, report.LedgerHash, 64)
+		require.Positive(t, report.Rows)
+		require.Positive(t, report.Reads)
+		reject := func(action string, input json.RawMessage, state string) {
+			t.Helper()
+			probe, err := tx.Begin(r.ctx)
+			require.NoError(t, err)
+			_, err = probe.Exec(r.ctx, call, action, input)
+			requireAccessDefinitionSQLState(t, err, state)
+			require.NoError(t, probe.Rollback(r.ctx))
+		}
+		reject("active_stale_member", payload, "40001")
+		reject("active_stale_ledger", payload, "40001")
+		changed := append([]coordinate(nil), all...)
+		changed[1].Proposed = nil
+		forged, err := json.Marshal(changed)
+		require.NoError(t, err)
+		reject("active_witness", forged, "42501")
+		const privateSeal = `SELECT has_function_privilege(current_user,'kaname._authority_role_move_active_project_seal_v1(jsonb,integer,integer)','EXECUTE')`
+		require.NoError(t, r.runtime.QueryRow(r.ctx, privateSeal).Scan(&privileged))
+		require.False(t, privileged)
+		require.NoError(t, tx.QueryRow(r.ctx, privateSeal).Scan(&privileged))
+		require.False(t, privileged)
+		require.Len(t, oldProject, 1)
+		require.Len(t, newProject, 1)
+		prior, desired := oldProject[0], newProject[0]
+		bid := domain.AccessBindingID(binding)
+		key := reconcile.MemberCoord{ObjectType: "iam.project", ObjectID: project}
+		input := reconcile.CapturedObjectDiff{
+			Binding:  reconcile.BindingScope{BindingID: bid, RoleID: role, Active: true, Scope: domain.ScopeAnchor{Type: "account", ID: r.a}},
+			Converge: true, Live: map[reconcile.MemberCoord]bool{key: true},
+			Current: []domain.TargetMember{{BindingID: bid, RoleID: domain.RoleID(role), RuleFP: prior.RuleFP,
+				ObjectType: key.ObjectType, ObjectID: key.ObjectID, VerificationStatus: prior.Status}},
+			Desired: []reconcile.DesiredMember{{Derivation: desired.Derivation, RuleFP: desired.RuleFP, ObjectType: key.ObjectType,
+				ObjectID: key.ObjectID, Status: desired.Status, Tuples: desired.Tuples}},
+		}
+		for _, tuple := range prior.Tuples {
+			input.Ledger = append(input.Ledger, reconcile.LedgerRow{Member: key, Tuple: tuple})
+		}
+		commands, err := reconcile.CompileCapturedObjectDiff(r.ctx, []reconcile.CapturedObjectDiff{input})
+		require.NoError(t, err)
+		require.Len(t, commands, 4)
+		proposal := func(commands []reconcile.BindingCommand) json.RawMessage {
+			t.Helper()
+			raw, err := json.Marshal(map[string]any{"coordinates": all, "commands": commands})
+			require.NoError(t, err)
+			return raw
+		}
+		const privateInsert = `SELECT has_function_privilege(current_user,'kaname._authority_role_move_active_member_insert_v1(integer,integer)','EXECUTE')`
+		require.NoError(t, r.runtime.QueryRow(r.ctx, privateInsert).Scan(&privileged))
+		require.False(t, privileged)
+		require.NoError(t, tx.QueryRow(r.ctx, privateInsert).Scan(&privileged))
+		require.False(t, privileged)
+		reject("active_member_insert", nil, "42501")
+		reject("active_source_replay", nil, "42501")
+		bad := append([]reconcile.BindingCommand(nil), commands...)
+		bad[3].RuleFP = newRule.Fingerprint()
+		reject("active_source_seal", proposal(bad), "42501")
+		bad = append([]reconcile.BindingCommand(nil), commands...)
+		bad[1].Tuples = append([]domain.MembershipTuple(nil), commands[1].Tuples...)
+		require.NotEmpty(t, bad[1].Tuples)
+		bad[1].Tuples[0].Relation = "v_delete"
+		reject("active_source_seal", proposal(bad), "42501")
+		var sealed, replay struct {
+			SHA256      string
+			Rows, Reads int
+		}
+		require.NoError(t, tx.QueryRow(r.ctx, call, "active_source_seal", proposal(commands)).Scan(&sealed))
+		require.Len(t, sealed.SHA256, 64)
+		require.Positive(t, sealed.Rows)
+		require.Positive(t, sealed.Reads)
+		reject("active_source_seal", proposal(commands), "42501")
+		reject("active_source_tamper", nil, "40001")
+		require.NoError(t, tx.QueryRow(r.ctx, call, "active_source_replay", nil).Scan(&replay))
+		require.Equal(t, sealed.SHA256, replay.SHA256)
+		reject("seal", sets(all), "42501")
+		var consumed struct {
+			Ordinal   int               `json:"last_consumed"`
+			Hash      string            `json:"seal_sha256"`
+			NewMember []json.RawMessage `json:"member_new"`
+		}
+		require.NoError(t, tx.QueryRow(r.ctx, call, "active_member_insert", nil).Scan(&consumed))
+		require.Equal(t, 1, consumed.Ordinal)
+		require.Equal(t, sealed.SHA256, consumed.Hash)
+		require.Len(t, consumed.NewMember, 3)
+		var inserted struct {
+			FP string `json:"rule_fp"`
+		}
+		require.NoError(t, json.Unmarshal(consumed.NewMember[2], &inserted))
+		require.Equal(t, report.NewFP, inserted.FP)
+		reject("active_member_insert", nil, "42501")
+		const members = `SELECT count(*) FILTER (WHERE rule_fp=$4),count(*) FILTER (WHERE rule_fp=$5)
+			FROM ONLY kaname.access_binding_target_members WHERE binding_id=$1 AND role_id=$2 AND
+			object_type='iam.project' AND object_id=$3 AND verification_status='ACTIVE'`
+		verify := func(row pgx.Row, wantNew int) {
+			t.Helper()
+			var oldCount, newCount int
+			require.NoError(t, row.Scan(&oldCount, &newCount))
+			require.Equal(t, 1, oldCount)
+			require.Equal(t, wantNew, newCount)
+		}
+		args := []any{binding, role, project, oldRule.Fingerprint(), report.NewFP}
+		verify(tx.QueryRow(r.ctx, members, args...), 1)
+		verify(r.admin.QueryRow(r.ctx, members, args...), 0)
+		requireAccessDefinitionSQLState(t, tx.Commit(r.ctx), "42501")
+		verify(r.admin.QueryRow(r.ctx, members, args...), 0)
+		return
+	}
 	// Штатный prepare удерживает OLD в той же backend-сессии. Самостоятельная
 	// ветка savepoint показывает границу публичных методов до расчёта Grant.
 	t.Run("публичный prepare удерживает без публикации", func(t *testing.T) {

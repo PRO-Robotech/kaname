@@ -23,10 +23,26 @@ import (
 // Вызовы используют одну и ту же редакцию роли. Отказ постороннему должен
 // оставить её пригодной для последующей авторизованной операции.
 func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusPending)
+}
+
+func TestRoleSelectorMoveUpdatePreservesActiveNoCopy(t *testing.T) {
+	testRoleSelectorMoveUpdateNoCopy(t, domain.AccessBindingStatusActive)
+}
+
+func testRoleSelectorMoveUpdateNoCopy(t *testing.T, status domain.AccessBindingStatus) {
+	t.Helper()
+	active := status == domain.AccessBindingStatusActive
 	r, owner := writerProtocolRigBeforePreparation(t)
 	actor := bindingPublicOwner(t, r)
 	var recipient string
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT owner_user_id FROM kaname.accounts WHERE id=$1`, r.b).Scan(&recipient))
+	outsider := recipient
+	if active {
+		recipient = seedMemberUser(t, r.ctx, r.admin, r.a, "active-selector-move")
+		_, err := r.admin.Exec(r.ctx, `UPDATE kaname.users SET email_verified_at=clock_timestamp() WHERE id=$1`, recipient)
+		require.NoError(t, err)
+	}
 	project := seedMetadataActualProject(t, r, "selector-move-project")
 	old := domain.Rule{Module: "iam", Resources: []string{"project"}, Verbs: []string{"get"}, MatchLabels: map[string]string{"team": "blue"}}
 	setProjectLabels(t, r.ctx, r.admin, project.ID, old.MatchLabels)
@@ -51,7 +67,7 @@ func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
 	subject := domain.Subject{Type: domain.SubjectTypeUser, ID: domain.SubjectID(recipient)}
 	binding, err := bindingset.Insert(r.ctx, seed.AccessBindingsW(), domain.AccessBinding{
 		ID: domain.AccessBindingID(ids.NewID("acb")), RoleID: role.ID, SubjectType: subject.Type, SubjectID: subject.ID,
-		ResourceType: "account", ResourceID: r.a, Scope: domain.ScopeAccount, Status: domain.AccessBindingStatusPending,
+		ResourceType: "account", ResourceID: r.a, Scope: domain.ScopeAccount, Status: status,
 		Target: domain.AccessTarget{Resources: []domain.ResourceRef{{Type: "iam.project", ID: string(project.ID)}}},
 	})
 	require.NoError(t, err)
@@ -69,7 +85,11 @@ func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
 		Module: "iam", Resources: []string{"role"}, ResourceNames: []string{string(role.ID)}, Verbs: []string{"update"},
 	})
 	pool, _, diagnostic := roleActorFiniteLogin(t, r)
-	shared, contract := pendingSourceApplyProjectLabel(t, r, owner, actor, project.ID, editor)
+	materialize := []domain.AccessBindingID{editor}
+	if active {
+		materialize = append(materialize, binding.ID)
+	}
+	shared, contract := pendingSourceApplyProjectLabel(t, r, owner, actor, project.ID, materialize...)
 	roleRepo := kanamepg.New(pool, nil)
 	dedicated, err := kanamepg.NewFullWriterContract(r.ctx, roleRepo, r.bundle)
 	require.NoError(t, err)
@@ -90,7 +110,10 @@ func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
 	}
 	check(t, actor, "v_update", "iam_role:"+string(role.ID), true)
 	check(t, recipient, "v_update", "iam_role:"+string(role.ID), false)
-	check(t, recipient, "v_get", "project:"+string(project.ID), false)
+	check(t, recipient, "v_get", "project:"+string(project.ID), active)
+	if active {
+		check(t, outsider, "v_get", "project:"+string(project.ID), false)
+	}
 
 	var version string
 	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT xmin::text FROM ONLY kaname.roles WHERE id=$1`, role.ID).Scan(&version))
@@ -112,15 +135,22 @@ func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
 	}
 	// Читаем физическую строку проекта и всю область выдачи с независимого
 	// соединения после завершения операции. Любая копия или расширение видны.
-	grantState := func(t *testing.T) string {
+	next := old
+	next.MatchAccessLabels, next.MatchLabels = old.MatchLabels, nil
+	grantState := func(t *testing.T, compareRights bool) string {
 		t.Helper()
 		var state string
 		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT jsonb_build_array(
 			to_jsonb(b),p.xmin::text,p.labels,p.access_labels,
 			(SELECT jsonb_agg(to_jsonb(s) ORDER BY s.ordinal) FROM ONLY kaname.access_binding_subjects s WHERE s.binding_id=b.id),
-			(SELECT jsonb_agg(to_jsonb(m) ORDER BY m.rule_fp,m.object_type,m.object_id) FROM ONLY kaname.access_binding_target_members m WHERE m.binding_id=b.id),
-			(SELECT jsonb_agg(to_jsonb(e) ORDER BY e.object,e.fga_user,e.relation) FROM ONLY kaname.access_binding_emitted_tuples e WHERE e.binding_id=b.id)
-		)::text FROM ONLY kaname.access_bindings b, ONLY kaname.projects p WHERE b.id=$1 AND p.id=$2`, binding.ID, project.ID).Scan(&state))
+			(SELECT jsonb_agg(item ORDER BY item) FROM (
+				SELECT CASE WHEN $3 AND m.object_type='iam.project' AND m.object_id=p.id AND m.rule_fp IN ($4,$5)
+					THEN to_jsonb(m)-ARRAY['rule_fp','created_at','updated_at']
+					ELSE to_jsonb(m) END AS item
+				FROM ONLY kaname.access_binding_target_members m WHERE m.binding_id=b.id
+			) AS members),
+			(SELECT jsonb_agg(to_jsonb(e) ORDER BY e.object,e.fga_user,e.relation,e.member_object_type,e.member_object_id) FROM ONLY kaname.access_binding_emitted_tuples e WHERE e.binding_id=b.id)
+		)::text FROM ONLY kaname.access_bindings b, ONLY kaname.projects p WHERE b.id=$1 AND p.id=$2`, binding.ID, project.ID, compareRights, old.Fingerprint(), next.Fingerprint()).Scan(&state))
 		return state
 	}
 	assertStored := func(t *testing.T, rule domain.Rule, arm string, auditCount int, sameVersion bool) {
@@ -151,30 +181,67 @@ func TestRoleSelectorMoveUpdateCommitsPendingNoCopy(t *testing.T) {
 		require.Equal(t, auditCount, audit)
 		require.Equal(t, auditCount, journal)
 	}
+	assertActiveRows := func(t *testing.T, fingerprint string) {
+		t.Helper()
+		var fingerprints []string
+		var hasRead bool
+		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT
+			ARRAY(SELECT rule_fp FROM ONLY kaname.access_binding_target_members
+				WHERE binding_id=$1 AND role_id=$2 AND object_type='iam.project' AND object_id=$3
+				AND verification_status='ACTIVE' AND rule_fp IN ($5,$6) ORDER BY rule_fp),
+			EXISTS(SELECT FROM ONLY kaname.access_binding_emitted_tuples
+				WHERE binding_id=$1 AND source='member' AND member_object_type='iam.project' AND member_object_id=$3
+				AND fga_user=$4 AND relation='v_get' AND object='project:'||$3)`,
+			binding.ID, role.ID, project.ID, "user:"+recipient, old.Fingerprint(), next.Fingerprint()).Scan(&fingerprints, &hasRead))
+		require.Equal(t, []string{fingerprint}, fingerprints)
+		require.True(t, hasRead)
+	}
 	var ready bool
-	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.labels='{"team":"blue"}' AND p.access_labels=p.labels AND b.status='PENDING'
+	require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT p.labels='{"team":"blue"}' AND p.access_labels=p.labels AND b.status=$3
 		AND b.target=jsonb_build_object('resources',jsonb_build_array(jsonb_build_object('type','iam.project','id',p.id)))
-		AND NOT EXISTS(SELECT FROM kaname.access_binding_target_members WHERE binding_id=b.id)
-		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID).Scan(&ready))
+		AND ($3='ACTIVE' OR NOT EXISTS(SELECT FROM kaname.access_binding_target_members WHERE binding_id=b.id))
+		FROM kaname.projects p, kaname.access_bindings b WHERE p.id=$1 AND b.id=$2`, project.ID, binding.ID, status).Scan(&ready))
 	require.True(t, ready)
-	before := grantState(t)
+	if active {
+		require.NotEqual(t, old.Fingerprint(), next.Fingerprint())
+		assertActiveRows(t, old.Fingerprint())
+	}
+	before := grantState(t, false)
+	beforeRights := before
+	if active {
+		beforeRights = grantState(t, true)
+	}
 	assertStored(t, old, "labels", 0, true)
 	t.Run("unauthorized rolls back", func(t *testing.T) {
 		denied := run(t, recipient)
 		require.NotNil(t, denied.Error)
 		require.Equal(t, int32(codes.PermissionDenied), denied.Error.GetCode(), "%v", denied.Error)
 		assertStored(t, old, "labels", 0, true)
-		require.Equal(t, before, grantState(t))
+		require.Equal(t, before, grantState(t, false))
+		if active {
+			assertActiveRows(t, old.Fingerprint())
+			check(t, recipient, "v_get", "project:"+string(project.ID), true)
+			check(t, outsider, "v_get", "project:"+string(project.ID), false)
+		}
 	})
 
 	t.Run("authorized commits", func(t *testing.T) {
 		done := run(t, actor)
+		if active && done.Error != nil {
+			assertStored(t, old, "labels", 0, true)
+			require.Equal(t, before, grantState(t, false))
+			assertActiveRows(t, old.Fingerprint())
+			check(t, recipient, "v_get", "project:"+string(project.ID), true)
+			check(t, outsider, "v_get", "project:"+string(project.ID), false)
+		}
 		require.Nil(t, done.Error, "%v", done.Error)
-		next := old
-		next.MatchAccessLabels, next.MatchLabels = old.MatchLabels, nil
 		assertStored(t, next, "access_labels", 1, false)
-		require.Equal(t, before, grantState(t))
-		check(t, recipient, "v_get", "project:"+string(project.ID), false)
+		require.Equal(t, beforeRights, grantState(t, active))
+		if active {
+			assertActiveRows(t, next.Fingerprint())
+			check(t, outsider, "v_get", "project:"+string(project.ID), false)
+		}
+		check(t, recipient, "v_get", "project:"+string(project.ID), active)
 		var audited bool
 		require.NoError(t, r.admin.QueryRow(r.ctx, `SELECT event_payload->>'actor'=$2 AND event_payload->'changed_fields'='["rules"]'::jsonb
 		FROM kaname.audit_outbox WHERE event_type='iam.role.updated' AND event_payload->>'resource_id'=$1`, role.ID, actor).Scan(&audited))

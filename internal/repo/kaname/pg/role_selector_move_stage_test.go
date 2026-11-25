@@ -14,6 +14,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/granteffect"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 	"github.com/stretchr/testify/require"
 )
 
@@ -51,4 +52,19 @@ func TestRoleSelectorMoveUsesCapturedCoordinateAndSharedEffectLimit(t *testing.T
 	grant.Tuple.Object = "account:other"
 	_, err = s.compileGrantEffects(t.Context(), bundle, []accessLabelMoveGrant{grant}, &relverdict.AdministrativeReadBudget{})
 	require.ErrorIs(t, err, kaname.ErrSourceUnconfirmed)
+}
+
+func TestNoCopySelectorMoveKeepsRightsPerBinding(t *testing.T) {
+	right := domain.MembershipTuple{User: "user:recipient", Object: "project:one", Relation: "v_get"}
+	old := []resourceeffect.ObjectDesiredMember{{RuleFP: "legacy", Status: domain.VerificationActive, Tuples: []domain.MembershipTuple{right}}}
+	next := []resourceeffect.ObjectDesiredMember{{RuleFP: "protected", Status: domain.VerificationActive, Tuples: []domain.MembershipTuple{right}}}
+	effect := accessLabelMoveEffect{Bindings: []accessLabelMoveBindingEffect{
+		{BindingID: "long-lived", Coordinates: []accessLabelMoveCoordinateEffect{{Before: old, Proposed: next}}},
+		{BindingID: "short-lived", Coordinates: []accessLabelMoveCoordinateEffect{{}}},
+	}}
+	require.NoError(t, requireNoCopySelectorMoveParity(t.Context(), effect, &relverdict.AdministrativeReadBudget{}))
+	// Глобальное множество одинаково, но доступ теперь зависит от другой выдачи и её срока.
+	effect.Bindings[0].Coordinates[0].Proposed = nil
+	effect.Bindings[1].Coordinates[0].Proposed = next
+	require.ErrorIs(t, requireNoCopySelectorMoveParity(t.Context(), effect, &relverdict.AdministrativeReadBudget{}), kaname.ErrSourceUnconfirmed)
 }
