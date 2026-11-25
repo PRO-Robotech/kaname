@@ -476,6 +476,9 @@ func (g *callerGraph) callerObjectsRaw(src valueSrc, seen map[callerObjectSource
 		// Место хранения обязательно, но до конца обхода refs остаётся отложенным.
 		storage := callerObjectKey{pkg: src.pkg, zero: v.Origin()}
 		refs := g.sources(v)
+		if objects, ok := g.callerSelfAppendObjects(src, v, refs, storage, seen, chain); ok {
+			return objects, false, true
+		}
 		if len(refs) == 0 {
 			if !ensure(storage, false) {
 				return nil, true, false
