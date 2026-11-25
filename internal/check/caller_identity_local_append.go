@@ -86,7 +86,7 @@ func callerExactAllocation(object callerObjectKey) bool {
 
 func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, variable *types.Var) bool {
 	body, found := g.bodies[callerNode{fn: fk.fn, lit: fk.lit}]
-	if !found || body.sp != sp || body.node == nil || len(sp.info.Uses) > callerLifetimeStepLimit {
+	if !found || body.sp != sp || body.node == nil {
 		return false
 	}
 	allowed := map[*ast.Ident]bool{}
@@ -103,7 +103,7 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 		}
 		switch n := node.(type) {
 		case *ast.FuncLit:
-			// Uses ниже всё равно увидит захват, но не получит разрешённой позиции.
+			// Полный проход ниже увидит захват без разрешённой позиции.
 			return false
 		case *ast.ValueSpec:
 			for _, id := range n.Names {
@@ -167,13 +167,16 @@ func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, varia
 	if !complete || !declared || !appended {
 		return false
 	}
-	// Это полный types.Object census, включая не посещённые выше замыкания,
-	// передачу адреса, неявный pointer receiver, проекции и прочие чтения.
-	for id, obj := range sp.info.Uses {
-		if g.ctx != nil && g.ctx.Err() != nil {
+	// Объявление найдено внутри этого тела. Область локальной переменной
+	// заканчивается там же, поэтому все её употребления находятся здесь,
+	// включая захваты вложенных замыканий. Учитываем полный обход тела
+	// в том же лимите, не начисляя работу за остальной пакет.
+	for node := range ast.Preorder(body.node) {
+		steps++
+		if steps > callerLifetimeStepLimit || g.ctx != nil && g.ctx.Err() != nil {
 			return false
 		}
-		if obj == variable && !allowed[id] {
+		if id, ok := node.(*ast.Ident); ok && sp.info.Uses[id] == variable && !allowed[id] {
 			return false
 		}
 	}

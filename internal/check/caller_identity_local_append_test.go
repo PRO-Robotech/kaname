@@ -10,6 +10,7 @@ import (
 	"go/token"
 	"go/types"
 	"maps"
+	"strings"
 	"testing"
 )
 
@@ -156,6 +157,38 @@ func TestCallerIdentityLocalAppendBuilderBoundary(t *testing.T) {
 						t.Fatal("неизвестный/zero ключ принят как конкретное выделение")
 					}
 				}
+			}
+		})
+	}
+}
+
+// Чужие объявления не расходуют лимит доказательства локального среза.
+func TestCallerIdentityLocalAppendLargePackage(t *testing.T) {
+	unrelated := "func unrelated(x int) {\n" + strings.Repeat("_ = x\n", callerLifetimeStepLimit+1) + "}"
+	for _, tc := range []struct {
+		name, extra string
+		want        bool
+	}{
+		{"local", "", true},
+		{"closure_capture", "_ = func() { out = source.Value().([]any) };", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setup := unrelated + `
+func collect(xs ...any) []any { return xs }
+func build() []any {
+	var out []any
+	for i := 0; i < 2; i++ { out = append(out, source.Value()) }
+	` + tc.extra + ` return collect(out...)
+}
+`
+			program := callerSoundnessProgram(t, setup, `anchor:=&Box{};candidate:=[]any{};_=anchor;_=candidate`, `&Handler{}`)
+			if len(program.root.info.Uses) <= callerLifetimeStepLimit {
+				t.Fatal("фикстура не превысила размер пакета")
+			}
+			g, _, wanted, allocation, write := callerLocalAppendFixture(t, program)
+			probe := callerLifetimeProbe{g: g, want: wanted}
+			if got := probe.separateLocalAppendBacking(write, allocation); got != tc.want {
+				t.Fatalf("доказательство=%t want=%t", got, tc.want)
 			}
 		})
 	}
