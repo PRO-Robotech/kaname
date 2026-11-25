@@ -88,6 +88,7 @@ func(slot *Slot[T])Set(value T){slot.Value=value}`)
 }
 
 func TestCallerIdentitySoundnessReviewRoots(t *testing.T) {
+	const capturedReadField = "type Holder struct{F func()}"
 	const rpc = "fixture/service/FixtureService/RPC"
 	const producer = "github.com/PRO-Robotech/corelib/operations.PrincipalFromContext"
 	base := []CallerReadDeclaration{{RPC: rpc, Producer: producer, Site: "fixture/app.anchor", Kind: CallerObservation, Reason: "Fixture nonempty population."}}
@@ -245,9 +246,16 @@ func TestCallerIdentitySoundnessReviewRoots(t *testing.T) {
 		{name: "registrar_local_mutation", setup: `type Registrar struct{};func(Registrar)RegisterService(_ any,h any){h.(*Handler).reader=Concrete{}}`, registrar: `Registrar{}`, body: `h.reader.read()`, registration: `&Handler{reader:Benign{}}`, mode: "reader"},
 		{name: "registrar_local_benign", setup: `type Registrar struct{};func(Registrar)RegisterService(_ any,h any){}`, registrar: `Registrar{}`, body: `h.reader.read()`, registration: `&Handler{reader:Benign{}}`, mode: "benign"},
 		{name: "registrar_nil_pointer_mutation", setup: `type Registrar struct{};func(*Registrar)RegisterService(_ any,h any){h.(*Handler).reader=Concrete{}}`, registrar: `(*Registrar)(nil)`, body: `h.reader.read()`, registration: `&Handler{reader:Benign{}}`, mode: "reader"},
-		{name: "captured_interface_field_reader", setup: callerCapturedFieldSetup, body: "var r Runner=&Worker{reader:Concrete{}}; box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "reader"},
-		{name: "captured_interface_field_benign", setup: callerCapturedFieldSetup, body: "var r Runner=&Worker{reader:Benign{}}; box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "benign"},
-		{name: "captured_interface_field_opaque", setup: callerCapturedFieldSetup, body: "r:=source.Value().(Runner); box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "unknown"},
+		// Один и тот же box.F вызывает метод, выбранный при захвате r.read.
+		{name: "captured_interface_field_reader", setup: capturedReadField, body: "var r Reader=Concrete{}; box:=Holder{F:r.read};box.F()", registration: "&Handler{}", mode: "reader"},
+		{name: "captured_interface_field_benign", setup: capturedReadField, body: "var r Reader=Benign{}; box:=Holder{F:r.read};box.F()", registration: "&Handler{}", mode: "benign"},
+		{name: "captured_interface_field_opaque", setup: capturedReadField, body: "r:=source.Value().(Reader); box:=Holder{F:r.read};box.F()", registration: "&Handler{}", mode: "unknown"},
+		// Когда тот же callback владеет указателем на Worker, проверка времени
+		// жизни его поля reader видит достижимый через box.F объект Worker.
+		// Объявление известного READ не должно погасить независимый UNKNOWN.
+		{name: "captured_interface_mutable_receiver_reader", setup: callerCapturedFieldSetup, body: "var r Runner=&Worker{reader:Concrete{}}; box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "unknown_reader"},
+		{name: "captured_interface_mutable_receiver_benign", setup: callerCapturedFieldSetup, body: "var r Runner=&Worker{reader:Benign{}}; box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "unknown"},
+		{name: "captured_interface_mutable_receiver_opaque", setup: callerCapturedFieldSetup, body: "r:=source.Value().(Runner); box:=Holder{F:r.run};box.F(Benign{})", registration: "&Handler{}", mode: "unknown"},
 		{name: "registrar_opaque", registrar: `source.Value().(interface{RegisterService(any,any)})`, body: `h.reader.read()`, registration: `&Handler{reader:Benign{}}`, mode: "unknown"},
 		{name: "qualified_interface_address", body: `source.Assign[any](&source.Shared,Concrete{});source.Shared.(Reader).read()`, registration: `&Handler{}`, mode: "unknown"},
 		{name: "qualified_interface_address_unrelated", body: `source.Assign[any](&source.Other,Concrete{});if source.Shared!=nil{source.Shared.(Reader).read()}`, registration: `&Handler{}`, mode: "benign"},
