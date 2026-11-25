@@ -16,6 +16,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/domain"
 	kaname "github.com/PRO-Robotech/kaname/internal/repo/kaname"
 	kanamepg "github.com/PRO-Robotech/kaname/internal/repo/kaname/pg"
+	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/authorityprotocol"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/multitracer"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -85,9 +86,23 @@ func TestRoleActorLoginFiniteGrantsAndRoleRoutes(t *testing.T) {
 		var ready bool
 		require.NoError(t, pool.QueryRow(w.r.ctx, `SELECT kaname.authority_role_actor_login_ready_v1()`).Scan(&ready))
 		require.True(t, ready)
+		var oid uint32
+		var ordinaryName string
+		require.NoError(t, w.r.runtime.QueryRow(w.r.ctx, `SELECT r.oid,r.rolname::text
+			FROM pg_catalog.pg_roles r WHERE r.rolname=session_user AND current_user=session_user`).Scan(&oid, &ordinaryName))
+		var matched, wrongOID, wrongName bool
+		require.NoError(t, pool.QueryRow(w.r.ctx, `SELECT
+			kaname.authority_role_actor_pair_ready_v1($1,$2),
+			kaname.authority_role_actor_pair_ready_v1(0::oid,$2),
+			kaname.authority_role_actor_pair_ready_v1($1,$2 || '-other')`, oid, ordinaryName).Scan(&matched, &wrongOID, &wrongName))
+		require.True(t, matched)
+		require.False(t, wrongOID)
+		require.False(t, wrongName)
 		for _, sig := range []string{
 			"authority_role_access_label_content_approved_v1()",
 			"authority_role_actor_login_ready_v1()",
+			"authority_role_actor_pair_ready_v1(oid,text)",
+			"authority_role_actor_publication_matches_v1(bigint,text,text)",
 		} {
 			var enrolled, ordinary bool
 			require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT has_function_privilege($1,$3,'EXECUTE'),has_function_privilege($2,$3,'EXECUTE')`, name, w.r.role, "kaname."+sig).Scan(&enrolled, &ordinary))
@@ -109,7 +124,7 @@ func TestRoleActorLoginFiniteGrantsAndRoleRoutes(t *testing.T) {
 			require.NoError(t, pool.QueryRow(w.r.ctx, `SELECT has_function_privilege(current_user,$1,'EXECUTE')`, "kaname."+sig).Scan(&allowed))
 			require.False(t, allowed, sig)
 		}
-		for _, table := range []string{"authority_role_actor_login", "authority_role_access_label_rule", "authority_access_label_definition"} {
+		for _, table := range []string{"authority_role_actor_login", "authority_role_access_label_rule", "authority_access_label_definition", "publication_model_revision"} {
 			_, err := pool.Exec(w.r.ctx, `SELECT * FROM kaname.`+pgx.Identifier{table}.Sanitize()+` LIMIT 0`)
 			requireAccessDefinitionSQLState(t, err, "42501")
 		}
@@ -166,13 +181,62 @@ func TestRoleActorLoginFiniteGrantsAndRoleRoutes(t *testing.T) {
 		separation(t)
 		roleFinalCreate(t, w, writers, "finite_role_regrant")
 	})
+	t.Run("changed ordinary enrollment", func(t *testing.T) {
+		other := "role_pair_" + strings.ReplaceAll(ids.NewID("rol"), "-", "_")
+		quoted := pgx.Identifier{other}.Sanitize()
+		_, err := w.r.admin.Exec(w.r.ctx, "CREATE ROLE "+quoted+" LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			_, err := w.r.admin.Exec(w.r.ctx, `SELECT kaname.authority_role_actor_login_configure_v1($1::regrole,$2::regrole)`, w.r.role, name)
+			require.NoError(t, err)
+			_, err = w.r.admin.Exec(w.r.ctx, "DROP ROLE "+quoted)
+			require.NoError(t, err)
+		})
+		_, err = w.r.admin.Exec(w.r.ctx, `SELECT kaname.authority_role_actor_login_configure_v1($1::regrole,$2::regrole)`, other, name)
+		require.NoError(t, err)
+		var roleReady bool
+		require.NoError(t, pool.QueryRow(w.r.ctx, `SELECT kaname.authority_role_actor_login_ready_v1()`).Scan(&roleReady))
+		require.True(t, roleReady)
+		_, err = kanamepg.NewRolePolicyWriters(w.r.ctx, shared, full, w.r.bundle)
+		require.ErrorContains(t, err, "enrolled pair")
+	})
 	t.Run("unenroll", func(t *testing.T) {
 		_, err := w.r.admin.Exec(w.r.ctx, `SELECT kaname.authority_role_actor_login_configure_v1(NULL,NULL)`)
 		require.NoError(t, err)
 		var allowed bool
-		require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT has_table_privilege($1,'kaname.roles','INSERT,UPDATE') OR has_function_privilege($1,'kaname.authority_role_access_label_content_approved_v1()','EXECUTE')`, name).Scan(&allowed))
+		require.NoError(t, w.r.admin.QueryRow(w.r.ctx, `SELECT has_table_privilege($1,'kaname.roles','INSERT,UPDATE') OR has_function_privilege($1,'kaname.authority_role_access_label_content_approved_v1()','EXECUTE')
+			OR has_function_privilege($1,'kaname.authority_role_actor_pair_ready_v1(oid,text)','EXECUTE')`, name).Scan(&allowed))
 		require.False(t, allowed)
 	})
+}
+
+// Смена редакции должна закрыть ранее открытый контракт ограниченного LOGIN
+// на его собственной транзакции, даже при неизменном bundle.
+func TestRoleActorPublicationCheckTracksCurrentHead(t *testing.T) {
+	r, owner := writerProtocolRigBeforePreparation(t)
+	pool, _, _ := roleActorFiniteLogin(t, r)
+	fullContractActivate(t, r)
+	id := r.bundle.Identity()
+	empty, err := authorityprotocol.NewFullContract(r.ctx, pool, id.ModelID, id.CatalogID, id.ProjectorVersion)
+	require.NoError(t, err)
+	first, err := owner.BootstrapCatalogPublication(r.ctx, r.bundle, nil)
+	require.NoError(t, err)
+	pinned, err := authorityprotocol.NewPublishedFullContract(r.ctx, pool, id.ModelID, id.CatalogID, id.ProjectorVersion, first.Revision, first.Digest)
+	require.NoError(t, err)
+	tx, err := pool.BeginTx(r.ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
+	require.NoError(t, err)
+	lifecycleRollback(t, tx)
+	require.ErrorIs(t, empty.ConfirmPublication(r.ctx, tx), kaname.ErrSourceUnconfirmed)
+	require.NoError(t, pinned.ConfirmPublication(r.ctx, tx))
+	var wrongRevision, wrongDigest, wrongCatalog bool
+	require.NoError(t, tx.QueryRow(r.ctx, `SELECT
+		kaname.authority_role_actor_publication_matches_v1($1::bigint+1,$2,$3),
+		kaname.authority_role_actor_publication_matches_v1($1,'',$3),
+		kaname.authority_role_actor_publication_matches_v1($1,$2,'')`,
+		first.Revision, first.Digest, id.CatalogID).Scan(&wrongRevision, &wrongDigest, &wrongCatalog))
+	require.False(t, wrongRevision)
+	require.False(t, wrongDigest)
+	require.False(t, wrongCatalog)
 }
 
 // Диагностика сохраняет ошибку подготовки до её преобразования в RPC-статус.

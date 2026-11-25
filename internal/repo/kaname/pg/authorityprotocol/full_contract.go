@@ -19,6 +19,7 @@ type FullContract struct {
 	model, catalog, projector string
 	revision                  int64
 	digest                    string
+	enrolledPublicationCheck  bool
 }
 type fullContractContextKey struct{}
 
@@ -39,6 +40,17 @@ func newFullContract(ctx context.Context, pool *pgxpool.Pool, model, catalog, pr
 		return nil, err
 	}
 	c := &FullContract{pool: pool, model: model, catalog: catalog, projector: projector, revision: revision, digest: digest}
+	// Выбираем путь на этом пуле по прямой выдаче EXECUTE владельцем. Сам
+	// предикат повторно подтверждает LOGIN и редакцию после каждого барьера.
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (
+		SELECT FROM pg_catalog.pg_proc p
+		CROSS JOIN LATERAL pg_catalog.aclexplode(p.proacl) acl
+		JOIN pg_catalog.pg_roles login ON login.oid=acl.grantee
+		WHERE p.oid=pg_catalog.to_regprocedure('kaname.authority_role_actor_publication_matches_v1(bigint,text,text)')
+			AND login.rolname=session_user AND login.oid<>p.proowner AND acl.privilege_type='EXECUTE'
+	)`).Scan(&c.enrolledPublicationCheck); err != nil {
+		return nil, errors.Join(kaname.ErrSourceUnconfirmed, err)
+	}
 	if err := c.confirmPublication(ctx, pool.QueryRow); err != nil {
 		return nil, err
 	}
@@ -72,13 +84,17 @@ func (c *FullContract) ConfirmPublication(ctx context.Context, tx pgx.Tx) error 
 
 func (c *FullContract) confirmPublication(ctx context.Context, query func(context.Context, string, ...any) pgx.Row) error {
 	var same bool
-	err := query(ctx, `
+	confirmation := `
 		SELECT NOT pg_is_in_recovery() AND COALESCE((
 			SELECT revision = $1 AND digest = $2 AND catalog_id = $3
 			FROM kaname.publication_model_revision
 			ORDER BY revision DESC LIMIT 1
 		), $1 = 0)
-	`, c.revision, c.digest, c.catalog).Scan(&same)
+	`
+	if c.enrolledPublicationCheck {
+		confirmation = `SELECT kaname.authority_role_actor_publication_matches_v1($1::bigint,$2::text,$3::text)`
+	}
+	err := query(ctx, confirmation, c.revision, c.digest, c.catalog).Scan(&same)
 	if err != nil {
 		return errors.Join(kaname.ErrSourceUnconfirmed, err)
 	}
