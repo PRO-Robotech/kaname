@@ -133,30 +133,11 @@ func ProbeExternalRegistrationReceipt(ctx context.Context, p *MetadataMutationWr
 		if err = stage.freezeProtected(ctx, rc, p.policy.bundle, actor, encoded, &work); err != nil {
 			return trace, err
 		}
-		semantic := newSemanticAuthorityWriter(writer, p.policy.bundle)
-		if err = stage.grant.recheck(ctx, writer); err != nil {
-			return trace, err
-		}
-		if err = stage.grant.verifyProjections(ctx, semantic); err != nil {
-			return trace, err
-		}
-		if err = p.policy.protectPolicyPlanAt(ctx, writer, plan, policyPlanBeforeMetadataWrite); err != nil {
-			return trace, err
-		}
-		if _, err = rc.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`); err != nil {
-			return trace, err
-		}
-		allowed, err := semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", stage.request.typ+":"+id)
+		semantic, err := p.finalizeMetadataAuthorization(ctx, writer, stage, policyPlanBeforeMetadataWrite)
 		if err != nil {
 			return trace, err
 		}
-		if !allowed {
-			return trace, fmt.Errorf("fixture actor lacks update on the held OLD")
-		}
-		if err = stage.grant.authorize(ctx, semantic, actor); err != nil {
-			return trace, err
-		}
-		if err = stage.approveProtectedApply(ctx, semantic, actor, &work); err != nil {
+		if err = stage.approveProtectedApply(ctx, semantic, &work); err != nil {
 			return trace, err
 		}
 		if finish[0] != "omit" {
