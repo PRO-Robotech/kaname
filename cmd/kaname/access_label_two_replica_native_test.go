@@ -63,6 +63,9 @@ func TestAccessLabelsTwoNativeReplicas(t *testing.T) {
 		startNativeAccessLabelReplica(t, f, "reader-b", installruntime.SecondNativePorts(), connectionB, nil),
 	}
 	require.NotEqual(t, replicas[0].pid, replicas[1].pid)
+	// Начальная запись меток начинается после штатного пересчёта проекций.
+	ridAwaitRoleProjectionsAt(t, ctx, replicas[0].process, "account-labels-replica-a")
+	ridAwaitRoleProjectionsAt(t, ctx, replicas[1].process, "account-labels-replica-b")
 	continuing := func() {
 		for _, r := range replicas {
 			r.assertContinuing(t)
