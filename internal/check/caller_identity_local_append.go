@@ -28,7 +28,7 @@ func (p *callerLifetimeProbe) separateLocalAppendBacking(write callerLifetimeWri
 	}
 	id, _ := callerLocalAppendPlace(src.pkg, src.expr)
 	if id == nil {
-		return false
+		return p.g.privateAppendReceiver(src)
 	}
 	v, ok := src.pkg.info.Uses[id].(*types.Var)
 	if !ok || v.IsField() || v.Parent() == nil || v.Parent() == src.pkg.types.Scope() || p.g.index == nil || p.g.index.addrTaken[v] {
