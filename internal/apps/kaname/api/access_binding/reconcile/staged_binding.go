@@ -9,6 +9,7 @@ import (
 	"reflect"
 
 	"github.com/PRO-Robotech/kaname/internal/domain"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 )
 
 // StagedBindingReconciler отделяет snapshot discovery от atomic apply.
@@ -107,6 +108,16 @@ func (c BindingCommand) applyBody(ctx context.Context, s ReconcileStore) error {
 // binding, включая creator/containment исключение. Результат ещё не proof:
 // owner verifier обязан проверить canonical sources до резерва sequence keys.
 func (r *Reconciler) CaptureStagedBindingCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, coord MemberCoord, obj domain.MirrorObject, present bool, ancestors []domain.MirrorObject) (CapturedObjectDiff, error) {
+	return r.captureStagedBindingCoordinate(ctx, s, bs, coord, obj, present, ancestors, nil)
+}
+
+// CaptureStagedProjectCoordinate использует отдельную подтверждённую проекцию
+// вложенного проекта. Прямые правила продолжают читать собственную строку.
+func (r *Reconciler) CaptureStagedProjectCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, obj domain.MirrorObject, graph resourceeffect.ProjectGraphProjection) (CapturedObjectDiff, error) {
+	return r.captureStagedBindingCoordinate(ctx, s, bs, MemberCoord{ObjectType: obj.ObjectType, ObjectID: obj.ObjectID}, obj, true, nil, &graph)
+}
+
+func (r *Reconciler) captureStagedBindingCoordinate(ctx context.Context, s ReconcileStore, bs BindingScope, coord MemberCoord, obj domain.MirrorObject, present bool, ancestors []domain.MirrorObject, project *resourceeffect.ProjectGraphProjection) (CapturedObjectDiff, error) {
 	var empty CapturedObjectDiff
 	if err := ctx.Err(); err != nil {
 		return empty, err
@@ -124,7 +135,7 @@ func (r *Reconciler) CaptureStagedBindingCoordinate(ctx context.Context, s Recon
 			selected.Selectors = append(selected.Selectors, sel)
 		}
 		var err error
-		desired, err = desiredMembersForObject(r.cat.Facts(), selected, obj, ancestors)
+		desired, err = desiredMembersForProjection(r.cat.Facts(), selected, obj, ancestors, project)
 		if err != nil {
 			return empty, err
 		}

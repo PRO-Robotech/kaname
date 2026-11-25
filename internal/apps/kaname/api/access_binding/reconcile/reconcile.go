@@ -1218,11 +1218,22 @@ func (r *Reconciler) reconcileBindingForObject(
 // противоречит пообъектной выдаче минимальных привилегий).
 func desiredMembersForObject(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject,
 	ancestors []domain.MirrorObject) ([]DesiredMember, error) {
-	compiled, err := resourceeffect.CompileObjectDesired(cat, resourceeffect.ObjectBinding{
+	return desiredMembersForProjection(cat, bs, o, ancestors, nil)
+}
+
+func desiredMembersForProjection(cat *catalog.Facts, bs BindingScope, o domain.MirrorObject, ancestors []domain.MirrorObject, project *resourceeffect.ProjectGraphProjection) ([]DesiredMember, error) {
+	binding := resourceeffect.ObjectBinding{
 		BindingID: bs.BindingID, Scope: bs.Scope, Subjects: bs.Subjects,
 		RoleID: bs.RoleID, Policy: bs.Policy, Selectors: bs.Selectors,
 		ScopeSelfVerbs: bs.ScopeSelfVerbs, Target: bs.Target, Active: bs.Active,
-	}, o, ancestors)
+	}
+	var compiled []resourceeffect.ObjectDesiredMember
+	var err error
+	if project != nil {
+		compiled, err = resourceeffect.CompileProjectObjectDesired(cat, binding, o, *project)
+	} else {
+		compiled, err = resourceeffect.CompileObjectDesired(cat, binding, o, ancestors)
+	}
 	if err != nil {
 		return nil, err
 	}

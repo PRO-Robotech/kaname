@@ -22,6 +22,7 @@ import (
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/relverdict"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/resource_mirror"
 	"github.com/PRO-Robotech/kaname/internal/repo/kaname/pg/target_members"
+	"github.com/PRO-Robotech/kaname/internal/resourceeffect"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -398,8 +399,12 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 		bytes += len(data)
 		return nil
 	}
+	projectUnderAccount := false
 	types := map[string]bool{}
 	for _, sel := range bs.Selectors {
+		if sel.Container != nil && sel.Container.Type == domain.ScopeTypeAccountDotted && slices.Contains(sel.ObjectTypes, domain.ScopeTypeProjectDotted) {
+			projectUnderAccount = true
+		}
 		for _, typ := range sel.ObjectTypes {
 			types[typ] = true
 		}
@@ -452,10 +457,6 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 				if e != nil {
 					return nil, e
 				}
-				ancestors, e := store.AncestorObjects(ctx, typ, oid)
-				if e != nil {
-					return nil, e
-				}
 				if !stage.global && typ == "iam.group" {
 					var scopes groupMembershipScope
 					e = tx.QueryRow(ctx, `SELECT accounts,global_scope FROM kaname.authority_group_object_scopes($1)`, oid).Scan(&scopes.accounts, &scopes.global)
@@ -470,7 +471,23 @@ func (p *BindingStageParticipant) stage(ctx context.Context, id domain.AccessBin
 						stage.global = true
 					}
 				}
-				input, e := p.engine.CaptureStagedBindingCoordinate(ctx, coordinateStore, bs, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, obj, present, ancestors)
+				var input reconcile.CapturedObjectDiff
+				if projectUnderAccount && present && typ == domain.ScopeTypeProjectDotted {
+					graph, err := parents.captureProjectObjectGraph(ctx, oid)
+					if err != nil {
+						return nil, err
+					}
+					if err = retainBindingProjectOwner(obj, &graph); err != nil {
+						return nil, err
+					}
+					input, e = p.engine.CaptureStagedProjectCoordinate(ctx, coordinateStore, bs, obj, graph)
+				} else {
+					ancestors, err := store.AncestorObjects(ctx, typ, oid)
+					if err != nil {
+						return nil, err
+					}
+					input, e = p.engine.CaptureStagedBindingCoordinate(ctx, coordinateStore, bs, reconcile.MemberCoord{ObjectType: typ, ObjectID: oid}, obj, present, ancestors)
+				}
 				if e != nil {
 					return nil, e
 				}
@@ -584,6 +601,21 @@ func bindingCoordinatePage(ctx context.Context, tx pgx.Tx, bs reconcile.BindingS
 		ids = append(ids, id)
 	}
 	return ids, rows.Err()
+}
+
+// Вложенная выдача на нативный проект требует совпадения владельца в
+// собственной строке, в зеркале и в типизированном наборе рёбер проекта.
+func retainBindingProjectOwner(project domain.MirrorObject, graph *resourceeffect.ProjectGraphProjection) error {
+	if graph.Object == nil {
+		return nil
+	}
+	if len(project.ParentAccountIDs) != 1 || !slices.Equal(graph.Object.ParentAccountIDs, project.ParentAccountIDs) {
+		return kaname.ErrSourceUnconfirmed
+	}
+	graph.Ancestors = slices.DeleteFunc(graph.Ancestors, func(a domain.MirrorObject) bool {
+		return a.ObjectType != domain.ScopeTypeAccountDotted || a.ObjectID != project.ParentAccountIDs[0]
+	})
+	return nil
 }
 
 type bindingSnapshotStore struct{ *reconcileStore }
