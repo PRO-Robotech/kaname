@@ -44,7 +44,7 @@ func TestRoleSelectorMoveNestedProjectReadsProtectedNativePairs(t *testing.T) {
 	require.JSONEq(t, "{}", mirror)
 	require.JSONEq(t, `{"team":"blue"}`, native)
 	for _, accounts := range [][]string{{r.a}, {r.b}, {r.a, r.b}} {
-		rows, err := resource_mirror.DescendantsOf(r.ctx, r.admin, []string{"iam.project"}, "iam.account", accounts)
+		rows, err := resource_mirror.DescendantsOf(r.ctx, r.admin, []string{"iam.project"}, "iam.account", accounts, false)
 		require.NoError(t, err)
 		found := 0
 		for _, row := range rows {
@@ -60,5 +60,20 @@ func TestRoleSelectorMoveNestedProjectReadsProtectedNativePairs(t *testing.T) {
 			}
 		}
 		require.Equal(t, 1, found)
+
+		protected, err := resource_mirror.DescendantsOf(r.ctx, r.admin, []string{"iam.project"}, "iam.account", accounts, true)
+		require.NoError(t, err)
+		found = 0
+		for _, row := range protected {
+			if row.ObjectID == string(project.ID) {
+				found++
+				require.Equal(t, map[string]string{"team": "blue"}, row.AccessLabels)
+			}
+		}
+		if accounts[0] == r.b {
+			require.Zero(t, found, "защищённый контейнер требует совпадения с физическим владельцем")
+		} else {
+			require.Equal(t, 1, found)
+		}
 	}
 }

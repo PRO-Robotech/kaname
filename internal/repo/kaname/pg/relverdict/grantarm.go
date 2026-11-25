@@ -313,7 +313,7 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
              SELECT 1
                FROM kaname.resource_parent_edge ce
               WHERE ce.object_type = ` + objectModelTypeExpr + ` AND ce.object_id = ` + objectIDExpr + `
-                AND ce.parent_type = rs.container_object_type
+                AND ce.parent_type = rs.container_object_type` + nestedProtectedProjectOwnerPredicate(objectTypeExpr) + `
                 AND (   rs.container_arm = 'anchor'
                      OR (rs.container_arm = 'names' AND ce.parent_id = ANY (rs.container_resource_names))
                      OR (rs.container_arm = 'labels' AND EXISTS (
@@ -349,6 +349,31 @@ func grantArmPredicate(objectTypeExpr, objectModelTypeExpr, objectIDExpr, labels
                     AND ` + namedInTarget("ns.container_type", "ce.parent_id") + `),
          false) IS NOT NULL`
 	return arm + nested + top + binding
+}
+
+// Для защищённого вложенного проекта родной аккаунт, каталоговое зеркало и
+// выбранное ребро должны подтверждать одного владельца. Читаем защищённые
+// пары из физических строк, чтобы копия не могла подменить ни одну сторону.
+func nestedProtectedProjectOwnerPredicate(objectTypeExpr string) string {
+	return `
+                AND CASE WHEN ` + objectTypeExpr + ` = 'iam.project'
+                          AND rs.container_type = 'iam.account'
+                          AND (rs.arm = 'access_labels' OR rs.container_arm = 'access_labels')
+                  THEN ce.tableoid = 'kaname.resource_parent_edge'::regclass AND EXISTS (
+                        SELECT 1
+                          FROM ONLY kaname.projects protected_project
+                          JOIN ONLY kaname.accounts protected_owner ON protected_owner.id = protected_project.account_id
+                          JOIN ONLY kaname.resource_mirror project_graph
+                            ON project_graph.object_type = 'iam.project' AND project_graph.object_id = protected_project.id
+                          LEFT JOIN ONLY kaname.projects graph_parent ON graph_parent.id = project_graph.parent_project_id
+                         WHERE protected_project.id = ce.object_id
+                           AND protected_owner.id = ce.parent_id
+                           AND protected_owner.id = COALESCE(NULLIF(project_graph.parent_account_id, ''), graph_parent.account_id, '')
+                           AND (b.resource_type = 'cluster'
+                             OR (b.resource_type = 'account' AND b.resource_id = protected_owner.id))
+                           AND (rs.arm <> 'access_labels' OR protected_project.access_labels @> rs.match_access_labels)
+                           AND (rs.container_arm <> 'access_labels' OR protected_owner.access_labels @> rs.container_match_access_labels))
+                  ELSE true END`
 }
 
 // errTemplateMark — метка шаблона запроса стоит в нём не ровно один раз.

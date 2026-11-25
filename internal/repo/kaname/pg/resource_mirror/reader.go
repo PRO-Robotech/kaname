@@ -405,7 +405,8 @@ func AncestorsSnapshot(ctx context.Context, q querier, objectType, objectID stri
 // потомков выбранных контейнеров, а не размеру таблицы рёбер.
 // Для проекта под аккаунтом зеркало подтверждает старые обычные метки и ребро.
 // Защищённые пары принадлежат собственной строке проекта в этом аккаунте.
-func DescendantsOf(ctx context.Context, q querier, types []string, containerType string, containerIDs []string) ([]MirrorRow, error) {
+// Защищённый селектор контейнера или ребёнка требует эту строку и совпадение её владельца.
+func DescendantsOf(ctx context.Context, q querier, types []string, containerType string, containerIDs []string, protected bool) ([]MirrorRow, error) {
 	if len(types) == 0 || len(containerIDs) == 0 {
 		return nil, nil
 	}
@@ -431,8 +432,9 @@ func DescendantsOf(ctx context.Context, q querier, types []string, containerType
 		           AND owner_edge.parent_type=cc.object_type AND owner_edge.parent_id=native_project.account_id)
 		    AND native_project.account_id=COALESCE(NULLIF(m.parent_account_id,''),pj.account_id,'')
 		  WHERE cc.dotted = $2 AND cc.live
+		    AND (NOT $4::boolean OR cc.dotted <> 'iam.account' OR co.dotted <> 'iam.project' OR native_project.id IS NOT NULL)
 		  ORDER BY m.object_type ASC, m.object_id ASC`,
-		types, containerType, containerIDs,
+		types, containerType, containerIDs, protected,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resource_mirror: descendants of %s: %w", containerType, err)

@@ -32,7 +32,7 @@ const (
 
 // MatchDescendants — объекты типов types, у которых среди предков есть
 // контейнер containerType с id из containerIDs.
-func (f *fakeStore) MatchDescendants(_ context.Context, types []string, containerType string, containerIDs []string) ([]domain.MirrorObject, error) {
+func (f *fakeStore) MatchDescendants(_ context.Context, types []string, containerType string, containerIDs []string, _ bool) ([]domain.MirrorObject, error) {
 	var out []domain.MirrorObject
 	for _, t := range types {
 		for _, o := range f.mirror[t] {

@@ -62,9 +62,9 @@ func (p *registrationLegacyProbe) MatchByIDs(ctx context.Context, types, ids []s
 	return p.ReconcileStore.MatchByIDs(ctx, types, ids)
 }
 
-func (p *registrationLegacyProbe) MatchDescendants(ctx context.Context, types []string, typ string, ids []string) ([]domain.MirrorObject, error) {
+func (p *registrationLegacyProbe) MatchDescendants(ctx context.Context, types []string, typ string, ids []string, protected bool) ([]domain.MirrorObject, error) {
 	p.descendants++
-	return p.ReconcileStore.MatchDescendants(ctx, types, typ, ids)
+	return p.ReconcileStore.MatchDescendants(ctx, types, typ, ids, protected)
 }
 
 func (p *registrationLegacyProbe) MatchSelector(ctx context.Context, types []string, labels map[string]string) ([]domain.MirrorObject, error) {

@@ -105,6 +105,12 @@ func TestAccessLabelsArriveInEveryNativeReadShape(t *testing.T) {
 					require.Contains(t, query, ".access_labels")
 					require.NotContains(t, query, "{{")
 					require.Equal(t, nested, strings.Contains(query, "rs.container_match_access_labels"))
+					const physicalEdge = "ce.tableoid = 'kaname.resource_parent_edge'::regclass"
+					wantGuards := 0
+					if nested {
+						wantGuards = 1
+					}
+					require.Equal(t, wantGuards, strings.Count(query, physicalEdge))
 				}
 			})
 		}
@@ -113,5 +119,61 @@ func TestAccessLabelsArriveInEveryNativeReadShape(t *testing.T) {
 		source := candidateFrom(table, "$9", "$3", "$4")
 		require.Contains(t, source, ".access_labels")
 		require.Empty(t, boundedCandidateSource(source, "$4"))
+	}
+}
+
+func TestNestedProtectedProjectRequiresSameAccount(t *testing.T) {
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, pgtest.NewEmptyDB(t))
+	require.NoError(t, err)
+	defer pool.Close()
+	_, err = pool.Exec(ctx, `CREATE SCHEMA kaname;
+ CREATE TABLE kaname.accounts(id text PRIMARY KEY, access_labels jsonb);
+ CREATE TABLE kaname.projects(id text PRIMARY KEY, account_id text NOT NULL, access_labels jsonb);
+ CREATE TABLE kaname.resource_mirror(object_type text, object_id text, parent_account_id text, parent_project_id text, labels jsonb);
+ CREATE TABLE kaname.resource_parent_edge(object_id text, parent_id text);
+ CREATE TABLE kaname.edge_copy() INHERITS (kaname.resource_parent_edge);
+ INSERT INTO kaname.accounts VALUES ('own','{"trust":"yes"}'),('foreign','{"trust":"yes"}');
+ INSERT INTO kaname.projects VALUES
+ ('project','own','{"trust":"yes"}'),('outdated','own','{"trust":"yes"}'),
+ ('ordinary','own','{}'),('fallback','own','{"trust":"yes"}'),('copied','own','{"trust":"yes"}');
+ INSERT INTO kaname.resource_mirror VALUES
+ ('iam.project','project','own','','{"trust":"yes"}'),
+ ('iam.project','outdated','foreign','','{"trust":"yes"}'),
+ ('iam.project','ordinary','own','','{"trust":"yes"}'),
+ ('iam.project','fallback','','project','{"trust":"yes"}'),
+ ('iam.project','copied','own','','{"trust":"yes"}');
+ INSERT INTO kaname.resource_parent_edge VALUES
+ ('project','own'),('project','foreign'),('outdated','own'),('outdated','foreign'),
+ ('ordinary','own'),('fallback','own');
+ INSERT INTO kaname.edge_copy VALUES ('copied','own');`)
+	require.NoError(t, err)
+	query := `WITH rs AS (
+ SELECT $4::text AS arm, $5::text AS container_type, $6::text AS container_arm,
+        '{"trust":"yes"}'::jsonb AS match_access_labels, '{"trust":"yes"}'::jsonb AS container_match_access_labels
+ ), b AS (SELECT $7::text AS resource_type, $8::text AS resource_id)
+ SELECT EXISTS (SELECT 1 FROM kaname.resource_parent_edge ce,rs,b
+ WHERE ce.object_id=$1 AND ce.parent_id=$2` + nestedProtectedProjectOwnerPredicate("$3::text") + `)`
+	for _, c := range []struct {
+		name, project, edge, objectType, childArm, container, containerArm, scope, scopeID string
+		want                                                                               bool
+	}{
+		{"same owner", "project", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", true},
+		{"same owner through parent project", "fallback", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", true},
+		{"same protected container owner", "project", "own", "iam.project", "labels", "iam.account", "access_labels", "account", "own", true},
+		{"foreign edge", "project", "foreign", "iam.project", "access_labels", "iam.account", "anchor", "cluster", "root", false},
+		{"foreign scope with real owner edge", "project", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "foreign", false},
+		{"foreign mirror owner", "outdated", "own", "iam.project", "access_labels", "iam.account", "anchor", "cluster", "root", false},
+		{"inherited edge alone", "copied", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", false},
+		{"ordinary labels alone", "ordinary", "own", "iam.project", "access_labels", "iam.account", "anchor", "account", "own", false},
+		{"protected container in foreign scope", "project", "own", "iam.project", "labels", "iam.account", "access_labels", "account", "foreign", false},
+		{"ordinary source unchanged", "project", "foreign", "iam.project", "labels", "iam.account", "anchor", "account", "foreign", true},
+		{"external source unchanged", "project", "foreign", "probe.child", "access_labels", "probe.parent", "anchor", "account", "foreign", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var got bool
+			require.NoError(t, pool.QueryRow(ctx, query, c.project, c.edge, c.objectType, c.childArm, c.container, c.containerArm, c.scope, c.scopeID).Scan(&got))
+			require.Equal(t, c.want, got)
+		})
 	}
 }

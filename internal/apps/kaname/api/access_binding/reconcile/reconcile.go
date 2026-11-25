@@ -328,7 +328,8 @@ type ReconcileStore interface {
 	// MatchDescendants — объекты типов `types`, у которых среди предков есть
 	// контейнер типа `containerType` с идентификатором из `containerIDs`, на любой
 	// глубине (kaname#874): кандидаты вложенного правила на полном проходе.
-	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string) ([]domain.MirrorObject, error)
+	// Для защищённой ветви требуется подтверждённый родитель собственного проекта.
+	MatchDescendants(ctx context.Context, types []string, containerType string, containerIDs []string, protected bool) ([]domain.MirrorObject, error)
 
 	// GetIAMDirectObject возвращает проекцию СОБСТВЕННОЙ таблицы той же БД (родители
 	// включения + метки) ОДНОГО родного объекта iam (iam.project / iam.account + типы

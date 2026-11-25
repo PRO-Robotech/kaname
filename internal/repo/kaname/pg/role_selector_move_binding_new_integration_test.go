@@ -113,7 +113,7 @@ func TestRoleSelectorMoveBindingNewKeepsRecipientsAndRejectsChangedCensus(t *tes
 		WHERE project.dotted='iam.project' AND project.live`, orphanB, project, independent)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, tag.RowsAffected())
-	nativeChildren, err := resource_mirror.DescendantsOf(r.ctx, seed, []string{"iam.project"}, "iam.account", []string{r.a})
+	nativeChildren, err := resource_mirror.DescendantsOf(r.ctx, seed, []string{"iam.project"}, "iam.account", []string{r.a}, true)
 	require.NoError(t, err)
 	require.Len(t, nativeChildren, 1)
 	require.Equal(t, project, nativeChildren[0].ObjectID)
