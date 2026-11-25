@@ -135,6 +135,8 @@ type callerGraph struct {
 	fieldQueryIndexedDepth int                        // -1 сохраняет линейный поиск до полного снятия синтетического стека.
 	nilReturnPrefixes      map[*valueSrc]int          // Префиксы в неизменяемых срезах index.returns.
 	embeddedLiterals       callerEmbeddedLiteralIndex // Неизменяемый синтаксис; общий для копий графа.
+
+	copiedStringFields map[*ast.SelectorExpr]*surfaceSrcPkg
 }
 
 func callerFunction(sp *surfaceSrcPkg, expr ast.Expr) *types.Func {
@@ -217,6 +219,9 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 			ast.Inspect(file, func(n ast.Node) bool {
 				if literal, ok := n.(*ast.CompositeLit); ok {
 					g.embeddedLiterals.add(sp, literal)
+				}
+				if pair, ok := n.(*ast.KeyValueExpr); ok {
+					g.indexCopiedStringField(sp, pair)
 				}
 				sw, ok := n.(*ast.TypeSwitchStmt)
 				if !ok {

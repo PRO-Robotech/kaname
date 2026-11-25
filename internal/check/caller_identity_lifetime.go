@@ -354,7 +354,7 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 				base := src
 				base.expr = x.X
 				refs, unknown := p.g.embeddedCallerSources(base, fieldPath(selection), map[callerFieldKey]bool{})
-				if unknown {
+				if unknown && !p.copiedStringDisjoint(src, x) {
 					return true
 				}
 				for _, ref := range refs {
@@ -437,6 +437,20 @@ func (p *callerLifetimeProbe) contains(src valueSrc) bool {
 		delete(p.objects, object)
 	}
 	return false
+}
+
+// При проверке интерфейсного поля отдельная копия строки не переносит
+// адрес самой ячейки. Даже в этом случае вызывающий проверяет все найденные
+// источники значения. Адрес поля и другие виды значений проходят обычный путь.
+func (p *callerLifetimeProbe) copiedStringDisjoint(src valueSrc, read *ast.SelectorExpr) bool {
+	if p.field == nil || p.want.field != nil || p.g.copiedStringFields[read] != src.pkg ||
+		src.tuple != -1 || src.elem || src.rangeKey || src.rangeVal || src.opAssign ||
+		!p.g.lifetimeScanning || p.g.semanticOverflow || p.g.scalarStoreNative ||
+		!callerFreshReplayContext(p.g.ctx) || p.g.ctx != nil && p.g.ctx.Err() != nil {
+		return false
+	}
+	_, iface := p.field.Type().Underlying().(*types.Interface)
+	return iface && !p.typeMayContain(types.Typ[types.String])
 }
 
 func (p *callerLifetimeProbe) opaqueCalleeContains(site callSrc) bool {

@@ -92,3 +92,30 @@ func (index *callerEmbeddedLiteralIndex) add(sp *surfaceSrcPkg, literal *ast.Com
 	index.values[key] = values
 	index.weight += len(values)
 }
+
+// Сохраняем только чтение, которое инициализирует строковое поле литерала
+// значением другого строкового поля. Адрес поля, селектор метода и упаковка в
+// интерфейс сюда не попадают. Узел AST однозначно задаёт позицию копирования.
+func (g *callerGraph) indexCopiedStringField(sp *surfaceSrcPkg, pair *ast.KeyValueExpr) {
+	key, ok := pair.Key.(*ast.Ident)
+	if !ok {
+		return
+	}
+	dst, ok := sp.info.Uses[key].(*types.Var)
+	if !ok || !dst.IsField() || !types.Identical(dst.Type(), types.Typ[types.String]) {
+		return
+	}
+	read, ok := ast.Unparen(pair.Value).(*ast.SelectorExpr)
+	if !ok {
+		return
+	}
+	sel := sp.info.Selections[read]
+	if sel == nil || sel.Kind() != types.FieldVal || len(sel.Index()) != 1 ||
+		!types.Identical(sel.Type(), types.Typ[types.String]) {
+		return
+	}
+	if g.copiedStringFields == nil {
+		g.copiedStringFields = make(map[*ast.SelectorExpr]*surfaceSrcPkg)
+	}
+	g.copiedStringFields[read] = sp
+}
