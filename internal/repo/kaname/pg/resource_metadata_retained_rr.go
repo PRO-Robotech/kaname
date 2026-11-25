@@ -305,20 +305,15 @@ func (c *metadataRetainedRR) captureScopeFootprint(ctx context.Context, model, i
 					}
 				}
 			case "iam_user":
-				rows, err = p.source.read(ctx, p.tx, resourceSourceKey{kind: resourceSourceUserMemberships, typ: "iam.user", id: n.id})
-				if err != nil {
-					return err
+				accounts := object.ParentAccountIDs
+				if !present {
+					accounts, err = p.userMembershipAccounts(ctx, n.id)
+					if err != nil {
+						return err
+					}
 				}
-				for _, r := range rows {
-					var v struct {
-						Account string `json:"account_id"`
-					}
-					if json.Unmarshal(r.value, &v) != nil {
-						return kaname.ErrSourceUnconfirmed
-					}
-					if v.Account != "" {
-						parents = append(parents, node{"account", v.Account, n.depth + 1})
-					}
+				for _, account := range accounts {
+					parents = append(parents, node{"account", account, n.depth + 1})
 				}
 			case "iam_group", "iam_service_account", "iam_role", "iam_access_binding":
 				dotted := map[string]string{"iam_group": "iam.group", "iam_service_account": "iam.serviceAccount", "iam_role": "iam.role", "iam_access_binding": "iam.accessBinding"}[n.typ]

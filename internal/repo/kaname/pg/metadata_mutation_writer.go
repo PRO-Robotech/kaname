@@ -470,10 +470,14 @@ func (p *MetadataMutationWriters) finalizeMetadataAuthorization(ctx context.Cont
 	if err := p.policy.protectPolicyPlanAt(ctx, w, s.plan, point); err != nil {
 		return nil, err
 	}
-	if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`); err != nil {
+	if s.request.table == "users" {
+		if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_metadata_user_finalize_v1($1)`, s.request.id); err != nil {
+			return nil, err
+		}
+	} else if _, err := w.tx.Exec(ctx, `SELECT kaname.authority_scalar_sequence_finalize_v3()`); err != nil {
 		return nil, err
 	}
-	if s.request.table == "resource_mirror" {
+	if s.grant != nil && (s.request.table == "resource_mirror" || s.request.table == "users") {
 		lifetime := s.grant.source.lifetime
 		if err := lifetime.bind(w); err != nil {
 			return nil, err
@@ -484,7 +488,11 @@ func (p *MetadataMutationWriters) finalizeMetadataAuthorization(ctx context.Cont
 	}
 	actor := s.plan.request.actor
 	semantic := newSemanticAuthorityWriter(w, p.policy.bundle)
-	allowed, err := semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), "v_update", s.request.typ+":"+s.request.id)
+	relation := "v_update"
+	if s.request.table == "users" {
+		relation = "record_writer"
+	}
+	allowed, err := semantic.SemanticRelationChecker().Check(ctx, subjectPolicyKey(actor), relation, s.request.typ+":"+s.request.id)
 	if err != nil {
 		return nil, err
 	}
