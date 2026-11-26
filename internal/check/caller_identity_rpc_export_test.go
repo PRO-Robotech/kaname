@@ -9,7 +9,8 @@ import (
 	"sort"
 )
 
-const checkNarrowingRPC = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1/InternalIAMService/Check"
+const checkNarrowingAPI = "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1"
+const checkNarrowingRPC = checkNarrowingAPI + "/InternalIAMService/Check"
 
 // CheckNarrowingWitness содержит только результат для зарегистрированного
 // InternalIAMService.Check. Свидетель не служит отчётом о покрытии дерева.
@@ -46,8 +47,9 @@ func CheckNarrowingWitnessForTest(ctx context.Context, root string, declared []C
 }
 
 type checkNarrowingFacts struct {
-	report CallerIdentityReport
-	scope  callerRegisteredWalk
+	reads                  []CallerIdentityRead
+	findings               []string
+	readSet, appliedNarrow map[string]bool
 }
 
 func collectCheckNarrowingFacts(ctx context.Context, p *surfaceProgram, listing *surfaceListing) (checkNarrowingFacts, error) {
@@ -56,7 +58,9 @@ func collectCheckNarrowingFacts(ctx context.Context, p *surfaceProgram, listing 
 	if report.Invalid != "" || scope.readSet == nil {
 		return checkNarrowingFacts{}, fmt.Errorf("обход Check не завершён: %s %v", report.Invalid, report.Findings)
 	}
-	return checkNarrowingFacts{report: report, scope: scope}, nil
+	return checkNarrowingFacts{
+		reads: report.Reads, findings: report.Findings, readSet: scope.readSet, appliedNarrow: scope.appliedNarrow,
+	}, nil
 }
 
 func (facts checkNarrowingFacts) witness(narrow map[string]bool, declared []CallerReadDeclaration) CheckNarrowingWitness {
@@ -70,8 +74,8 @@ func (facts checkNarrowingFacts) witness(narrow map[string]bool, declared []Call
 			declarations = append(declarations, row)
 		}
 	}
-	evidence := callerDeclarationEvidence{readSet: facts.scope.readSet, narrow: selected, appliedNarrow: facts.scope.appliedNarrow}
-	findings := append(evidence.findings(facts.report.Reads, declarations), facts.report.Findings...)
+	evidence := callerDeclarationEvidence{readSet: facts.readSet, narrow: selected, appliedNarrow: facts.appliedNarrow}
+	findings := append(evidence.findings(facts.reads, declarations), facts.findings...)
 	sort.Strings(findings)
-	return CheckNarrowingWitness{Reads: facts.report.Reads, Findings: findings}
+	return CheckNarrowingWitness{Reads: facts.reads, Findings: findings}
 }

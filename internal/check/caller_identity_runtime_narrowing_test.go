@@ -6,6 +6,7 @@ package check_test
 import (
 	"bytes"
 	"context"
+	"flag"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -27,12 +28,25 @@ const (
 // Проверяем действующее сужение Check через зарегистрированный RPC. У близнеца меняется
 // только таблица, из которой обработчик и внутренний фронт получают допуск.
 func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) {
+	callerRunCheckPair(t, moduleRoot(t), "REGISTERED_CHECK_DIRECT_WITNESS", check.DirectCheckNarrowingPairForTest)
+}
+
+func TestCallerIdentityRegisteredCheckFullTraversal(t *testing.T) {
+	run := flag.Lookup("test.run")
+	phase, requested := os.LookupEnv("KANAME_REGISTERED_CHECK_PHASE")
+	if !requested && (run == nil || run.Value.String() != "^"+t.Name()+"$") {
+		t.Skip("для полного обхода Check нужен точный селектор этого теста")
+	}
 	root := moduleRoot(t)
-	if phase, requested := os.LookupEnv("KANAME_REGISTERED_CHECK_PHASE"); requested {
+	if requested {
 		callerNarrowingDiagnostic(t, root, phase)
 		return
 	}
+	callerRunCheckPair(t, root, "REGISTERED_CHECK_FULL_TRAVERSAL", check.CheckNarrowingPairForTest)
+}
 
+func callerRunCheckPair(t *testing.T, root, marker string, collect func(*testing.T, context.Context, string, string, []check.CallerReadDeclaration) (check.CheckNarrowingWitness, check.CheckNarrowingWitness, error)) {
+	t.Helper()
 	missing := callerMissingCheckRow(t, root)
 	where := callerCheckCoordinate(t, root)
 	callerCheckFrontControls(t, root)
@@ -43,9 +57,9 @@ func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) 
 	}
 	ctx, cancel := callerFullTreeTestContext(t)
 	defer cancel()
-	lawful, negative, err := check.CheckNarrowingPairForTest(t, ctx, root, missing, liveCallerDeclarations())
+	lawful, negative, err := collect(t, ctx, root, missing, liveCallerDeclarations())
 	if err != nil {
-		t.Fatalf("общий обход Check: %v. Раздельные обходы доступны через scripts/registered-check-pair.py", err)
+		t.Fatal(err)
 	}
 	want := callerLawfulCheckFindings(t, lawful, where)
 	if !slices.Equal(negative.Findings, want) {
@@ -54,8 +68,7 @@ func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) 
 	if withRow != callerCheckFixtureDigest(t, root) || withoutRow != callerCheckFixtureDigest(t, missing) {
 		t.Fatal("дерево близнеца изменилось во время наблюдения")
 	}
-	t.Logf("Check: один завершённый обход регистрации, чтение %s, находок с записью %d, без записи %d",
-		where, len(lawful.Findings), len(negative.Findings))
+	t.Logf("%s read=%s lawful=%d missing_row=%d", marker, where, len(lawful.Findings), len(negative.Findings))
 }
 
 func callerMissingCheckRow(t *testing.T, root string) string {

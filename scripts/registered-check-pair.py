@@ -30,7 +30,7 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = "github.com/PRO-Robotech/kaname"
 PACKAGE = MODULE + "/internal/check"
-TOP = "TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration"
+TOP = "TestCallerIdentityRegisteredCheckFullTraversal"
 RPC = MODULE + "/pkg/api/kaname/cloud/iam/v1/InternalIAMService/Check"
 PRODUCER = MODULE + "/internal/moduleidentity.Roster.FromContext"
 HANDLER = "(*" + MODULE + "/internal/apps/kaname/api/internal_iam.Handler).Check"

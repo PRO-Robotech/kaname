@@ -31,73 +31,85 @@ const checkNarrowingMethod = "/kaname.cloud.iam.v1.InternalIAMService/Check"
 // of each fixture, with identical dependency selection.
 func CheckNarrowingPairForTest(t *testing.T, ctx context.Context, root, missing string, declared []CallerReadDeclaration) (lawful, negative CheckNarrowingWitness, err error) {
 	t.Helper()
-	l, err := newProdListing(ctx, root, []string{"./cmd/kaname/..."})
+	inputs, err := loadCheckNarrowingInputs(ctx, root, missing)
 	if err != nil {
 		return lawful, negative, err
 	}
-	program, err := l.program(nil)
-	if err != nil {
-		return lawful, negative, err
-	}
-	withRow, withoutRow, err := checkNarrowingPairTables(l, program, missing)
-	if err != nil {
-		return lawful, negative, err
-	}
-	t.Log("Check: обе таблицы прочитаны, подтверждены условия общего обхода регистрации")
-	defer callerGraphs.Delete(program)
-	facts, err := collectCheckNarrowingFacts(ctx, program, l)
+	t.Log("Check: обе таблицы прочитаны, начинается полный обход зарегистрированного Check")
+	defer callerGraphs.Delete(inputs.withRow.program)
+	facts, err := collectCheckNarrowingFacts(ctx, inputs.withRow.program, inputs.listing)
 	if err != nil {
 		return lawful, negative, err
 	}
 	// Removing the line shifts coordinates in this file. A reader reaching that
 	// file would require an independent traversal to observe its own coordinate.
-	for _, read := range facts.report.Reads {
+	for _, read := range facts.reads {
 		if strings.HasPrefix(read.Coordinate, checkNarrowingTable+":") {
 			return lawful, negative, fmt.Errorf("снятие строки меняет координату чтения %s", read.Coordinate)
 		}
 	}
-	lawful, negative = facts.witness(withRow, declared), facts.witness(withoutRow, declared)
+	lawful, negative = facts.witness(inputs.withRow.table, declared), facts.witness(inputs.withoutRow.table, declared)
 	if err := ctx.Err(); err != nil {
 		return CheckNarrowingWitness{}, CheckNarrowingWitness{}, err
 	}
 	return lawful, negative, nil
 }
 
-func checkNarrowingPairTables(l *surfaceListing, program *surfaceProgram, missing string) (withRow, withoutRow map[string]bool, err error) {
+type checkNarrowingInput struct {
+	program *surfaceProgram
+	table   map[string]bool
+}
+
+type checkNarrowingInputs struct {
+	listing             *surfaceListing
+	withRow, withoutRow checkNarrowingInput
+}
+
+func loadCheckNarrowingInputs(ctx context.Context, root, missing string) (checkNarrowingInputs, error) {
+	l, err := newProdListing(ctx, root, []string{"./cmd/kaname/..."})
+	if err != nil {
+		return checkNarrowingInputs{}, err
+	}
+	program, err := l.program(nil)
+	if err != nil {
+		return checkNarrowingInputs{}, err
+	}
 	if !checkNarrowingOnlyScalarPredicate(program) {
-		return nil, nil, fmt.Errorf("таблица Check или её скалярный потребитель изменились")
+		return checkNarrowingInputs{}, fmt.Errorf("таблица Check или её скалярный потребитель изменились")
 	}
 	dir := filepath.Join(missing, filepath.Dir(checkNarrowingTable))
 	baseFiles, _, err := l.sourceFiles(checkNarrowingPackage, "")
 	if err != nil {
-		return nil, nil, err
+		return checkNarrowingInputs{}, err
 	}
 	overlayFiles, _, err := l.sourceFiles(checkNarrowingPackage, dir)
 	if err != nil {
-		return nil, nil, err
+		return checkNarrowingInputs{}, err
 	}
 	slices.Sort(baseFiles)
 	if !slices.Equal(baseFiles, overlayFiles) {
-		return nil, nil, fmt.Errorf("у копий Check различается состав файлов authzguard")
+		return checkNarrowingInputs{}, fmt.Errorf("у копий Check различается состав файлов authzguard")
 	}
 	mutant, err := l.program(map[string]string{checkNarrowingPackage: dir})
 	if err != nil {
-		return nil, nil, fmt.Errorf("проверка типов близнеца Check без записи: %w", err)
+		return checkNarrowingInputs{}, fmt.Errorf("проверка типов близнеца Check без записи: %w", err)
 	}
-	withRow, err = callerRuntimeNarrowing(program)
+	withRow, err := callerRuntimeNarrowing(program)
 	if err != nil {
-		return nil, nil, err
+		return checkNarrowingInputs{}, err
 	}
-	withoutRow, err = callerRuntimeNarrowing(mutant)
+	withoutRow, err := callerRuntimeNarrowing(mutant)
 	if err != nil {
-		return nil, nil, err
+		return checkNarrowingInputs{}, err
 	}
 	expected := maps.Clone(withRow)
 	delete(expected, checkNarrowingRPC)
 	if !withRow[checkNarrowingRPC] || !maps.Equal(expected, withoutRow) {
-		return nil, nil, fmt.Errorf("ожидалось отсутствие только декларации Check в типизированной таблице близнеца")
+		return checkNarrowingInputs{}, fmt.Errorf("ожидалось отсутствие только декларации Check в типизированной таблице близнеца")
 	}
-	return withRow, withoutRow, nil
+	return checkNarrowingInputs{
+		listing: l, withRow: checkNarrowingInput{program, withRow}, withoutRow: checkNarrowingInput{mutant, withoutRow},
+	}, ctx.Err()
 }
 
 // The registered walk visits the calls in both branches of conditionals. The
