@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,7 +20,7 @@ import (
 )
 
 func TestCallerIdentityDeclarationsCoverTheTree(t *testing.T) {
-	r := callerJudgeTree(t, moduleRoot(t))
+	r := callerUnmodifiedTreeReport(t, moduleRoot(t))
 	want := check.CallerIdentityRead{RPC: "github.com/PRO-Robotech/kaname/pkg/api/kaname/cloud/iam/v1/RoleService/Update", Producer: "github.com/PRO-Robotech/corelib/operations.PrincipalFromContext", Site: "(*github.com/PRO-Robotech/corelib/operations.pgRepo).Create"}
 	found := false
 	for _, read := range r.Reads {
@@ -277,6 +278,10 @@ func RegisterFixture(srv grpc.ServiceRegistrar,h iam.InternalIAMServiceServer) {
 				overlay["github.com/PRO-Robotech/kaname/cmd/kaname"] = cmdDir
 			}
 			declared := append(liveCallerDeclarations(), check.CallerReadDeclaration{RPC: rpcPrefix + "LookupSubject", Producer: actualProducer, Site: site, Kind: check.CallerObservation, Reason: "Экспериментальный reader без изменения ответа существующего RPC."})
+			lookupOnly := declared
+			if form == "new_consumer" {
+				declared = append(declared, check.CallerReadDeclaration{RPC: rpcPrefix + "PollSubjectChanges", Producer: producer, Site: site, Kind: check.CallerObservation, Reason: "Тот же helper имеет отдельного объявленного RPC-потребителя."})
+			}
 			if form == "benign" || form == "interface_benign" || form == "embedded_interface_benign" || form == "constructor_field_benign" || form == "unreachable" || form == "unresolved" || form == "interface_external_leaf" || form == "interface_uncovered" || form == "constructor_field_uncovered" {
 				declared = liveCallerDeclarations()
 			}
@@ -294,25 +299,24 @@ func RegisterFixture(srv grpc.ServiceRegistrar,h iam.InternalIAMServiceServer) {
 				}
 				t.Fatalf("неразрешённый callback ошибочно принят: %v", r.Findings)
 			}
-			if form == "new_consumer" {
-				if len(r.Findings) != 1 || !strings.Contains(r.Findings[0], rpcPrefix+"PollSubjectChanges") || !strings.Contains(r.Findings[0], "чтение личности без объявления") {
-					t.Fatalf("новый потребитель не изолирован: %v", r.Findings)
-				}
-				declared = append(declared, check.CallerReadDeclaration{RPC: rpcPrefix + "PollSubjectChanges", Producer: producer, Site: site, Kind: check.CallerObservation, Reason: "Тот же helper имеет отдельного объявленного RPC-потребителя."})
-				r, err = check.CallerIdentityFindings(ctx, root, declared, overlay)
-				if err != nil || len(r.Findings) != 0 {
-					t.Fatalf("законный второй потребитель: %v %v", err, r.Findings)
-				}
-			} else if len(r.Findings) != 0 {
+			if len(r.Findings) != 0 {
 				t.Fatalf("законный %s: %v", form, r.Findings)
 			}
+			// Меняется только декларация. Полный обход этих же исходников
+			// уже собрал фактические чтения и основания для сверки.
+			if form == "new_consumer" {
+				findings, err := r.DeclarationFindingsForTest(lookupOnly)
+				if err != nil || len(findings) != 1 || !strings.Contains(findings[0], rpcPrefix+"PollSubjectChanges") || !strings.Contains(findings[0], "чтение личности без объявления") {
+					t.Fatalf("новый потребитель не изолирован: %v %v", err, findings)
+				}
+			}
 			if form != "new_consumer" && form != "benign" && form != "interface_benign" && form != "embedded_interface_benign" && form != "constructor_field_benign" && form != "unreachable" && form != "interface_external_leaf" {
-				r, err = check.CallerIdentityFindings(ctx, root, liveCallerDeclarations(), overlay)
+				findings, err := r.DeclarationFindingsForTest(liveCallerDeclarations())
 				if err != nil {
 					t.Fatal(err)
 				}
-				if len(r.Findings) != 1 || !strings.Contains(r.Findings[0], rpcPrefix+"LookupSubject") || !strings.Contains(r.Findings[0], "чтение личности без объявления") {
-					t.Fatalf("отсутствующее описание %s не изолировано: %v", form, r.Findings)
+				if len(findings) != 1 || !strings.Contains(findings[0], rpcPrefix+"LookupSubject") || !strings.Contains(findings[0], "чтение личности без объявления") {
+					t.Fatalf("отсутствующее описание %s не изолировано: %v", form, findings)
 				}
 			}
 			if form == "embedded_interface" {
@@ -357,11 +361,30 @@ func TestCallerIdentityRepeatedBaselineReusesOnlyImmutableAnalysis(t *testing.T)
 
 func callerRequireLawfulBaseline(t *testing.T, root string) check.CallerIdentityReport {
 	t.Helper()
-	r := callerJudgeTree(t, root)
+	r := callerUnmodifiedTreeReport(t, root)
 	if len(r.Findings) != 0 {
 		t.Fatalf("пробы НЕ ИСПОЛНИЛИСЬ: законный baseline красный, находок %d: %v", len(r.Findings), r.Findings)
 	}
 	return r
+}
+
+var callerUnmodifiedTrees = struct {
+	sync.Mutex
+	reports map[string]check.CallerIdentityReport
+}{reports: make(map[string]check.CallerIdentityReport)}
+
+// Только исходный checkout. Пробы изменений используют собственные временные
+// исходники и заново исполняют обход при каждой физической правке.
+func callerUnmodifiedTreeReport(t *testing.T, root string) check.CallerIdentityReport {
+	t.Helper()
+	callerUnmodifiedTrees.Lock()
+	defer callerUnmodifiedTrees.Unlock()
+	if report, ok := callerUnmodifiedTrees.reports[root]; ok {
+		return report
+	}
+	report := callerJudgeTree(t, root)
+	callerUnmodifiedTrees.reports[root] = report
+	return report
 }
 
 func TestCallerIdentityBrokenLoadIsNotGreen(t *testing.T) {
