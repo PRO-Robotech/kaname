@@ -22,6 +22,15 @@ type callerObjectExecutionState struct {
 	objectGeneration, resolveGeneration uint64
 }
 
+// Последний прямой hit в одном callerMutations доказывает равенство lastScope.
+// Между такими вызовами проверка эффекта, сопоставление объектов и штатные
+// Err не меняют снимок. Любой другой обход прекращает доказательство.
+// Здесь нет ссылки на scope, ticket или answer.
+type callerMutationScope struct {
+	state callerObjectExecutionState
+	exact bool
+}
+
 type callerObjectExecutionScope struct {
 	snapshot   callerExecutionScopeSnapshot
 	next       *callerObjectExecutionScope
@@ -459,7 +468,7 @@ func (c *callerObjectExecutions) acquireScope(g *callerGraph, reclaim bool) *cal
 	if !g.callerExecutionScopeTracked() {
 		return nil
 	}
-	return c.acquireTrackedScope(g, reclaim)
+	return c.acquireTrackedScope(g, reclaim, nil)
 }
 
 // Вход требует только что выполненного полного structural-доказательства.
@@ -467,13 +476,14 @@ func (c *callerObjectExecutions) acquireScope(g *callerGraph, reclaim bool) *cal
 // карты scope. Допустим advance: он снимает только владение кеша и его учёт.
 // Это локальная предпосылка вызова, не сохранённый флаг или сертификат эпохи.
 // После Err без доказанной прозрачности проверки выполняются заново.
-func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim bool) *callerObjectExecutionScope {
+// exactLast передаётся только из непрерывной серии прямых hit в callerMutations.
+func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim bool, exactLast *callerObjectExecutionScope) *callerObjectExecutionScope {
 	frozen := c.frozenScopeDepth(g)
 	var last *callerObjectExecutionScope
 	if frozen >= 0 {
 		last = c.lastScope
-		if last != nil && last.snapshot.matchesTrackedSuffix(g, c.lastFrozen) {
-			// Суффикс только что сравнен. Восстанавливаем границу и после
+		if last != nil && (last == exactLast || last.snapshot.matchesTrackedSuffix(g, c.lastFrozen)) {
+			// Равенство доказано. Восстанавливаем границу и после
 			// pop/push, даже если глубина и адреса кадров совпали со старыми.
 			c.lastFrozen = frozen
 			last.references++
@@ -576,8 +586,12 @@ func (g *callerGraph) callerInitialObjectExecutionHit(answer callerObjectAnswer,
 	return g.callerObjectMemoAnswer(answer, true)
 }
 
-func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectSourceID]bool) (map[callerObjectKey]bool, bool) {
+func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectSourceID]bool, reuse *callerMutationScope) (map[callerObjectKey]bool, bool) {
 	entryContext := g.ctx
+	previousHit := reuse != nil && reuse.exact
+	if previousHit {
+		reuse.exact = false
+	}
 	var entryScope *callerObjectExecutionScope
 	original := func() (map[callerObjectKey]bool, bool) {
 		g.work.ObjectExecutionFallbacks++
@@ -610,11 +624,15 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 	g.work.ObjectExecutionQueries++
 	state := g.callerObjectExecutionState()
 	c := g.objectExecutions
+	var exactLast *callerObjectExecutionScope
+	if previousHit && reuse.state == state {
+		exactLast = c.lastScope
+	}
 	c.advance(g)
 	// Полное tracked-доказательство выше остаётся действительным: чтение state
-	// и advance не вызывают Err/callback и не меняют содержимое scope. Повторно
-	// проверяем только hash/content здесь; состояние и контекст hit сверяются ниже.
-	scope := c.acquireTrackedScope(g, false)
+	// и advance не вызывают Err/callback и не меняют содержимое scope. Scope
+	// проверяется здесь, состояние и контекст hit сверяются ниже.
+	scope := c.acquireTrackedScope(g, false, exactLast)
 	if scope == nil {
 		return original()
 	}
@@ -627,7 +645,7 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 			return nil, true
 		}
-		// acquireTrackedScope уже сравнил точный снимок. До hit были только
+		// acquireTrackedScope уже подтвердил точный снимок. До hit были только
 		// чтения состояния и чистая проверка отмены допущенного контекста.
 		if g.objectExecutions != c || c.graph != g || state != g.callerObjectExecutionState() || !callerFreshSameContext(entryContext, g.ctx) {
 			return original()
@@ -636,6 +654,9 @@ func (g *callerGraph) callerObjectExecution(src valueSrc, seen map[callerObjectS
 			return nil, true
 		}
 		g.work.ObjectExecutionHits++
+		if reuse != nil && c.lastScope == scope {
+			reuse.state, reuse.exact = state, true
+		}
 		return answer.answer.objects, answer.answer.unknown
 	}
 	cuts, skips, completed, cycles := g.resolveCuts, g.initialSkips, g.completedInitialSkips, g.objectCuts

@@ -741,7 +741,7 @@ func (g *callerGraph) callerInteriorRaw(src valueSrc, seen map[callerObjectSourc
 		scope = c.callerTraceRetainedTrackedScope(g, chain, source)
 	}
 	if scope == nil {
-		scope = c.acquireTrackedScope(g, true)
+		scope = c.acquireTrackedScope(g, true, nil)
 	} else {
 		// advance снимает только завершённые записи; внешний fresh ticket,
 		// живой родитель либо проверенная retained-запись сохраняет pin.

@@ -98,10 +98,17 @@ type callerObjectAnswer struct {
 // Возвращённая карта доступна только для чтения независимо от допуска в кеш.
 // nil представляет пустое множество только для чтения, в том числе в memo.
 func (g *callerGraph) callerObjects(src valueSrc, seen map[callerObjectSourceID]bool) (map[callerObjectKey]bool, bool) {
+	return g.callerObjectsWithMutationScope(src, seen, nil)
+}
+
+func (g *callerGraph) callerObjectsWithMutationScope(src valueSrc, seen map[callerObjectSourceID]bool, reuse *callerMutationScope) (map[callerObjectKey]bool, bool) {
 	// Даже fresh hit является внешним входом для suspended interior chain.
 	g.taintCallerTraces()
 	if g.objectExecutions != nil && g.objectExecutions.graph == g && g.lifetimeScanning && len(seen) == 0 {
-		return g.callerObjectExecution(src, seen)
+		return g.callerObjectExecution(src, seen, reuse)
+	}
+	if reuse != nil {
+		reuse.exact = false
 	}
 	objects, unknown, _ := g.callerObjectsOwned(src, seen)
 	return objects, unknown
@@ -507,7 +514,8 @@ func (g *callerGraph) callerObjectsRaw(src valueSrc, seen map[callerObjectSource
 }
 
 func (g *callerGraph) callerMutations(src valueSrc, field *types.Var) (refs []valueSrc, unknown bool) {
-	objects, u := g.callerObjects(src, map[callerObjectSourceID]bool{})
+	var reuse callerMutationScope
+	objects, u := g.callerObjectsWithMutationScope(src, map[callerObjectSourceID]bool{}, &reuse)
 	unknown = u
 	for _, write := range g.mutations[field.Origin()] {
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
@@ -518,12 +526,14 @@ func (g *callerGraph) callerMutations(src valueSrc, field *types.Var) (refs []va
 		}
 		owners := []valueSrc{write.owner}
 		if len(write.path) > 0 {
+			// Раскрытие пути может менять снимок и выполнять вложенные обходы.
+			reuse.exact = false
 			var u bool
 			owners, u = g.embeddedCallerSources(write.owner, write.path, map[callerFieldKey]bool{})
 			unknown = unknown || u
 		}
 		for _, owner := range owners {
-			other, u := g.callerObjects(owner, map[callerObjectSourceID]bool{})
+			other, u := g.callerObjectsWithMutationScope(owner, map[callerObjectSourceID]bool{}, &reuse)
 			if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 				return nil, true
 			}
