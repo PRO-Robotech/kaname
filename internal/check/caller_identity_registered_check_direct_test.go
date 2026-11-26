@@ -11,7 +11,6 @@ import (
 	"go/token"
 	"go/types"
 	"slices"
-	"strings"
 	"testing"
 )
 
