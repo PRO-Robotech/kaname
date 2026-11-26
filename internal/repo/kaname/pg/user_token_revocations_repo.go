@@ -206,8 +206,21 @@ const revokedBeforeSQL = `SELECT revoke_before FROM user_token_revocations WHERE
 // (cutoff, true, nil) — отсечка есть, (zero, false, nil) — нет; ошибка
 // поднимается, чтобы вызывающий отказал, а не принял её за «отсечки нет».
 func revokedBeforeQ(ctx context.Context, q rowQuerier, userID string) (time.Time, bool, error) {
+	return revokedBeforeRow(q.QueryRow(ctx, revokedBeforeSQL, userID), userID)
+}
+
+func revokedBeforePool(ctx context.Context, pool *pgxpool.Pool, userID string) (time.Time, bool, error) {
+	return revokedBeforeRow(pool.QueryRow(ctx, revokedBeforeSQL, userID), userID)
+}
+
+func revokedBeforePoolTx(ctx context.Context, tx *pgxpool.Tx, userID string) (time.Time, bool, error) {
+	return revokedBeforeRow(tx.QueryRow(ctx, revokedBeforeSQL, userID), userID)
+}
+
+// revokedBeforeRow сохраняет единый разбор отсечки, отсутствия строки и отказа.
+func revokedBeforeRow(row pgx.Row, userID string) (time.Time, bool, error) {
 	var before time.Time
-	err := q.QueryRow(ctx, revokedBeforeSQL, userID).Scan(&before)
+	err := row.Scan(&before)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return time.Time{}, false, nil
 	}

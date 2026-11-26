@@ -26,12 +26,13 @@ func roleOpStateOptions(t *testing.T) check.RoleOperationResponseStateOptions {
 	t.Helper()
 	corpusRoot, modulePrefix := platformtree.RequireCorpus(t)
 	return check.RoleOperationResponseStateOptions{
-		Root:             corpusRoot,
-		ServiceRoot:      filepath.ToSlash(modulePrefix),
-		DomainPkg:        "domain",
-		RoleType:         "Role",
-		TransferFunc:     "Transfer",
-		ProjectionMethod: "WithoutComputedState",
+		Root:              corpusRoot,
+		ServiceRoot:       filepath.ToSlash(modulePrefix),
+		DomainPkg:         "domain",
+		RoleType:          "Role",
+		TransferFunc:      "Transfer",
+		ValueTransferFunc: "Convert",
+		ProjectionMethod:  "WithoutComputedState",
 	}
 }
 

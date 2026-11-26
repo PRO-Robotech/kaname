@@ -130,7 +130,30 @@ type Transferrable interface {
 		*DTO[domain.GrantDelegation, *iamv1.GrantDelegation]
 }
 
-// Transfer запускает Perform() на dto. Единственная публичная entry-point.
+// Transfer запускает Perform() на dto, сохраняя API с записью результата по указателю.
 func Transfer[V Transferrable](dto V) error {
 	return dto.Perform()
+}
+
+// Convert возвращает результат перевода без адреса переменной назначения.
+// T, F и P задаются явно: P должен быть *DTO[F,T] из Transferrable.
+// Это сохраняет тот же закрытый набор допустимых пар, что Transfer.
+// При ошибке результат равен нулю T: частичный результат переводчика не выдаётся,
+// как и при Perform, который записывает назначение только после успеха.
+func Convert[T any, F any, P interface {
+	*DTO[F, T]
+	Transferrable
+}](src F) (T, error) {
+	impl, ok := findTransfer[F, T]()
+	if !ok {
+		var f F
+		var t T
+		return t, fmt.Errorf("dto: no transfer registered for %T → %T", f, t)
+	}
+	res, err := impl.Transfer(src)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return res, nil
 }

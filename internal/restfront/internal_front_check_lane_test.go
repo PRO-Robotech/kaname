@@ -107,10 +107,26 @@ type laneWorld struct {
 
 func newLaneWorld(t *testing.T) *laneWorld {
 	t.Helper()
+	return newLaneWorldWithLookup(t, nil)
+}
+
+// newLaneWorldWithLookup сохраняет боевой транспорт и подставляет только сценарий чтения.
+func newLaneWorldWithLookup(t *testing.T, lookup *internal_iam.LookupSubjectUseCase) *laneWorld {
+	t.Helper()
+	authz := &countingAuthorizer{}
+	w := newLaneWorldWithAuthorizer(t, lookup, authz)
+	w.authz = authz
+	return w
+}
+
+// newLaneWorldWithAuthorizer принимает порт обработчика, сохраняя настоящие
+// фронт, сертификаты, политику и обработчик. Полоса сценария подаёт сюда
+// AuthorizeService, а прежняя полоса сужения — свой счётчик допуска.
+func newLaneWorldWithAuthorizer(t *testing.T, lookup *internal_iam.LookupSubjectUseCase, authz internal_iam.Authorizer) *laneWorld {
+	t.Helper()
 	ca := newLaneCA(t)
 	roster := laneRoster(t)
 	d := moduleroster.Domain()
-	authz := &countingAuthorizer{}
 
 	policy := authzguard.NewCallerPolicy(true, authzguard.GatewayFrontedInternalRPCs()).
 		WithOwnFrontHop(laneFrontSAN).
@@ -119,7 +135,7 @@ func newLaneWorld(t *testing.T) *laneWorld {
 		grpc.Creds(credentials.NewTLS(ca.serverTLS(t))),
 		grpc.ChainUnaryInterceptor(grpcsrv.UnaryCertIdentityExtract(d), policy.Unary()),
 	)
-	iamv1.RegisterInternalIAMServiceServer(srv, internal_iam.NewHandler(nil, authz).WithModuleRoster(roster))
+	iamv1.RegisterInternalIAMServiceServer(srv, internal_iam.NewHandler(lookup, authz).WithModuleRoster(roster))
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err)
 	go func() { _ = srv.Serve(lis) }()
@@ -141,17 +157,19 @@ func newLaneWorld(t *testing.T) *laneWorld {
 	hs.StartTLS()
 	t.Cleanup(hs.Close)
 
-	return &laneWorld{t: t, ca: ca, grpc: lis.Addr().String(), front: hs.URL, authz: authz}
+	return &laneWorld{t: t, ca: ca, grpc: lis.Addr().String(), front: hs.URL}
 }
 
 // overHTTP — внутренний Check через фронт листом san: код HTTP и тело.
 func (w *laneWorld) overHTTP(san, object string) (int, map[string]any) {
 	w.t.Helper()
-	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{
+	transport := &http.Transport{TLSClientConfig: &tls.Config{
 		Certificates: []tls.Certificate{w.ca.leaf(w.t, san)},
 		RootCAs:      w.ca.pool(),
 		MinVersion:   tls.VersionTLS12,
-	}}}
+	}}
+	w.t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport}
 	t := w.t
 	body, err := json.Marshal(map[string]string{"subjectId": "user:usr_alice", "relation": "viewer", "object": object})
 	require.NoError(t, err)

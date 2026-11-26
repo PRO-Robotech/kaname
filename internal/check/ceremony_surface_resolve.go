@@ -306,11 +306,19 @@ func (ix *resolveIndex) addressOf(sp *surfaceSrcPkg, n *ast.UnaryExpr) {
 	case *ast.Ident:
 		if v, ok := sp.info.ObjectOf(x).(*types.Var); ok {
 			ix.addrTaken[v] = true
+			ix.addrTaken[v.Origin()] = true
 		}
 	case *ast.SelectorExpr:
 		if sel, ok := sp.info.Selections[x]; ok && sel.Kind() == types.FieldVal {
 			p := fieldPath(sel)
-			ix.addrTaken[p[len(p)-1]] = true
+			v := p[len(p)-1]
+			// Существующий resolver использует исходное поле, caller analyzer — Origin.
+			ix.addrTaken[v] = true
+			ix.addrTaken[v.Origin()] = true
+		} else if v, ok := sp.info.Uses[x.Sel].(*types.Var); ok {
+			// У квалифицированной переменной пакета нет записи Selections.
+			ix.addrTaken[v] = true
+			ix.addrTaken[v.Origin()] = true
 		}
 	}
 }

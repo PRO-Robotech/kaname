@@ -524,8 +524,22 @@ RETURNING c.family_id, c.client_id, c.user_id, c.session_id, c.scope,
 func ceremonyWriterTx() pgx.TxOptions { return pgx.TxOptions{IsoLevel: pgx.ReadCommitted} }
 
 // beginWriter — ЕДИНСТВЕННОЕ открытие транзакции писателя в этом порту.
-func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (pgx.Tx, error) {
-	return r.pool.BeginTx(ctx, ceremonyWriterTx())
+func (r *OAuthCeremonyRepo) beginWriter(ctx context.Context) (*pgxpool.Tx, error) {
+	tx, err := r.pool.BeginTx(ctx, ceremonyWriterTx())
+	if err != nil {
+		return nil, err
+	}
+	// Единица работы и запрос обмена владеют транзакцией именно этого пула.
+	pooled, ok := tx.(*pgxpool.Tx)
+	if !ok && tx != nil {
+		if err := tx.Rollback(ctx); err != nil {
+			return nil, fmt.Errorf("ceremony writer: rollback of unexpected transaction %T: %w", tx, err)
+		}
+	}
+	if pooled == nil {
+		return nil, fmt.Errorf("ceremony writer: pool returned invalid transaction %T", tx)
+	}
+	return pooled, nil
 }
 
 // execWriter — одиночный оператор писателя на названном уровне.
