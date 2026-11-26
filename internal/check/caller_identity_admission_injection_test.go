@@ -296,9 +296,9 @@ func callerJudgeTree(t *testing.T, root string) check.CallerIdentityReport {
 	}
 	ctx, cancel := callerFullTreeTestContext(t)
 	defer cancel()
-	report, err := check.CallerIdentityFindings(ctx, root, declared, nil, func(phase string, work check.CallerIdentityWork) {
-		t.Logf("PHASE %s WORK %+v", phase, work)
-	})
+	// The ordinary gate uses the closed collector with indexed scope reuse.
+	// Phase-by-phase observers belong to the separately selected diagnostics.
+	report, err := check.CallerIdentityFindings(ctx, root, declared, nil)
 	if err != nil {
 		t.Fatalf("гейт НЕ ИСПОЛНЯЛСЯ: %v", err)
 	}
