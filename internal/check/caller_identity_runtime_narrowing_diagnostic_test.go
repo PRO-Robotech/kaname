@@ -4,6 +4,7 @@
 package check_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/json"
 	"flag"
@@ -33,7 +34,7 @@ func callerNarrowingDiagnostic(t *testing.T, root, phase string) {
 		if phase == "missing_row" {
 			fixture = callerMissingCheckRow(t, root)
 		}
-		before, table := callerCheckFixtureDigest(t, fixture)
+		before := callerCheckFixtureDigest(t, fixture)
 		where := callerCheckCoordinate(t, fixture)
 		if phase == "lawful" {
 			callerCheckFrontControls(t, fixture)
@@ -44,8 +45,7 @@ func callerNarrowingDiagnostic(t *testing.T, root, phase string) {
 		if phase == "lawful" {
 			callerLawfulCheckFindings(t, witness, where)
 		}
-		after, afterTable := callerCheckFixtureDigest(t, fixture)
-		if before != after || table != afterTable {
+		if before != callerCheckFixtureDigest(t, fixture) {
 			t.Fatal("дерево близнеца изменилось во время наблюдения")
 		}
 		report := struct {
@@ -61,7 +61,7 @@ func callerNarrowingDiagnostic(t *testing.T, root, phase string) {
 			Findings      []string
 		}{
 			Schema: 1, Phase: phase, Pair: pair, RPC: narrowingRPC, Producer: narrowingProducer,
-			Coordinate: where, FixtureSHA256: before, TableSHA256: table,
+			Coordinate: where, FixtureSHA256: before.tree, TableSHA256: before.table,
 			Reads: append([]check.CallerIdentityRead{}, witness.Reads...), Findings: append([]string{}, witness.Findings...),
 		}
 		data, err := json.Marshal(report)
@@ -74,10 +74,14 @@ func callerNarrowingDiagnostic(t *testing.T, root, phase string) {
 
 // Хеш всех путей, режимов git и содержимого проверяет весь фактический вход
 // обхода. По окончании custodian независимо вычисляет обе суммы из checkout.
-func callerCheckFixtureDigest(t *testing.T, root string) (string, string) {
+type callerCheckFixture struct {
+	tree, table, otherFiles, tableWithoutCheck string
+}
+
+func callerCheckFixtureDigest(t *testing.T, root string) callerCheckFixture {
 	t.Helper()
 	var rows []string
-	var table string
+	var fixture callerCheckFixture
 	err := fs.WalkDir(os.DirFS(root), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -119,14 +123,21 @@ func callerCheckFixtureDigest(t *testing.T, root string) (string, string) {
 		}
 		sum := fmt.Sprintf("%x", sha256.Sum256(data))
 		if path == narrowingTable {
-			table = sum
+			fixture.table = sum
+			row := []byte(narrowingCheckRow)
+			if bytes.Count(data, row) == 1 {
+				fixture.tableWithoutCheck = fmt.Sprintf("%x", sha256.Sum256(bytes.Replace(data, row, nil, 1)))
+			}
 		}
 		rows = append(rows, path+"\x00"+mode+"\x00"+sum+"\n")
 		return nil
 	})
-	if err != nil || table == "" {
-		t.Fatalf("проверка дерева близнеца: %v, таблица %q", err, table)
+	if err != nil || fixture.table == "" {
+		t.Fatalf("проверка дерева близнеца: %v, таблица %q", err, fixture.table)
 	}
 	slices.Sort(rows)
-	return fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(rows, "")))), table
+	fixture.tree = fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(rows, ""))))
+	otherFiles := slices.DeleteFunc(rows, func(row string) bool { return strings.HasPrefix(row, narrowingTable+"\x00") })
+	fixture.otherFiles = fmt.Sprintf("%x", sha256.Sum256([]byte(strings.Join(otherFiles, ""))))
+	return fixture
 }

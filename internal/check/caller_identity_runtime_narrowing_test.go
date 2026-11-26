@@ -21,6 +21,7 @@ const (
 	narrowingProducer = "github.com/PRO-Robotech/kaname/internal/moduleidentity.Roster.FromContext"
 	narrowingHandler  = "(*github.com/PRO-Robotech/kaname/internal/apps/kaname/api/internal_iam.Handler).Check"
 	narrowingTable    = "internal/authzguard/front_admission.go"
+	narrowingCheckRow = "\tinternalCheckMethod: {moduleidentity.ProfileDataPlane},\n"
 )
 
 // Проверяем действующее сужение Check через зарегистрированный RPC. У близнеца меняется
@@ -35,14 +36,26 @@ func TestCallerIdentityAdmissionRequiresCheckNarrowingDeclaration(t *testing.T) 
 	missing := callerMissingCheckRow(t, root)
 	where := callerCheckCoordinate(t, root)
 	callerCheckFrontControls(t, root)
+	withRow := callerCheckFixtureDigest(t, root)
+	withoutRow := callerCheckFixtureDigest(t, missing)
+	if withRow.otherFiles != withoutRow.otherFiles || withRow.tableWithoutCheck != withoutRow.table {
+		t.Fatal("фикстуры Check должны отличаться только снятой строкой")
+	}
 	ctx, cancel := callerFullTreeTestContext(t)
 	defer cancel()
-	lawful := callerCheckWitness(t, ctx, root, "с записью")
+	lawful, negative, err := check.CheckNarrowingPairForTest(t, ctx, root, missing, liveCallerDeclarations())
+	if err != nil {
+		t.Fatalf("общий обход Check: %v. Раздельные обходы доступны через scripts/registered-check-pair.py", err)
+	}
 	want := callerLawfulCheckFindings(t, lawful, where)
-	negative := callerCheckWitness(t, ctx, missing, "без записи")
 	if !slices.Equal(negative.Findings, want) {
 		t.Fatalf("снята только запись сужения Check: находки %q, ожидались %q", negative.Findings, want)
 	}
+	if withRow != callerCheckFixtureDigest(t, root) || withoutRow != callerCheckFixtureDigest(t, missing) {
+		t.Fatal("дерево близнеца изменилось во время наблюдения")
+	}
+	t.Logf("Check: один завершённый обход регистрации, чтение %s, находок с записью %d, без записи %d",
+		where, len(lawful.Findings), len(negative.Findings))
 }
 
 func callerMissingCheckRow(t *testing.T, root string) string {
@@ -53,7 +66,7 @@ func callerMissingCheckRow(t *testing.T, root string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	entry := []byte("\tinternalCheckMethod: {moduleidentity.ProfileDataPlane},\n")
+	entry := []byte(narrowingCheckRow)
 	if bytes.Count(data, entry) != 1 {
 		t.Fatal("ожидалась одна запись сужения Check для профиля плоскости данных")
 	}
