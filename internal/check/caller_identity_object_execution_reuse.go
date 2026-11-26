@@ -72,6 +72,12 @@ type callerObjectExecutions struct {
 	// prefixHashes[i] включает кадры [0, i], строго ниже активного владельца.
 	prefixHashes [32]uint64
 	prefixDepth  int
+
+	// Эта подсказка не удерживает ticket. До lastFrozen кадров снимка
+	// совпадают и непрерывно остаются ниже активного владельца с последнего
+	// точного сравнения. Leave подрезает границу, запись в общий хвост refs её сбрасывает.
+	lastScope  *callerObjectExecutionScope
+	lastFrozen int
 }
 
 // В execution-снимке heads не удерживается: при полном tracked-доказательстве
@@ -89,10 +95,16 @@ func (s callerExecutionScopeSnapshot) matches(g *callerGraph) bool {
 // Вызывается только сразу после полного tracked-доказательства, без callback
 // или изменения графа между доказательством и точным сравнением содержимого.
 func (s callerExecutionScopeSnapshot) matchesTrackedContent(g *callerGraph) bool {
+	return s.matchesTrackedSuffix(g, 0)
+}
+
+// Кадры [0, frozen) уже доказанно равны у этого самого снимка. Карты
+// не принадлежат кадру и всегда сравниваются независимо от границы.
+func (s callerExecutionScopeSnapshot) matchesTrackedSuffix(g *callerGraph, frozen int) bool {
 	if len(s.queries) != len(g.fieldQueries) || !maps.Equal(s.containers, g.containerScanning) || !maps.Equal(s.mutations, g.mutationScanning) {
 		return false
 	}
-	for i := range s.queries {
+	for i := frozen; i < len(s.queries); i++ {
 		before, after := &s.queries[i], &g.fieldQueries[i]
 		if before.source != after.source || before.unknown != after.unknown || before.previousSourceQuery != after.previousSourceQuery || !slices.Equal(before.fields, after.fields) || !slices.Equal(before.refs, after.refs) {
 			return false
@@ -224,7 +236,13 @@ func (c *callerObjectExecutions) releaseAnswer(g *callerGraph, key callerObjectE
 // B1 namespace со снятым владельцем сохраняет весь учёт до штатного idle reset.
 func (c *callerObjectExecutions) releaseScope(g *callerGraph, node *callerObjectExecutionScope) {
 	node.references--
-	if node.references != 0 || c.graph == nil {
+	if node.references != 0 {
+		return
+	}
+	if c.lastScope == node {
+		c.lastScope, c.lastFrozen = nil, 0
+	}
+	if c.graph == nil {
 		return
 	}
 	link := c.scopes[node.hash]
@@ -344,11 +362,23 @@ func (h *callerExecutionBoolHashes) sum(seed maphash.Seed, value bool) uint64 {
 	return h.values[index]
 }
 
+// Только у закрытого обхода строго нижние кадры неизменяемы до leave.
+func (c *callerObjectExecutions) frozenScopeDepth(g *callerGraph) int {
+	if c == nil || c.graph != g || g.objectExecutions != c || g.fieldQueryHashOwner != g || g.fieldQueryIndexOwner != g || g.fieldQueryIndexedDepth != len(g.fieldQueries) || !callerFreshReplayContext(g.ctx) {
+		return -1
+	}
+	return max(0, len(g.fieldQueries)-1)
+}
+
 // Хеш выбирает только корзину. Решение о равенстве всегда принимает matches
 // по полным queries и картам стражей. Производный heads доказан tracked-проверкой;
 // порядок refs, поля и все значения непроизводных карт сравниваются точно.
 // XOR для карт не зависит от порядка их обхода; коллизия не даёт попадания.
 func (c *callerObjectExecutions) scopeHash(g *callerGraph) uint64 {
+	return c.hashScope(g, c.frozenScopeDepth(g))
+}
+
+func (c *callerObjectExecutions) hashScope(g *callerGraph, frozen int) uint64 {
 	var hash uint64
 	booleans := callerExecutionBoolHashes{}
 	depth, cached, limit := len(g.fieldQueries), 0, 0
@@ -356,8 +386,10 @@ func (c *callerObjectExecutions) scopeHash(g *callerGraph) uint64 {
 		// Только закрытый collect без пользовательского callback. Текущий
 		// владелец всегда читается заново: он публикует refs/unknown между
 		// дочерними запросами. При возврате leave освобождает и его префикс.
-		if g.fieldQueryHashOwner == g && g.fieldQueryIndexOwner == g && g.fieldQueryIndexedDepth == depth && callerFreshReplayContext(g.ctx) {
-			limit = min(len(c.prefixHashes), max(0, depth-1))
+		if frozen >= 0 {
+			limit = min(len(c.prefixHashes), frozen)
+		} else {
+			c.lastScope, c.lastFrozen = nil, 0
 		}
 		cached = min(c.prefixDepth, limit)
 		c.prefixDepth = cached
@@ -428,15 +460,35 @@ func (c *callerObjectExecutions) acquireScope(g *callerGraph, reclaim bool) *cal
 // Это локальная предпосылка вызова, не сохранённый флаг или сертификат эпохи.
 // После Err без доказанной прозрачности проверки выполняются заново.
 func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim bool) *callerObjectExecutionScope {
-	hash := c.scopeHash(g)
+	frozen := c.frozenScopeDepth(g)
+	var last *callerObjectExecutionScope
+	if frozen >= 0 {
+		last = c.lastScope
+		if last != nil && last.snapshot.matchesTrackedSuffix(g, c.lastFrozen) {
+			// Суффикс только что сравнен. Восстанавливаем границу и после
+			// pop/push, даже если глубина и адреса кадров совпали со старыми.
+			c.lastFrozen = frozen
+			last.references++
+			c.active++
+			return last
+		}
+	}
+	hash := c.hashScope(g, frozen)
 	for node := c.scopes[hash]; node != nil; node = node.next {
 		// Хеширование и чтение корзины не меняют граф после полного доказательства.
-		if node.snapshot.matchesTrackedContent(g) {
+		if node != last && node.snapshot.matchesTrackedContent(g) {
+			if frozen >= 0 {
+				c.lastScope, c.lastFrozen = node, frozen
+			}
 			node.references++
 			c.active++
 			return node
 		}
 	}
+	return c.captureTrackedScope(g, reclaim, hash, frozen)
+}
+
+func (c *callerObjectExecutions) captureTrackedScope(g *callerGraph, reclaim bool, hash uint64, frozen int) *callerObjectExecutionScope {
 	weight := 1 + g.callerExecutionScopeWeight()
 	if !c.scopeRoom(g, weight, reclaim) {
 		g.work.ObjectExecutionCapacityFallbacks++
@@ -446,6 +498,11 @@ func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim boo
 	// и не вызывает пользовательский код. Доказательство стека остаётся
 	// действительным: учёт и вытеснение меняют только хранилище снимков.
 	recheckScope := !callerFreshReplayContext(g.ctx)
+	if recheckScope && c.graph == g {
+		// Вложенный вызов произвольного Err мог видеть другой ctx. После
+		// возврата callback его сведения о неизменности кадров недействительны.
+		defer func() { c.lastScope, c.lastFrozen, c.prefixDepth = nil, 0, 0 }()
+	}
 	if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 		return nil
 	}
@@ -455,7 +512,7 @@ func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim boo
 	if recheckScope {
 		// Произвольный Err может изменить содержимое или вложенным вызовом
 		// поместить точный снимок в ту же корзину.
-		if !g.callerExecutionScopeTracked() || hash != c.scopeHash(g) || weight != 1+g.callerExecutionScopeWeight() {
+		if !g.callerExecutionScopeTracked() || hash != c.hashScope(g, -1) || weight != 1+g.callerExecutionScopeWeight() {
 			return nil
 		}
 		for existing := c.scopes[hash]; existing != nil; existing = existing.next {
@@ -483,6 +540,9 @@ func (c *callerObjectExecutions) acquireTrackedScope(g *callerGraph, reclaim boo
 	if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil || g.objectExecutions != c || c.graph != g || recheckScope && !node.snapshot.matches(g) {
 		c.releaseTicket(g, node)
 		return nil
+	}
+	if frozen >= 0 {
+		c.lastScope, c.lastFrozen = node, frozen
 	}
 	return node
 }

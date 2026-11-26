@@ -99,8 +99,10 @@ func (g *callerGraph) enterCallerFieldQuery(src valueSrc, fields []*types.Var) (
 func (g *callerGraph) leaveCallerFieldQuery(index int) {
 	// С этого момента родитель снова может публиковать refs и unknown.
 	// Сохраняем только строгих предков родителя, включая при смене ветви.
-	if c := g.objectExecutions; c != nil && c.graph == g && c.prefixDepth >= index && c.prefixDepth > 0 {
-		c.prefixDepth = max(0, index-1)
+	if c := g.objectExecutions; c != nil && c.graph == g {
+		frozen := max(0, index-1)
+		c.prefixDepth = min(c.prefixDepth, frozen)
+		c.lastFrozen = min(c.lastFrozen, frozen)
 	}
 	if g.fieldQueryIndexedDepth != len(g.fieldQueries) || g.fieldQueryIndexOwner == g && index != len(g.fieldQueries)-1 {
 		g.fieldQueryIndexOwner = nil
@@ -121,6 +123,18 @@ func (g *callerGraph) leaveCallerFieldQuery(index int) {
 	} else if g.fieldQueryIndexedDepth >= 0 {
 		g.fieldQueryIndexedDepth = len(g.fieldQueries)
 	}
+}
+
+// Raw может вернуть active.refs напрямую. При append в его запас capacity
+// короткий срез может перезаписать видимый хвост другого приостановленного
+// кадра. Сбрасываем оба префикса до записи, сохраняя обычный результат append.
+func (g *callerGraph) appendCallerFieldRefs(refs, more []valueSrc) []valueSrc {
+	if len(more) > 0 && len(more) <= cap(refs)-len(refs) {
+		if c := g.objectExecutions; c != nil && c.graph == g {
+			c.prefixDepth, c.lastFrozen = 0, 0
+		}
+	}
+	return append(refs, more...)
 }
 
 func (g *callerGraph) embeddedCallerSources(src valueSrc, fields []*types.Var, seen map[callerFieldKey]bool) (refs []valueSrc, unknown bool) {
@@ -168,7 +182,7 @@ func (g *callerGraph) embeddedCallerSources(src valueSrc, fields []*types.Var, s
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 			return nil, true
 		}
-		refs = append(refs, more...)
+		refs = g.appendCallerFieldRefs(refs, more)
 		unknown = unknown || u
 	}
 	remember()
@@ -197,7 +211,7 @@ func (g *callerGraph) embeddedCallerSources(src valueSrc, fields []*types.Var, s
 		if g.semanticOverflow || g.ctx != nil && g.ctx.Err() != nil {
 			return nil, true
 		}
-		refs = append(refs, values...)
+		refs = g.appendCallerFieldRefs(refs, values)
 		unknown = unknown || u
 		remember()
 	}
