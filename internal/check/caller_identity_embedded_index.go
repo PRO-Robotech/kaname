@@ -93,9 +93,7 @@ func (index *callerEmbeddedLiteralIndex) add(sp *surfaceSrcPkg, literal *ast.Com
 	index.weight += len(values)
 }
 
-// Сохраняем только чтение, которое инициализирует строковое поле литерала
-// значением другого строкового поля. Адрес поля, селектор метода и упаковка в
-// интерфейс сюда не попадают. Узел AST однозначно задаёт позицию копирования.
+// Строковое поле литерала копирует значение другого строкового поля.
 func (g *callerGraph) indexCopiedStringField(sp *surfaceSrcPkg, pair *ast.KeyValueExpr) {
 	key, ok := pair.Key.(*ast.Ident)
 	if !ok {
@@ -105,7 +103,36 @@ func (g *callerGraph) indexCopiedStringField(sp *surfaceSrcPkg, pair *ast.KeyVal
 	if !ok || !dst.IsField() || !types.Identical(dst.Type(), types.Typ[types.String]) {
 		return
 	}
-	read, ok := ast.Unparen(pair.Value).(*ast.SelectorExpr)
+	g.indexCopiedStringValue(sp, pair.Value)
+}
+
+// Встроенный append в []string копирует строковые операнды после среза.
+// Сам срез и развёрнутые аргументы по-прежнему несут возможные ссылки.
+func (g *callerGraph) indexAppendedStringField(sp *surfaceSrcPkg, call *ast.CallExpr) {
+	if len(call.Args) < 2 || call.Ellipsis.IsValid() {
+		return
+	}
+	id, ok := ast.Unparen(call.Fun).(*ast.Ident)
+	if !ok {
+		return
+	}
+	builtin, ok := sp.info.Uses[id].(*types.Builtin)
+	if !ok || builtin.Name() != "append" {
+		return
+	}
+	slice, ok := types.Unalias(sp.info.TypeOf(call.Args[0])).(*types.Slice)
+	if !ok || !types.Identical(slice.Elem(), types.Typ[types.String]) {
+		return
+	}
+	for _, value := range call.Args[1:] {
+		g.indexCopiedStringValue(sp, value)
+	}
+}
+
+// Адрес поля, селектор метода и упаковка в интерфейс сюда не попадают.
+// Узел AST однозначно задаёт позицию копирования значения.
+func (g *callerGraph) indexCopiedStringValue(sp *surfaceSrcPkg, value ast.Expr) {
+	read, ok := ast.Unparen(value).(*ast.SelectorExpr)
 	if !ok {
 		return
 	}

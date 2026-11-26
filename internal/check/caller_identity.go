@@ -220,8 +220,11 @@ func newCallerGraph(p *surfaceProgram) *callerGraph {
 				if literal, ok := n.(*ast.CompositeLit); ok {
 					g.embeddedLiterals.add(sp, literal)
 				}
-				if pair, ok := n.(*ast.KeyValueExpr); ok {
-					g.indexCopiedStringField(sp, pair)
+				switch expr := n.(type) {
+				case *ast.KeyValueExpr:
+					g.indexCopiedStringField(sp, expr)
+				case *ast.CallExpr:
+					g.indexAppendedStringField(sp, expr)
 				}
 				sw, ok := n.(*ast.TypeSwitchStmt)
 				if !ok {
