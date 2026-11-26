@@ -387,12 +387,16 @@ func callerRun(t *testing.T, root, pkg, name string) ([]byte, error, bool) {
 		t.Fatalf("проверка НЕ ИСПОЛНЯЛАСЬ: срок %s: %v\n%s", name, ctx.Err(), out)
 	}
 	executed := false
+	started := map[string]int{}
 	passed := map[string]int{}
 	s := bufio.NewScanner(bytes.NewReader(out))
 	for s.Scan() {
 		var event struct{ Action, Test, Package string }
 		if json.Unmarshal(s.Bytes(), &event) != nil {
 			continue
+		}
+		if event.Action == "run" && strings.HasSuffix(event.Package, strings.TrimPrefix(pkg, ".")) {
+			started[event.Test]++
 		}
 		if event.Action == "pass" && strings.HasSuffix(event.Package, strings.TrimPrefix(pkg, ".")) {
 			passed[event.Test]++
@@ -407,7 +411,7 @@ func callerRun(t *testing.T, root, pkg, name string) ([]byte, error, bool) {
 	if s.Err() != nil {
 		t.Fatalf("чтение исхода: %v", s.Err())
 	}
-	// Успех родителя сам по себе не доказывает, что все три подслучая были
+	// Успех родителя сам по себе не доказывает, что все подслучаи были
 	// запущены: ранний return мог бы оставить зелёный неполный контроль.
 	var children []string
 	switch name {
@@ -415,11 +419,20 @@ func callerRun(t *testing.T, root, pkg, name string) ([]byte, error, bool) {
 		children = []string{"https_front_verified_hop", "direct_grpc_verified_edge_twin", "outsider_http_forbidden_without_downstream"}
 	case callerLookupControl:
 		children = []string{"https_front_forbidden_without_downstream", "direct_grpc_verified_edge_twin", "outsider_http_forbidden_without_downstream"}
+	case callerNarrowingControl:
+		children = []string{
+			"плоскость_данных_registry_о_чужом_типе",
+			"лист_вне_перечня",
+			"плоскость_данных_registry_о_своём_типе",
+			"близнец:_край_о_том_же_чужом_объекте",
+		}
 	}
 	completed := 0
 	for _, child := range children {
-		if passed[name+"/"+child] != 1 {
-			err = fmt.Errorf("контроль %s: успешных исполнений %s — %d, ожидалось 1; исход процесса: %v", name, child, passed[name+"/"+child], err)
+		path := name + "/" + child
+		if passed[path] != 1 || name == callerNarrowingControl && started[path] != 1 {
+			err = fmt.Errorf("контроль %s: подслучай %s, запусков %d, успехов %d, ожидалось по одному. Исход процесса: %v",
+				name, child, started[path], passed[path], err)
 		} else {
 			completed++
 		}

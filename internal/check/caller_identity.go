@@ -301,6 +301,67 @@ func callerProducer(fn *types.Func) string {
 	return ""
 }
 
+type callerReadObservations struct {
+	report                                  *CallerIdentityReport
+	readSet, readCoordinates, appliedNarrow map[string]bool
+}
+
+func newCallerReadObservations(report *CallerIdentityReport) callerReadObservations {
+	return callerReadObservations{report: report, readSet: map[string]bool{}, readCoordinates: map[string]bool{}, appliedNarrow: map[string]bool{}}
+}
+
+func (o *callerReadObservations) observeDirectCall(p *surfaceProgram, body callerBody, call *ast.CallExpr, fn *types.Func, rpc string) (string, bool) {
+	applied := false
+	if fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == "github.com/PRO-Robotech/kaname/internal/authzguard" && fn.Name() == "NarrowsCallerArgument" && len(call.Args) == 2 {
+		if value := body.sp.info.Types[call.Args[0]].Value; value != nil && value.Kind() == constant.String {
+			if callerRPCName(constant.StringVal(value)) == rpc {
+				o.appliedNarrow[rpc] = true
+				applied = true
+			}
+		}
+	}
+	return o.observeRead(p, body, call, fn, rpc), applied
+}
+
+func (o *callerReadObservations) observeRead(p *surfaceProgram, body callerBody, call *ast.CallExpr, fn *types.Func, rpc string) string {
+	producer := callerProducer(fn)
+	if producer == "" {
+		return ""
+	}
+	row := CallerIdentityRead{rpc, producer, body.name, p.fset.Position(call.Pos()).String()}
+	key := rpc + "\x00" + producer + "\x00" + body.name
+	if !o.readCoordinates[key+row.Coordinate] {
+		o.report.Reads = append(o.report.Reads, row)
+		o.readCoordinates[key+row.Coordinate] = true
+	}
+	o.readSet[key] = true
+	return producer
+}
+
+type callerRegisteredTarget struct {
+	rpc, finding string
+	fn           *types.Func
+	indirect     bool
+}
+
+func callerRegistrationMethod(registration, method *types.Func, receiver types.Type) callerRegisteredTarget {
+	service := strings.TrimSuffix(strings.TrimPrefix(registration.Name(), "Register"), "Server")
+	target := callerRegisteredTarget{rpc: registration.Pkg().Path() + "/" + service + "/" + method.Name()}
+	if receiver == nil {
+		target.finding = target.rpc + ": тип обработчика не разрешён"
+		return target
+	}
+	obj, path, _ := types.LookupFieldOrMethod(receiver, true, method.Pkg(), method.Name())
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		target.finding = target.rpc + ": метод обработчика не разрешён"
+		return target
+	}
+	target.fn = fn
+	target.indirect = isIfaceMethod(fn) || len(path) > 1
+	return target
+}
+
 // CallerIdentityFindings проверяет реальные корни и объявления, включая
 // устаревшие записи. Наложение использует тот же загрузчик, что живое дерево.
 func CallerIdentityFindings(ctx context.Context, root string, declared []CallerReadDeclaration, overlay map[string]string, observers ...CallerIdentityObserver) (CallerIdentityReport, error) {
@@ -491,26 +552,20 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 					return true
 				}
 				actual := registrationPkg.info.TypeOf(call.Args[1])
-				service := strings.TrimSuffix(strings.TrimPrefix(fn.Name(), "Register"), "Server")
 				for i := 0; i < iface.NumMethods(); i++ {
 					method := iface.Method(i)
 					if !method.Exported() {
 						continue
 					}
-					key := fn.Pkg().Path() + "/" + service + "/" + method.Name()
-					if actual == nil {
-						r.Findings = append(r.Findings, key+": тип обработчика не разрешён")
+					registered := callerRegistrationMethod(fn, method, actual)
+					if registered.finding != "" {
+						r.Findings = append(r.Findings, registered.finding)
 						continue
 					}
-					obj, lookupPath, _ := types.LookupFieldOrMethod(actual, true, method.Pkg(), method.Name())
-					target, ok := obj.(*types.Func)
-					if !ok {
-						r.Findings = append(r.Findings, key+": метод обработчика не разрешён")
-						continue
-					}
+					key, target := registered.rpc, registered.fn
 					var ns []callerNode
 					var u bool
-					if isIfaceMethod(target) || len(lookupPath) > 1 {
+					if registered.indirect {
 						ns, u = g.boundMethod(registrationPkg, call.Args[1], target, map[callerResolveKey]bool{})
 					} else {
 						ns = []callerNode{{fn: target.Origin()}}
@@ -531,7 +586,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 							continue
 						}
 						refs := g.live[recv.Origin()]
-						if !isIfaceMethod(target) && len(lookupPath) <= 1 {
+						if !registered.indirect {
 							refs = []valueSrc{{pkg: registrationPkg, expr: call.Args[1], tuple: -1}}
 						}
 						rootBindings[key][recv.Origin()] = append(rootBindings[key][recv.Origin()], refs...)
@@ -547,9 +602,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 	}
 	sort.Strings(r.Roots)
 	cut := map[string]bool{}
-	readSet := map[string]bool{}
-	readCoordinates := map[string]bool{}
-	appliedNarrow := map[string]bool{}
+	observations := newCallerReadObservations(&r)
 	visitedRoots := 0
 	for _, rpc := range r.Roots {
 		if g.semanticOverflow {
@@ -622,21 +675,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 					return true
 				}
 				fn := callerFunction(b.sp, call.Fun)
-				if fn != nil && fn.Pkg() != nil && fn.Pkg().Path() == "github.com/PRO-Robotech/kaname/internal/authzguard" && fn.Name() == "NarrowsCallerArgument" && len(call.Args) == 2 {
-					if value := b.sp.info.Types[call.Args[0]].Value; value != nil && value.Kind() == constant.String {
-						if callerRPCName(constant.StringVal(value)) == rpc {
-							appliedNarrow[rpc] = true
-						}
-					}
-				}
-				if producer := callerProducer(fn); producer != "" {
-					row := CallerIdentityRead{rpc, producer, b.name, p.fset.Position(call.Pos()).String()}
-					key := rpc + "\x00" + producer + "\x00" + b.name
-					if !readCoordinates[key+row.Coordinate] {
-						r.Reads = append(r.Reads, row)
-						readCoordinates[key+row.Coordinate] = true
-					}
-					readSet[key] = true
+				if producer, _ := observations.observeDirectCall(p, b, call, fn, rpc); producer != "" {
 					return true
 				}
 				// Преобразование типа и встроенная операция не зовут помощника.
@@ -666,15 +705,7 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 					if ctx.Err() != nil {
 						return false
 					}
-					if producer := callerProducer(next.fn); producer != "" {
-						row := CallerIdentityRead{rpc, producer, b.name, p.fset.Position(call.Pos()).String()}
-						key := rpc + "\x00" + producer + "\x00" + b.name
-						if !readCoordinates[key+row.Coordinate] {
-							r.Reads = append(r.Reads, row)
-							readCoordinates[key+row.Coordinate] = true
-						}
-						readSet[key] = true
-					} else {
+					if observations.observeRead(p, b, call, next.fn, rpc) == "" {
 						walk(next)
 					}
 					if ctx.Err() != nil {
@@ -725,15 +756,15 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 			r.Findings = r.Findings[:findStart]
 			r.Reads = r.Reads[:readStart]
 			r.ExcludedExternalCalls = externalStart
-			appliedNarrow[rpc] = false
-			for key := range readSet {
+			observations.appliedNarrow[rpc] = false
+			for key := range observations.readSet {
 				if strings.HasPrefix(key, rpc+"\x00") {
-					delete(readSet, key)
+					delete(observations.readSet, key)
 				}
 			}
-			for key := range readCoordinates {
+			for key := range observations.readCoordinates {
 				if strings.HasPrefix(key, rpc+"\x00") {
-					delete(readCoordinates, key)
+					delete(observations.readCoordinates, key)
 				}
 			}
 			for _, start := range starts {
@@ -784,8 +815,8 @@ func (scope *callerRegisteredWalk) collect(ctx context.Context, p *surfaceProgra
 	if observer != nil && scope.rpc == "" {
 		observer("rpc-solve:end", g.work)
 	}
-	scope.readSet = readSet
-	scope.appliedNarrow = appliedNarrow
+	scope.readSet = observations.readSet
+	scope.appliedNarrow = observations.appliedNarrow
 	if scope.rpc != "" {
 		r.Work = g.work
 		return r
