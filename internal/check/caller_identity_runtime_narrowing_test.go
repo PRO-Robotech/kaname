@@ -47,6 +47,9 @@ func TestCallerIdentityRegisteredCheckFullTraversal(t *testing.T) {
 
 func callerRunCheckPair(t *testing.T, root, marker string, collect func(*testing.T, context.Context, string, string, []check.CallerReadDeclaration) (check.CheckNarrowingWitness, check.CheckNarrowingWitness, error)) {
 	t.Helper()
+	// Freeze the checkout before either variant is evaluated. CI writes its
+	// Go events into the original checkout while these probes are running.
+	root = callerActualTree(t, root)
 	missing := callerMissingCheckRow(t, root)
 	where := callerCheckCoordinate(t, root)
 	callerCheckFrontControls(t, root)

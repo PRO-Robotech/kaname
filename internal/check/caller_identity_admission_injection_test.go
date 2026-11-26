@@ -66,7 +66,9 @@ type callerExperimentalDisposition struct {
 func TestCallerIdentityAdmissionFindsAnUndeclaredRealReader(t *testing.T) {
 	root := moduleRoot(t)
 	declared := callerActualTree(t, root)
-	undeclared := callerActualTree(t, root)
+	// Go's outer runner can be writing its JSON evidence in the checkout.
+	// Both variants must start from the same frozen source bytes.
+	undeclared := callerActualTree(t, declared)
 	where := callerInjectReader(t, declared)
 	if other := callerInjectReader(t, undeclared); other != where {
 		t.Fatalf("фикстура: координаты близнецов различаются: %s / %s", where, other)
