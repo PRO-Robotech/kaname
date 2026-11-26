@@ -214,3 +214,52 @@ func TestCallerIdentityLastFrozenScopeAliasedAppend(t *testing.T) {
 	}
 	c.releaseTicket(g, second)
 }
+
+func TestCallerIdentityScopeRefSamplingKeepsExactInterior(t *testing.T) {
+	for _, opaque := range []bool{false, true} {
+		name := "retained_bucket"
+		if opaque {
+			name = "opaque_checkpoint"
+		}
+		t.Run(name, func(t *testing.T) {
+			g, push := callerFrozenScopeStack(t)
+			push(0)
+			defer g.leaveCallerFieldQuery(0)
+			frame := &g.fieldQueries[0]
+			if len(frame.refs) == 0 {
+				t.Fatal("expected concrete refs")
+			}
+			a := frame.refs[0]
+			frame.refs = []valueSrc{a, a, a}
+			c := g.objectExecutions
+			bucket := c.scopeHash(g)
+			changeInterior := func() { frame.refs[1].tuple = a.tuple + 1 }
+
+			if opaque {
+				g.ctx = &callerExecutionResetContext{Context: context.Background(), checkpoint: changeInterior}
+				if scope := c.scope(g); scope != nil {
+					t.Fatal("a callback changed the exact input before publication")
+				}
+				if got := c.scopeHash(g); got != bucket || c.active != 0 || c.entries != 0 {
+					t.Fatal("the rejected collision changed bucket or retained tickets")
+				}
+				return
+			}
+
+			first := c.scope(g)
+			if first == nil {
+				t.Fatal("initial scope unavailable")
+			}
+			defer c.releaseTicket(g, first)
+			changeInterior()
+			if got := c.scopeHash(g); got != bucket {
+				t.Fatal("the control did not produce an identical bucket")
+			}
+			second := c.scope(g)
+			if second == nil || second == first || !second.snapshot.matches(g) || first.snapshot.matches(g) {
+				t.Fatal("a matching bucket erased the interior ref change")
+			}
+			c.releaseTicket(g, second)
+		})
+	}
+}

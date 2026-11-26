@@ -406,8 +406,16 @@ func (c *callerObjectExecutions) hashScope(g *callerGraph, frozen int) uint64 {
 		for _, field := range query.fields {
 			hash = hash*1099511628211 + maphash.Comparable(c.seed, field)
 		}
-		for _, ref := range query.refs {
-			hash = hash*1099511628211 + maphash.Comparable(c.seed, ref)
+		// Refs can dominate hashing of the mutable frame. The length and
+		// boundary refs suffice for the bucket; matchesTrackedSuffix still
+		// compares EVERY value of a candidate, including unsampled interiors.
+		n := len(query.refs)
+		hash = hash*1099511628211 + uint64(n)
+		if n != 0 {
+			hash = hash*1099511628211 + maphash.Comparable(c.seed, query.refs[0])
+		}
+		if n > 1 {
+			hash = hash*1099511628211 + maphash.Comparable(c.seed, query.refs[n-1])
 		}
 		if i < limit {
 			c.prefixHashes[i] = hash
@@ -498,6 +506,12 @@ func (c *callerObjectExecutions) captureTrackedScope(g *callerGraph, reclaim boo
 	// и не вызывает пользовательский код. Доказательство стека остаётся
 	// действительным: учёт и вытеснение меняют только хранилище снимков.
 	recheckScope := !callerFreshReplayContext(g.ctx)
+	var snapshot callerExecutionScopeSnapshot
+	if recheckScope {
+		// A callback may change an unsampled ref without changing the bucket.
+		// Preserve the exact pre-callback image for this open traversal.
+		snapshot = g.callerExecutionSnapshot()
+	}
 	if recheckScope && c.graph == g {
 		// Вложенный вызов произвольного Err мог видеть другой ctx. После
 		// возврата callback его сведения о неизменности кадров недействительны.
@@ -512,7 +526,7 @@ func (c *callerObjectExecutions) captureTrackedScope(g *callerGraph, reclaim boo
 	if recheckScope {
 		// Произвольный Err может изменить содержимое или вложенным вызовом
 		// поместить точный снимок в ту же корзину.
-		if !g.callerExecutionScopeTracked() || hash != c.hashScope(g, -1) || weight != 1+g.callerExecutionScopeWeight() {
+		if !snapshot.matches(g) || weight != 1+g.callerExecutionScopeWeight() {
 			return nil
 		}
 		for existing := c.scopes[hash]; existing != nil; existing = existing.next {
@@ -527,7 +541,10 @@ func (c *callerObjectExecutions) captureTrackedScope(g *callerGraph, reclaim boo
 		g.work.ObjectExecutionCapacityFallbacks++
 		return nil
 	}
-	node := &callerObjectExecutionScope{snapshot: g.callerExecutionSnapshot(), hash: hash, weight: weight, references: 1}
+	if !recheckScope {
+		snapshot = g.callerExecutionSnapshot()
+	}
+	node := &callerObjectExecutionScope{snapshot: snapshot, hash: hash, weight: weight, references: 1}
 	if c.scopes == nil {
 		c.scopes = map[uint64]*callerObjectExecutionScope{}
 	}
