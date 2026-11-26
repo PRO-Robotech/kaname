@@ -46,7 +46,15 @@ func DirectCheckNarrowingPairForTest(t *testing.T, ctx context.Context, root, mi
 	}
 	t.Logf("REGISTERED_CHECK_DIRECT_PATH maker=%s registration=%s adapter=%s narrowing=%s",
 		path.maker, path.registered, path.adapter, path.narrowing)
-	return withRow.witness(inputs.withRow.table, declared), withoutRow.witness(inputs.withoutRow.table, declared), nil
+	// The full gate judges declarations for transitive reads. This pair can
+	// judge only the reads actually observed through its bounded path.
+	var observedDeclarations []CallerReadDeclaration
+	for _, row := range declared {
+		if withRow.readSet[row.RPC+"\x00"+row.Producer+"\x00"+row.Site] {
+			observedDeclarations = append(observedDeclarations, row)
+		}
+	}
+	return withRow.witness(inputs.withRow.table, observedDeclarations), withoutRow.witness(inputs.withoutRow.table, observedDeclarations), nil
 }
 
 func directRegisteredCheckFacts(p *surfaceProgram) (checkNarrowingFacts, checkRegistrationPath, error) {
