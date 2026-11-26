@@ -141,7 +141,7 @@ func callerActualTree(t *testing.T, root string) string {
 		if err != nil {
 			return err
 		}
-		if rel == "." {
+		if rel == "." || (rel == ".git" && !d.IsDir()) {
 			return nil
 		}
 		if d.IsDir() {
