@@ -69,7 +69,7 @@ func callerResolveKeyFor(src valueSrc, receiver bool) callerResolveKey {
 	return callerResolveKey{src, receiver}
 }
 
-func callerKey(k callerNode) fkey { return fkey{fn: k.fn, lit: k.lit} }
+func callerKey(k callerNode) fkey { return fkey(k) }
 
 func (g *callerGraph) addCallerLive(v *types.Var, ref valueSrc) {
 	v = v.Origin()

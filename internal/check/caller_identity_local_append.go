@@ -113,7 +113,7 @@ func callerExactAllocation(object callerObjectKey) bool {
 }
 
 func (g *callerGraph) closedLocalAppendBuilder(sp *surfaceSrcPkg, fk fkey, variable *types.Var) bool {
-	body, found := g.bodies[callerNode{fn: fk.fn, lit: fk.lit}]
+	body, found := g.bodies[callerNode(fk)]
 	if !found || body.sp != sp || body.node == nil {
 		return false
 	}
